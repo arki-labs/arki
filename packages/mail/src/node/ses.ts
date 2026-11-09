@@ -11,12 +11,13 @@
  * configuration set, not in the response.
  */
 import type { MailTransport } from '../types.js';
-import { MAIL_ERROR_CODES, MailError } from '../errors.js';
+import { invalidConfig, MAIL_ERROR_CODES, MailError } from '../errors.js';
 import { readAnswer, sesErrorSchema, sesResponseHeadersSchema } from '../http/answers.js';
 import { errorField } from '../log.js';
 import { listOf } from '../message.js';
 import { traceTransport } from '../telemetry.js';
 import {
+  checkHeaderValue,
   checkTimeoutMs,
   everyRecipient,
   logged,
@@ -48,6 +49,9 @@ export type SesOptions = {
 // SES's documented charset name. SES expects this exact spelling, not Node's `utf8`.
 // eslint-disable-next-line unicorn/text-encoding-identifier-case -- SES API value, not a Node encoding
 const SES_CHARSET = 'UTF-8';
+
+/** The SDK's rule for a region: one host name label (letters, digits and inner hyphens, 1 to 63 characters). */
+const SES_REGION = /^(?!-)[a-z\d-]{1,63}(?<!-)$/i;
 
 /** Memoizes the first call's promise; a rejected load is tried again on the next send. */
 function once<T>(load: () => Promise<T>): () => Promise<T> {
@@ -91,6 +95,15 @@ function retryAfter(error: unknown): number | undefined {
 export function ses(options: SesOptions): MailTransport {
   const id = options.id ?? 'ses';
   checkTimeoutMs(id, options.timeoutMs);
+  // The SDK refuses these only at send, as an error that would read as an uncertain send (or, for an
+  // empty region, as a missing SDK); a key id or token is sent in a header that `fetch` would refuse.
+  if (!SES_REGION.test(options.region))
+    invalidConfig(`${id}: \`region\` must be an AWS region such as eu-west-1, got ${JSON.stringify(options.region)}.`);
+  if (options.credentials !== undefined) {
+    checkHeaderValue(id, 'credentials.accessKeyId', options.credentials.accessKeyId);
+    if (options.credentials.sessionToken !== undefined)
+      checkHeaderValue(id, 'credentials.sessionToken', options.credentials.sessionToken);
+  }
   const loadSdk = once(async () => {
     const { SESv2Client, SendEmailCommand } = await import('@aws-sdk/client-sesv2');
     const client = new SESv2Client({

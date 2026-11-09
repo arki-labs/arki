@@ -24,6 +24,13 @@ const RESERVED_HEADERS = new Set([
 
 const LINE_BREAK = /[\r\n]/;
 const NUL = '\u0000';
+/** A character `fetch` refuses in a header value: NUL, CR, LF, or anything above U+00FF (a header value is bytes). */
+const UNSENDABLE_IN_HEADER = /[\0\n\r\u{100}-\u{10FFFF}]/u;
+
+/** Whether `fetch` would refuse `value` as an HTTP header value, before sending anything. */
+export function unsendableInHeader(value: string): boolean {
+  return UNSENDABLE_IN_HEADER.test(value);
+}
 
 /** Whether a key or a string anywhere in this value holds U+0000. */
 export function holdsNul(value: unknown): boolean {
@@ -67,6 +74,19 @@ function problemWith(message: MailMessage): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * `MailInvalidMessage` when `idempotencyKey` cannot travel as an HTTP header (Resend sends it as
+ * `Idempotency-Key`, and `failover` may pick Resend), or `undefined` when it can. Without this check
+ * `fetch` refuses the request before sending and the send reads as `MailUncertain`.
+ */
+export function checkIdempotencyKey(key: string | undefined): FailureOf<typeof MailInvalidMessage> | undefined {
+  if (key === undefined || !unsendableInHeader(key)) return undefined;
+  return MailInvalidMessage({
+    problem:
+      'The idempotencyKey holds a line break, a NUL character or a character above U+00FF; it travels as an HTTP header.',
+  });
 }
 
 /**

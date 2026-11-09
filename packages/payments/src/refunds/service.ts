@@ -57,6 +57,9 @@ export const refundAutoApproveLimitsSchema = z.record(currencyCodeSchema, z.stri
 
 export type RefundAutoApproveLimits = z.input<typeof refundAutoApproveLimitsSchema>;
 
+/** The refund window: whole milliseconds, 0 or more. Checked once when the service is built. */
+const refundWindowMsSchema = z.int().min(0);
+
 /** About ten dollars' worth where it is set; other currencies wait for a person. */
 export const DEFAULT_REFUND_AUTO_APPROVE_LIMITS: RefundAutoApproveLimits = {
   USD: '10.00',
@@ -67,7 +70,10 @@ export const DEFAULT_REFUND_AUTO_APPROVE_LIMITS: RefundAutoApproveLimits = {
 export type RefundServiceConfig = {
   /** User ID attributed for system-driven auto-approvals (e.g. small-amount refunds). */
   systemUserId: UserId;
-  /** Refund window in milliseconds. Defaults to 90 days. */
+  /**
+   * Refund window in milliseconds. Defaults to 90 days. A whole number of 0 or more: anything else
+   * (NaN, a fraction, a negative number) throws `payments.configuration_invalid` when the service is built.
+   */
   refundWindowMs?: number;
   /** Small refunds approved without a person. Defaults to `DEFAULT_REFUND_AUTO_APPROVE_LIMITS`. */
   autoApproveLimits?: RefundAutoApproveLimits;
@@ -130,7 +136,12 @@ export class RefundService {
     private readonly paymentRepository: PaymentReads,
     config: RefundServiceConfig,
   ) {
-    this.refundWindow = config.refundWindowMs ?? 90 * 24 * 60 * 60 * 1000;
+    // A NaN window compared false and turned the window off: a bad one is a configuration fault
+    const window = refundWindowMsSchema.safeParse(config.refundWindowMs ?? 90 * 24 * 60 * 60 * 1000);
+    if (!window.success) {
+      throw misconfigured('refunds.refundWindowMs', `must be a whole number of milliseconds, 0 or more; got ${String(config.refundWindowMs)}`);
+    }
+    this.refundWindow = window.data;
     this.systemUserId = config.systemUserId;
     // A bad limit is a configuration fault: `payments.configuration_invalid` when the service is built
     const limits = refundAutoApproveLimitsSchema.safeParse(config.autoApproveLimits ?? DEFAULT_REFUND_AUTO_APPROVE_LIMITS);

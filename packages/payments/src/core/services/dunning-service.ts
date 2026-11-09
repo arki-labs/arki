@@ -98,12 +98,22 @@ export type DunningSenders = {
 /** An `email` step's config: the template the app's mailer sends. */
 const emailStepConfigSchema = z.looseObject({ template: z.string().min(1) });
 
+/** A `cancel_subscription` step's config: the reason sent to the provider, when it names one. */
+const cancelStepConfigSchema = z.looseObject({ reason: z.string().min(1) });
+
+/** A rule's delay: whole days from 0 to ten years, so the scheduled day is always a real date. */
+const delayDaysSchema = z.number().int().min(0).max(3650);
+
 /**
  * Throws `payments.configuration_invalid` when an enabled rule needs a sender the app did not pass,
- * or an `email` rule names no template. Runs when the service is built and when its rules change.
+ * an `email` rule names no template, or a rule's `trigger.delayDays` is not a whole number from 0 to
+ * 3650. Runs when the service is built and when its rules change.
  */
 function checkRulesHaveSenders(rules: readonly DunningRule[], senders: DunningSenders): void {
   for (const rule of rules) {
+    if (!delayDaysSchema.safeParse(rule.trigger.delayDays).success) {
+      throw misconfigured(`rules.${rule.id}.trigger.delayDays`, 'a delay is a whole number of days from 0 to 3650');
+    }
     if (!rule.enabled) continue;
     const { type, config } = rule.action;
     if (type === 'email') {
@@ -227,7 +237,7 @@ export class DunningService {
   private config: DunningConfiguration;
   private dunningEvents = new Map<string, DunningEvent>();
 
-  /** Throws `payments.configuration_invalid` when an enabled rule needs a sender that `senders` lacks. */
+  /** Throws `payments.configuration_invalid` when an enabled rule needs a sender that `senders` lacks, or a rule's delay is not whole days from 0 to 3650. */
   constructor(
     private readonly paymentProvider: DunningProvider,
     private readonly paymentRepository: DunningReads,
@@ -458,10 +468,10 @@ export class DunningService {
    * provider's (the row is left as it is) or the journal's.
    */
   private async cancelSubscription(event: DunningEvent, config: Record<string, unknown>) {
-    const reason = config['reason'];
+    const step = cancelStepConfigSchema.safeParse(config);
     const canceled = await this.paymentProvider.cancelSubscription(event.subscriptionId, {
       immediately: true,
-      reason: typeof reason === 'string' && reason !== '' ? reason : 'payment_failure',
+      reason: step.success ? step.data.reason : 'payment_failure',
     });
     // The provider did not cancel it, so the row must not say canceled
     if (isFailure(canceled)) return canceled;
@@ -578,7 +588,7 @@ export class DunningService {
   /**
    * Update dunning configuration
    */
-  /** Throws `payments.configuration_invalid`, and keeps the old rules, when a new rule needs a missing sender. */
+  /** Throws `payments.configuration_invalid`, and keeps the old rules, when a new rule needs a missing sender or has a delay outside whole days from 0 to 3650. */
   updateConfiguration(config: Partial<DunningConfiguration>): void {
     const next = { ...this.config, ...config };
     checkRulesHaveSenders(next.rules, this.senders);

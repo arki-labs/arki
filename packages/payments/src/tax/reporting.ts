@@ -194,6 +194,10 @@ export class TaxReportingService {
    *
    * A tax record stored under a payment's id in another currency than the payment cannot be added to
    * it: `StoredTaxInvalid` (`problem: 'other_currency'`) is returned, never a wrong total.
+   *
+   * `period.startDate` and `period.endDate` fall in the years 1 to 9999 (UTC), the times Postgres
+   * compares: another time is a bug in the caller, and throws `FailureError` (`invariant`) before the
+   * first query. `year`, `quarter` and `month` only label the report.
    */
   async generateComplianceReport(params: {
     reportType: 'sales_and_use_tax' | 'vat' | 'gst';
@@ -466,6 +470,9 @@ export class TaxReportingService {
    * recorded for it, and with `includeExemptions` one row per exemption in force in the period.
    * CSV values are quoted when they need it, and text that a spreadsheet would run as a formula is
    * prefixed with a quote. XML text is escaped, and characters XML 1.0 cannot hold are dropped.
+   *
+   * `period.startDate` and `period.endDate` fall in the years 1 to 9999 (UTC): another time throws
+   * `FailureError` (`invariant`) before the first query. `year`, `quarter` and `month` only name the file.
    */
   async exportTaxData(params: {
     format: ExportTaxDataInput['format'];

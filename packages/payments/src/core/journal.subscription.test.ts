@@ -629,3 +629,25 @@ describe('a whole subscription life', () => {
     expect(await rowOf(subscriptionId)).toMatchObject({ status: 'active', canceledAt: null, version: 8 });
   });
 });
+
+describe('a subscription id no row can hold', () => {
+  it('is schema.invalid_input for every command that reads a subscription stream, and writes nothing', async () => {
+    const subscriptionId = 'sub_a\u0000b' as const;
+    const before = await countEvents(db);
+
+    for (const refused of [
+      journal.run(db, commands.createSubscription, { subscriptionId, ...delivery() }, meta),
+      journal.run(db, commands.cancelSubscription, { subscriptionId }, meta),
+      journal.run(db, commands.reactivateSubscription, { subscriptionId }, meta),
+      journal.run(db, commands.pauseSubscription, { subscriptionId }, meta),
+      journal.run(db, commands.resumeSubscription, { subscriptionId }, meta),
+      journal.run(db, commands.changeSubscriptionPlan, { subscriptionId, planId }, meta),
+      journal.run(db, commands.setSubscriptionCancelAtPeriodEnd, { subscriptionId, cancelAtPeriodEnd: true }, meta),
+      journal.run(db, commands.markSubscriptionPastDue, { subscriptionId }, meta),
+      journal.run(db, commands.activateSubscription, { subscriptionId }, meta),
+    ]) {
+      expect(await refused).toMatchObject({ code: 'schema.invalid_input' });
+    }
+    expect(await countEvents(db)).toBe(before);
+  });
+});

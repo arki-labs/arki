@@ -287,6 +287,16 @@ describe('what is accepted into the queue', () => {
     expect(await queue().queued()).toEqual([]);
   });
 
+  // Why: `bytes > NaN` is never true, so a NaN limit let every mail through; a limit of 0 or less refused every mail.
+  it.each([Number.NaN, 0, -1, 1.5, Number.POSITIVE_INFINITY])(
+    'a maxBytes of %s throws E001 when the outbox is built',
+    maxBytes => {
+      expect(() => outboxWith(provider('ok').transport, maxBytes)).toThrow(
+        expect.objectContaining({ name: 'MailError', code: MAIL_ERROR_CODES.invalidConfig }),
+      );
+    },
+  );
+
   it('a recipient that cannot be mailed is a returned MailInvalidMessage and queues nothing', async () => {
     const outbox = outboxWith(provider('ok').transport);
     const result = await db.transaction(tx =>

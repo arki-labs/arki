@@ -154,6 +154,18 @@ describe('compliance report and export from stored data', () => {
     expect(report.summary.averageTaxRate).toBe(0);
   });
 
+  // Postgres refuses a time past the year 9999 as a parameter (raw 22009): the stated precondition fails first
+  it('fails as an invariant for a period past the year 9999, before the first query', async () => {
+    const beyond = { year: 2100, startDate: instant('2100-01-01T00:00:00Z'), endDate: instant('+010000-01-01T00:00:00Z') };
+
+    expect(await rejectionOf(reporting.generateComplianceReport({ reportType: 'vat', period: beyond }))).toMatchObject({
+      code: FAILURE_ERROR_CODES.invariant,
+    });
+    expect(await rejectionOf(reporting.exportTaxData({ format: 'json', period: beyond }))).toMatchObject({
+      code: FAILURE_ERROR_CODES.invariant,
+    });
+  });
+
   it('exports CSV that a parser reads back: quotes, commas and line breaks quoted, formulas defused', async () => {
     const { data, filename } = orThrow(await reporting.exportTaxData({ format: 'csv', period: thisYearPeriod(), includeExemptions: true }));
 

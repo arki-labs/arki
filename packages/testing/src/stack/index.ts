@@ -10,7 +10,8 @@
 import type { FailureOf } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
 import { defineFailure, isFailure } from '@arki/failure';
-import { is, parse, recordSchema } from '@arki/schema';
+import { z } from 'zod';
+import { parse } from '@arki/schema';
 
 export type Json = string | number | boolean | null | readonly Json[] | { readonly [key: string]: Json };
 
@@ -120,58 +121,19 @@ export const READ_MANIFEST_FAILURES = [StackNotStarted, StackManifestInvalid] as
 /** A failure value returned by `readManifest`. */
 export type ReadManifestFailure = FailureOf<(typeof READ_MANIFEST_FAILURES)[number]>;
 
-/** The value as `Json`, or `undefined` when something inside is not JSON (a function, a symbol, `undefined`). */
-function jsonOf(value: unknown): Json | undefined {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
-  if (Array.isArray(value)) {
-    const items: readonly unknown[] = value;
-    const checked: Json[] = [];
-    for (const item of items) {
-      const entry = jsonOf(item);
-      if (entry === undefined) return undefined;
-      checked.push(entry);
-    }
-    return checked;
-  }
-  if (!is(value, recordSchema)) return undefined;
-  const checked: Record<string, Json> = {};
-  for (const [key, item] of Object.entries(value)) {
-    const entry = jsonOf(item);
-    if (entry === undefined) return undefined;
-    checked[key] = entry;
-  }
-  return checked;
-}
-
 /** JSON text of `{ runId: string, run: object }`. The text is parsed inside the schema, so a bad text is an issue, not a throw. */
-const manifestTextSchema: StandardSchemaV1<unknown, StackManifest> = {
-  '~standard': {
-    version: 1,
-    vendor: 'arki-testing',
-    validate(text) {
-      const issue = { issues: [{ message: 'expected JSON text of { runId: string, run: object }' }] };
-      if (typeof text !== 'string') return issue;
-      let json: unknown;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        return issue;
-      }
-      if (!is(json, recordSchema)) return issue;
-      const runId = json['runId'];
-      const run = json['run'];
-      if (typeof runId !== 'string' || !is(run, recordSchema)) return issue;
-      const values: Record<string, Json> = {};
-      for (const [key, value] of Object.entries(run)) {
-        const checked = jsonOf(value);
-        if (checked === undefined) return issue;
-        values[key] = checked;
-      }
-      return { value: { runId, run: values } };
-    },
-  },
-};
+const manifestTextSchema: StandardSchemaV1<string, StackManifest> = z
+  .string()
+  .transform((text, context): unknown => {
+    try {
+      const json: unknown = JSON.parse(text);
+      return json;
+    } catch {
+      context.addIssue({ code: 'custom', message: 'expected JSON text of { runId: string, run: object }' });
+      return z.NEVER;
+    }
+  })
+  .pipe(z.object({ runId: z.string(), run: z.record(z.string(), z.json()) }));
 
 /**
  * Reads the manifest the runner put in `process.env.ARKI_STACK`. The one place it is validated.

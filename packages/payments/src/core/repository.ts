@@ -10,9 +10,10 @@ import { now } from '@arki/date';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { findDatabaseError } from '@arki/db/errors';
 import { invariant, isFailure } from '@arki/failure';
-import { parse } from '@arki/schema';
+import { is, parse } from '@arki/schema';
 
 import type { PaymentQuery, PlanQuery, SubscriptionQuery } from './contracts.js';
+import { paymentQuerySchema, planQuerySchema, subscriptionQuerySchema } from './contracts.js';
 import type { CoreTables } from './tables.js';
 import type {
   Customer,
@@ -100,6 +101,20 @@ function assertCount(value: number, name: string): void {
 }
 
 /**
+ * Whether a row could hold every given id or text. Postgres stores no U+0000 in text, so a lookup by
+ * such a value finds no row; the methods answer it as "not found" without a query, which would fail
+ * with a raw SQLSTATE 22021. Typed ids (`pln_…`, `usr_…`) are caller text too.
+ */
+function findable(...texts: (string | undefined)[]): boolean {
+  return texts.every(text => text === undefined || is(text, pgTextSchema));
+}
+
+/** The precondition of a list query: a value its contract schema accepts (whole `limit` 1 to 100, `offset` 0 or more, times in the years 1 to 9999). */
+function assertQuery(accepted: boolean, name: string): void {
+  invariant(accepted, () => `[@arki/payments] ${name} must be a value its contract schema accepts`);
+}
+
+/**
  * Structural database type accepted by the payments repositories.
  *
  * Mirrors drizzle's public surface: a `NodePgDatabase`, an in-flight `NodePgTransaction` or a
@@ -152,7 +167,9 @@ export class PaymentRepository {
     return PlanAlreadyExists({ planId: data.id });
   }
 
+  /** Null too for an id no row can hold (U+0000), with no query. */
   async findPlanById(id: PlanId): Promise<Plan | null> {
+    if (!findable(id)) return null;
     const [plan] = await this.db.select().from(this.plans).where(eq(this.plans.id, id)).limit(1);
     return plan ?? null;
   }
@@ -165,8 +182,13 @@ export class PaymentRepository {
       .orderBy(this.plans.priceMinor);
   }
 
-  /** Plans matching the filters left in `query`, cheapest first within a tier, one page. */
+  /**
+   * Plans matching the filters left in `query`, cheapest first within a tier, one page. `query` is a
+   * value `planQuerySchema` accepts (a precondition: anything else, such as a fractional `limit`, throws
+   * an invariant failure before any query).
+   */
   async findPlans(query: PlanQuery): Promise<Plan[]> {
+    assertQuery(is(query, planQuerySchema), 'findPlans query');
     const { tier, interval, isActive, limit, offset } = query;
 
     return this.db
@@ -199,6 +221,7 @@ export class PaymentRepository {
   async updatePlan(id: PlanId, data: UpdatePlan): Promise<Plan | NotFound | SchemaFailure> {
     const checked = parse(this.writeSchemas.planChange, data);
     if (isFailure(checked)) return checked;
+    if (!findable(id)) return ReferenceNotFound({ kind: 'plan', id, missing: 'row' });
     const result = await this.db
       .update(this.plans)
       .set({ ...data, updatedAt: now() })
@@ -211,8 +234,9 @@ export class PaymentRepository {
     return row;
   }
 
-  /** The deactivated plan, or `ReferenceNotFound` when no plan has this id. */
+  /** The deactivated plan, or `ReferenceNotFound` when no plan has this id (or it holds U+0000: no query then). */
   async deactivatePlan(id: PlanId): Promise<Plan | NotFound> {
+    if (!findable(id)) return ReferenceNotFound({ kind: 'plan', id, missing: 'row' });
     const result = await this.db
       .update(this.plans)
       .set({ isActive: false, updatedAt: now() })
@@ -269,12 +293,16 @@ export class PaymentRepository {
     });
   }
 
+  /** Null too for an id no row can hold (U+0000), with no query. */
   async findCustomerById(id: CustomerId): Promise<Customer | null> {
+    if (!findable(id)) return null;
     const [customer] = await this.db.select().from(this.customers).where(eq(this.customers.id, id)).limit(1);
     return customer ?? null;
   }
 
+  /** Null too for a user id no row can hold (U+0000), with no query. */
   async findCustomerByUserId(userId: UserId): Promise<Customer | null> {
+    if (!findable(userId)) return null;
     const [customer] = await this.db
       .select()
       .from(this.customers)
@@ -306,6 +334,7 @@ export class PaymentRepository {
   async updateCustomer(id: CustomerId, data: UpdateCustomer): Promise<Customer | NotFound | Conflict | SchemaFailure> {
     const checked = parse(this.writeSchemas.customerChange, data);
     if (isFailure(checked)) return checked;
+    if (!findable(id)) return ReferenceNotFound({ kind: 'customer', id, missing: 'row' });
     const changes = data;
 
     return this.db.transaction(async tx => {
@@ -366,6 +395,8 @@ export class PaymentRepository {
    * customer or one of its payments (a refund): nothing is deleted then.
    */
   async deleteCustomer(id: CustomerId): Promise<undefined | FailureOf<typeof CustomerInUse>> {
+    // An id no row can hold (U+0000) deletes nothing, like any unknown id
+    if (!findable(id)) return undefined;
     try {
       // A savepoint inside a caller's transaction, so a refused delete leaves that transaction usable
       await this.db.transaction(async tx => {
@@ -379,21 +410,31 @@ export class PaymentRepository {
   }
 
   // Subscription methods
+  /** Null too for an id no row can hold (U+0000), with no query. */
   async findSubscriptionById(id: SubscriptionId): Promise<SubscriptionWithPlan | null> {
+    if (!findable(id)) return null;
     const [subscription] = await this.readSubscriptions({ where: eq(this.subscriptions.id, id), limit: 1 });
     return subscription ?? null;
   }
 
+  /** Empty too for a user id no row can hold (U+0000), with no query. */
   async findSubscriptionsByUserId(userId: UserId): Promise<Subscription[]> {
+    if (!findable(userId)) return [];
     return this.readSubscriptions({
       where: eq(this.subscriptions.userId, userId),
       orderBy: [desc(this.subscriptions.createdAt)],
     });
   }
 
-  /** Subscriptions matching the filters left in `query`, newest first, one page. */
+  /**
+   * Subscriptions matching the filters left in `query`, newest first, one page. Empty for an id no row
+   * can hold (U+0000), with no query. Otherwise `query` is a value `subscriptionQuerySchema` accepts (a
+   * precondition: anything else, such as a fractional `limit`, throws an invariant failure before any query).
+   */
   async findSubscriptions(query: SubscriptionQuery): Promise<Subscription[]> {
     const { status, planId, userId, limit, offset } = query;
+    if (!findable(planId, userId)) return [];
+    assertQuery(is(query, subscriptionQuerySchema), 'findSubscriptions query');
 
     return this.readSubscriptions({
       where: and(
@@ -407,7 +448,9 @@ export class PaymentRepository {
     });
   }
 
+  /** Null too for a user id no row can hold (U+0000), with no query. */
   async findActiveSubscriptionByUserId(userId: UserId): Promise<SubscriptionWithPlan | null> {
+    if (!findable(userId)) return null;
     const [subscription] = await this.readSubscriptions({
       where: and(eq(this.subscriptions.userId, userId), eq(this.subscriptions.status, 'active')),
       limit: 1,
@@ -461,14 +504,20 @@ export class PaymentRepository {
   }
 
   // Payment methods
+  /** Null too for an id no row can hold (U+0000), with no query. */
   async findPaymentById(id: PaymentId): Promise<Payment | null> {
+    if (!findable(id)) return null;
     const [payment] = await this.readPayments({ where: eq(this.payments.id, id), limit: 1 });
     return payment ?? null;
   }
 
-  /** The newest `limit` payments of the user. `limit` is a whole number of 0 or more (a precondition: anything else throws). */
+  /**
+   * The newest `limit` payments of the user; empty for a user id no row can hold (U+0000). `limit` is a
+   * whole number of 0 or more (a precondition: anything else throws).
+   */
   async findPaymentsByUserId(userId: UserId, limit = 50): Promise<Payment[]> {
     assertCount(limit, 'limit');
+    if (!findable(userId)) return [];
     return this.readPayments({
       where: eq(this.payments.userId, userId),
       orderBy: [desc(this.payments.createdAt)],
@@ -476,9 +525,16 @@ export class PaymentRepository {
     });
   }
 
-  /** Payments matching the filters left in `query`, newest first, one page. `startDate` and `endDate` bound `createdAt`, both inclusive. */
+  /**
+   * Payments matching the filters left in `query`, newest first, one page. `startDate` and `endDate` bound
+   * `createdAt`, both inclusive. Empty for an id no row can hold (U+0000), with no query. Otherwise
+   * `query` is a value `paymentQuerySchema` accepts (a precondition: anything else, such as a fractional
+   * `limit` or a time outside the years 1 to 9999, throws an invariant failure before any query).
+   */
   async findPayments(query: PaymentQuery): Promise<Payment[]> {
     const { status, subscriptionId, customerId, userId, startDate, endDate, limit, offset } = query;
+    if (!findable(subscriptionId, customerId, userId)) return [];
+    assertQuery(is(query, paymentQuerySchema), 'findPayments query');
 
     return this.readPayments({
       where: and(
@@ -495,7 +551,9 @@ export class PaymentRepository {
     });
   }
 
+  /** Empty too for an id no row can hold (U+0000), with no query. */
   async findPaymentsBySubscriptionId(subscriptionId: SubscriptionId): Promise<Payment[]> {
+    if (!findable(subscriptionId)) return [];
     return this.readPayments({
       where: eq(this.payments.subscriptionId, subscriptionId),
       orderBy: [desc(this.payments.createdAt)],
@@ -609,7 +667,9 @@ export class PaymentRepository {
     return reclaimWebhookEvent(this.db, this.webhookEvents, id, seenAttempts, leaseCutoff);
   }
 
+  /** Null too for an id no row can hold (U+0000), with no query. */
   async findWebhookEventById(id: WebhookId): Promise<WebhookEvent | null> {
+    if (!findable(id)) return null;
     const [webhookEvent] = await this.db
       .select()
       .from(this.webhookEvents)
@@ -693,6 +753,7 @@ export class PaymentRepository {
   ): Promise<WebhookEvent | EventNotFound | EventExists | SchemaFailure> {
     const checked = parse(this.writeSchemas.webhookEventChange, data);
     if (isFailure(checked)) return checked;
+    if (!findable(id)) return WebhookEventNotFound({ webhookId: id });
     const changes = data;
     try {
       // A savepoint inside a caller's transaction, so a refused update leaves that transaction usable
@@ -712,6 +773,7 @@ export class PaymentRepository {
 
   /** The processed event, or `WebhookEventNotFound` when no event has this id. */
   async markWebhookEventAsProcessed(id: WebhookId): Promise<WebhookEvent | EventNotFound> {
+    if (!findable(id)) return WebhookEventNotFound({ webhookId: id });
     const result = await this.db
       .update(this.webhookEvents)
       .set({

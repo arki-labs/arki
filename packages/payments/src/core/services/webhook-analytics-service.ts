@@ -1,9 +1,12 @@
 import type { Instant } from '@arki/date';
+import { z } from '@arki/contracts';
 import { isSameOrAfter, now, sub, toMillis } from '@arki/date';
+import { invariant } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { PaymentRepository } from '../repository.js';
 import type { PaymentProviderType, WebhookEventType, WebhookId } from '../types.js';
+import { misconfigured } from '../failures.js';
 
 const logger = getLogger('arki:payments:webhook');
 
@@ -62,18 +65,42 @@ export type WebhookAlert = {
   resolvedAt?: Instant;
 }
 
+/** When the service raises an alert, and how many alerts it keeps. */
+const alertThresholdsSchema = z.object({
+  /** Percentage of failed events. */
+  errorRate: z.number().min(0),
+  /** Milliseconds one event may take before it counts as slow. */
+  slowProcessing: z.number().min(0),
+  /** Alerts kept in memory; the oldest is dropped past this. */
+  maxAlerts: z.number().int().min(1).max(100_000),
+});
+
+type WebhookAlertThresholds = z.output<typeof alertThresholdsSchema>;
+
 export class WebhookAnalyticsService {
   private alerts = new Map<string, WebhookAlert>();
   private processingTimes: number[] = [];
 
+  /**
+   * Throws `payments.configuration_invalid` for thresholds that are not finite numbers of 0 or more,
+   * or a `maxAlerts` that is not a whole number from 1 to 100,000.
+   */
   constructor(
     private readonly paymentRepository: PaymentRepository,
-    private readonly alertThresholds = {
+    private readonly alertThresholds: WebhookAlertThresholds = {
       errorRate: 5, // Percentage
       slowProcessing: 5000, // Milliseconds
       maxAlerts: 100,
     }
-  ) {}
+  ) {
+    const checked = alertThresholdsSchema.safeParse(alertThresholds);
+    if (!checked.success) {
+      throw misconfigured(
+        'webhookAnalytics.alertThresholds',
+        checked.error.issues.map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`).join('; '),
+      );
+    }
+  }
 
   /**
    * Get comprehensive webhook metrics. A time given falls in the years 1 to 9999 (a precondition: anything else throws an invariant failure).
@@ -270,9 +297,14 @@ export class WebhookAnalyticsService {
   }
 
   /**
-   * Record processing time for real-time monitoring
+   * Record processing time for real-time monitoring. `processingTime` is a finite number of
+   * milliseconds, 0 or more (a precondition: anything else throws an invariant failure, and nothing is recorded).
    */
   recordProcessingTime(processingTime: number): void {
+    invariant(
+      Number.isFinite(processingTime) && processingTime >= 0,
+      '[@arki/payments] processingTime must be a finite number of milliseconds, 0 or more',
+    );
     this.processingTimes.push(processingTime);
 
     // Keep only recent times (last 1000)
@@ -511,11 +543,7 @@ export class WebhookAnalyticsService {
 
 export function createWebhookAnalyticsService(
   paymentRepository: PaymentRepository,
-  alertThresholds?: {
-    errorRate: number;
-    slowProcessing: number;
-    maxAlerts: number;
-  }
+  alertThresholds?: WebhookAlertThresholds
 ) {
   return new WebhookAnalyticsService(paymentRepository, alertThresholds);
 }

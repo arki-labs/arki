@@ -1,13 +1,12 @@
 // Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
-import { findDatabaseError } from '@arki/db/errors';
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 
 /**
  * DunningCampaignService.createCampaign: one transaction
  *
  * A campaign without its templates never runs a step, and a retry would then
  * make a second campaign. The campaign and every template are written in one
- * transaction on PGlite, so a template that Postgres rejects leaves no campaign.
+ * transaction on PGlite, and the steps are parsed first, so a refused step leaves no campaign.
  */
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
@@ -18,7 +17,7 @@ import { count, defineRelations, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { add, now, sub, toMillis } from '@arki/date';
+import { add, fromDate, now, sub, toMillis } from '@arki/date';
 
 import type { CustomerId } from '../core/types.js';
 import type { CreateDunningCampaignInput } from './contracts.js';
@@ -187,11 +186,11 @@ describe('createCampaign', () => {
     const campaigns = await countOf(tables.dunningCampaigns);
     const templates = await countOf(tables.dunningTemplates);
 
-    // 2^31 hours does not fit the integer column. The contract refuses it; a caller that skips the
-    // contract gets Postgres's numeric_value_out_of_range (22003) on the second template
-    await expect(service.createCampaign(campaignInput([0, 2_147_483_648]), 'usr_admin')).rejects.toSatisfy(
-      error => findDatabaseError(error)?.sqlState === '22003',
-    );
+    // 2^31 hours does not fit the integer column (22003 on the second template). The steps are parsed
+    // before the transaction writes anything, so the answer is schema.invalid_input
+    expect(await service.createCampaign(campaignInput([0, 2_147_483_648]), 'usr_admin')).toMatchObject({
+      code: 'schema.invalid_input',
+    });
 
     expect(await countOf(tables.dunningCampaigns)).toBe(campaigns);
     expect(await countOf(tables.dunningTemplates)).toBe(templates);
@@ -1252,6 +1251,110 @@ describe('the dunning repositories refuse what their columns refuse', () => {
     expect(await communications.findByProviderMessageId('m'.repeat(256))).toBeUndefined();
     const rows = await db.select().from(tables.dunningCommunications).where(eq(tables.dunningCommunications.executionId, ran.id));
     expect(rows).toEqual([expect.objectContaining({ status: 'pending', providerMessageId: null })]);
+  });
+});
+
+describe('the dunning write doors parse what the type allows but the columns refuse', () => {
+  const NUL = '\u0000';
+  const step = {
+    name: 'Step',
+    stepNumber: 7,
+    delayHours: 0,
+    communication: { channel: 'email' as const, subject: 'Payment failed', content: 'Please update your card', variables: [] },
+  };
+
+  it('DunningTemplateRepository.create and update parse their contract: schema.invalid_input, nothing written', async () => {
+    const campaignId = await createdCampaign('Template contract');
+    const templates = createDunningTemplateRepository(db, tables);
+    const before = await countOf(tables.dunningTemplates);
+
+    // Each would be a raw SQLSTATE: 22001 (varchar), 22021 (text), 22003 (int4), 22P05 (jsonb)
+    const created = [
+      await templates.create({ ...step, campaignId, name: 'n'.repeat(256) }),
+      await templates.create({ ...step, campaignId, name: `bad${NUL}` }),
+      await templates.create({ ...step, campaignId, stepNumber: 3_000_000_000 }),
+      await templates.create({ ...step, campaignId, communication: { ...step.communication, content: `bad${NUL}` } }),
+      await templates.create({ ...step, campaignId, abTestVariant: 'v'.repeat(51) }),
+    ];
+    const [existing] = await templates.findByCampaignId(campaignId);
+    if (!existing) throw new Error('the campaign has no step');
+    const updated = [
+      await templates.update(existing.id, { name: `bad${NUL}` }),
+      await templates.update(existing.id, { delayHours: -1 }),
+    ];
+
+    for (const answer of [...created, ...updated]) expect(answer).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await countOf(tables.dunningTemplates)).toBe(before);
+    expect(await templates.findById(existing.id)).toMatchObject({ name: existing.name, delayHours: existing.delayHours });
+  });
+
+  it('campaign writes refuse a name, text or JSON their columns cannot store and write nothing', async () => {
+    const campaigns = createDunningCampaignRepository(db, tables);
+    const campaignId = await createdCampaign('Campaign columns');
+    const before = await countOf(tables.dunningCampaigns);
+    const input = campaignInput([0]);
+
+    const refused = [
+      await campaigns.create({ ...input, name: 'n'.repeat(256), createdBy: userId }),
+      await campaigns.create({ ...input, description: `bad${NUL}`, createdBy: userId }),
+      await campaigns.create({ ...input, settings: { ...input.settings, timezone: `UTC${NUL}` }, createdBy: userId }),
+      await campaigns.update(campaignId, { name: `bad${NUL}`, updatedBy: userId }),
+    ];
+
+    for (const answer of refused) expect(answer).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await countOf(tables.dunningCampaigns)).toBe(before);
+    expect(await campaigns.findById(campaignId)).toMatchObject({ name: 'Campaign columns' });
+  });
+
+  it('createCampaign and updateCampaign parse the steps before any write', async () => {
+    const campaignId = await createdCampaign('Step contract');
+    const campaigns = await countOf(tables.dunningCampaigns);
+    const templates = await countOf(tables.dunningTemplates);
+    const badSteps = [{ ...step, name: `bad${NUL}` }];
+
+    expect(await service.createCampaign({ ...campaignInput([0]), templates: badSteps }, userId)).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await service.updateCampaign(campaignId, { name: 'Renamed', templates: badSteps }, userId)).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+
+    expect(await countOf(tables.dunningCampaigns)).toBe(campaigns);
+    expect(await countOf(tables.dunningTemplates)).toBe(templates);
+    expect(await service.getCampaign(campaignId)).toMatchObject({ name: 'Step contract' });
+  });
+
+  it('a page size, offset, day or hour span outside its precondition throws the invariant failure before any query', async () => {
+    const campaignId = await createdCampaign('Preconditions');
+    const campaigns = createDunningCampaignRepository(db, tables);
+    const executions = createDunningExecutionRepository(db, tables);
+    const communications = createDunningCommunicationRepository(db, tables);
+    const page = { limit: 10, offset: 0, sortOrder: 'desc' } as const;
+    const invariantFailure = { code: FAILURE_ERROR_CODES.invariant };
+
+    for (const bad of [1.5, -1, Number.NaN]) {
+      await expect(service.processScheduledExecutions(bad)).rejects.toMatchObject(invariantFailure);
+      await expect(service.retryFailedExecutions(bad)).rejects.toMatchObject(invariantFailure);
+      await expect(communications.findPendingCommunications(bad)).rejects.toMatchObject(invariantFailure);
+      await expect(service.getCampaignAnalytics(campaignId, bad)).rejects.toMatchObject(invariantFailure);
+      await expect(executions.findRecentForCustomer(customerId, campaignId, bad)).rejects.toMatchObject(invariantFailure);
+      await expect(service.listCampaigns({ ...page, sortBy: 'createdAt', limit: bad })).rejects.toMatchObject(invariantFailure);
+      await expect(service.listExecutions({ ...page, sortBy: 'createdAt', offset: bad })).rejects.toMatchObject(invariantFailure);
+    }
+    // A span past 100 years would leave the range of dates
+    await expect(service.getCampaignAnalytics(campaignId, 1e9)).rejects.toMatchObject(invariantFailure);
+    await expect(executions.findRecentForCustomer(customerId, campaignId, 1e12)).rejects.toMatchObject(invariantFailure);
+    const year10000 = fromDate(new Date('+010000-01-01T00:00:00Z'));
+    await expect(service.listExecutions({ ...page, sortBy: 'createdAt', scheduledBefore: year10000 })).rejects.toMatchObject(
+      invariantFailure,
+    );
+
+    // The bounds themselves are valid, and a search no name can hold matches nothing
+    expect(await service.getCampaignAnalytics(campaignId, 0)).toMatchObject({ executions: 0 });
+    expect(await campaigns.findMany({ ...page, sortBy: 'createdAt', search: `a${NUL}` })).toEqual([]);
+    expect(await service.listCampaigns({ ...page, sortBy: 'name', search: 'Preconditions' })).toEqual([
+      expect.objectContaining({ id: campaignId }),
+    ]);
   });
 });
 

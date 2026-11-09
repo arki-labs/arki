@@ -305,6 +305,26 @@ describe('what the caller sends that the payments table cannot hold is a typed f
   });
 });
 
+describe('a payment id no row can hold is schema.invalid_input, never a raw Postgres error', () => {
+  it('every command that reads a payment stream refuses an id with U+0000 and writes nothing', async () => {
+    const paymentId = 'pay_a\u0000b' as const;
+    const before = await countEvents(db);
+
+    for (const refused of [
+      journal.run(db, commands.initiatePayment, { ...intent(), paymentId }, meta),
+      journal.run(db, commands.completePayment, { paymentId }, meta),
+      journal.run(db, commands.failPayment, { paymentId, failureReason: 'card_declined' }, meta),
+      journal.run(db, commands.cancelPayment, { paymentId }, meta),
+      journal.run(db, commands.markPaymentRequiresAction, { paymentId }, meta),
+      journal.run(db, commands.recordPaymentRefund, { paymentId, refundedAmount: { amount: '1', currency: 'USD' } }, meta),
+      journal.run(db, commands.recordPaymentDispute, { paymentId, disputeId: 'dp_nul', status: 'open' }, meta),
+    ]) {
+      expect(await refused).toMatchObject({ code: 'schema.invalid_input' });
+    }
+    expect(await countEvents(db)).toBe(before);
+  });
+});
+
 describe('completePayment, failPayment and cancelPayment', () => {
   it('completes a pending payment and keeps the receipt', async () => {
     const paymentId = await seed();

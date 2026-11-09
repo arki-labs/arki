@@ -1052,10 +1052,15 @@ describe('claimWebhookEvent and reclaimWebhookEvent at their own door', () => {
       { ...base, id: orThrow(createWebhookId()), providerEventId: `evt_${'x'.repeat(255)}`, data: {} },
       { ...base, id: orThrow(createWebhookId()), providerEventId: 'evt_claim_nul', data: { n: '\u0000' } },
       { ...base, id: orThrow(createWebhookId()), providerEventId: 'evt_claim_ip', data: {}, sourceIp: 'x'.repeat(46) },
+      { ...base, id: 'wh_a\u0000b' as const, providerEventId: 'evt_claim_nul_id', data: {} },
     ]) {
       expect(await claimWebhookEvent(db, webhookEvents, data)).toMatchObject({ code: 'schema.invalid_input' });
     }
     expect(await db.select().from(webhookEvents)).toHaveLength(0);
+  });
+
+  it('an id no row can hold takes nothing over, with no query', async () => {
+    expect(await reclaimWebhookEvent(db, webhookEvents, 'wh_a\u0000b', 0, now())).toBe(false);
   });
 
   it('a fractional seen-attempts count or a cutoff before year 1 breaks the stated precondition', async () => {
@@ -1178,5 +1183,20 @@ describe('WebhookHandler.retryFailedWebhooks and events given up on', () => {
 
     expect(failed).toMatchObject([{ error: 'still down' }]);
     expect(await rowFor('evt_last_try')).toMatchObject({ attempts: 2, errorMessage: 'still down' });
+  });
+});
+
+describe('WebhookHandler: a count or a duration it cannot use fails when it is built', () => {
+  it.each([
+    ['a NaN lease, which would throw on the first resend', { processingLeaseMs: Number.NaN }],
+    ['a lease past one year', { processingLeaseMs: 365 * 24 * 60 * 60 * 1000 + 1 }],
+    ['a fractional retry count', { maxRetries: 1.5 }],
+    ['no retries at all', { maxRetries: 0 }],
+    ['a negative retry delay', { retryDelayMs: -1 }],
+  ])('%s is payments.configuration_invalid', (_what, config) => {
+    const { validator } = validatorReturning(valid);
+    expect(() => new WebhookHandler(storeOn(db), validator, writesOn(db), config)).toThrow(
+      expect.objectContaining({ code: 'payments.configuration_invalid' }),
+    );
   });
 });

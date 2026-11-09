@@ -149,4 +149,15 @@ describe('configuration', () => {
     expect(() => failover([one, one])).toThrow(/distinct `id`/);
     expect(() => failover([])).toThrow(/At least one transport/);
   });
+
+  // Why: `sent >= NaN` is never true, so a NaN budget was silently ignored; a negative or fractional one is a typo.
+  it.each([Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY])('a quotaPerMonth of %s throws E001 at build', quota => {
+    const transport = scripted('resend', accepted, quota).transport;
+    expect(() => failover([transport])).toThrow(expect.objectContaining({ name: 'MailError', code: 'ARKI_MAIL_E001' }));
+    expect(() => failover([transport])).toThrow(/quotaPerMonth/);
+  });
+
+  it('a quotaPerMonth of 0 is a real budget: the transport is never used', () => {
+    expect(failover([scripted('resend', accepted, 0).transport]).id).toBe('resend');
+  });
 });

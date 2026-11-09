@@ -75,6 +75,11 @@ const sale = {
 
 const past = instant('2020-01-01T00:00:00Z');
 
+/** The not-found answer of a tax repository method for `id`. */
+function notFound(kind: string, id: string) {
+  return { code: TaxReferenceNotFound.code, data: { kind, id } };
+}
+
 beforeAll(async () => {
   const opened = await openDb({
     ...tax.enums,
@@ -600,6 +605,37 @@ describe('a value a tax column cannot store', () => {
     expect(await repos.exemptions.findCustomerExemptionsInRange(nul, past, instant('2100-01-01T00:00:00Z'))).toEqual([]);
     expect(await repos.exemptions.findApplicableExemptions(nul)).toEqual([]);
     expect(await repos.exemptions.findProductExemptions(nul)).toEqual([]);
+  });
+
+  // A typed id (`txc_${string}`) can hold U+0000 too. Each of these used to send it and reject with a raw 22021;
+  // the not-found answer of the method comes back instead, and no query is sent
+  it('answers not found for an id holding U+0000, by id and as a parent or jurisdiction', async () => {
+    const configId = 'txc_a\u0000b' as const;
+    const jurisdictionId = 'txj_a\u0000b' as const;
+    const exemptionId = 'txe_a\u0000b' as const;
+
+    expect(await repos.configurations.findConfigurationById(configId)).toBeNull();
+    expect(await repos.configurations.updateConfiguration(configId, { name: 'X' })).toMatchObject(notFound('configuration', configId));
+    expect(await repos.configurations.setDefaultConfiguration(configId)).toMatchObject(notFound('configuration', configId));
+    await expect(repos.configurations.deleteConfiguration(configId)).resolves.toBeUndefined();
+
+    expect(await repos.jurisdictions.findJurisdictionById(jurisdictionId)).toBeNull();
+    expect(await repos.jurisdictions.findJurisdictionHierarchy(jurisdictionId)).toEqual([]);
+    expect(await repos.jurisdictions.updateJurisdiction(jurisdictionId, { name: 'X' })).toMatchObject(notFound('jurisdiction', jurisdictionId));
+    expect(await repos.jurisdictions.deleteJurisdiction(jurisdictionId)).toBeUndefined();
+    expect(
+      await repos.jurisdictions.createJurisdiction({ name: 'Child', code: 'CH0', type: 'state', countryCode: 'CH', parentId: jurisdictionId }),
+    ).toMatchObject(notFound('jurisdiction', jurisdictionId));
+
+    expect(await repos.exemptions.findExemptionById(exemptionId)).toBeNull();
+    expect(await repos.exemptions.findJurisdictionExemptions(jurisdictionId)).toEqual([]);
+    expect(await repos.exemptions.updateExemption(exemptionId, { reason: 'X' })).toMatchObject(notFound('exemption', exemptionId));
+    expect(await repos.exemptions.approveExemption(exemptionId, 'usr_admin')).toMatchObject(notFound('exemption', exemptionId));
+    expect(await repos.exemptions.revokeExemption(exemptionId)).toMatchObject(notFound('exemption', exemptionId));
+    await expect(repos.exemptions.deleteExemption(exemptionId)).resolves.toBeUndefined();
+    const exemption = { type: 'jurisdiction' as const, jurisdictionId, exemptionCode: 'NUL', reason: 'Nul', validFrom: past };
+    expect(await repos.exemptions.createExemption(exemption)).toMatchObject(notFound('jurisdiction', jurisdictionId));
+    expect(await repos.exemptions.findJurisdictionExemptions(jurisdictionId)).toEqual([]);
   });
 
   it('is refused by the request contracts first', () => {

@@ -5,7 +5,7 @@ import type { Instant } from '@arki/date';
 import type { SchemaFailure } from '@arki/failure';
 import { z } from '@arki/contracts';
 import { fromDate, now, toDate } from '@arki/date';
-import { isFailure, orThrow, unreachable, UnexpectedFailure } from '@arki/failure';
+import { invariant, isFailure, orThrow, unreachable, UnexpectedFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { parse } from '@arki/schema';
 
@@ -28,7 +28,7 @@ import type {
   DunningTemplate,
 } from '../types.js';
 import { PaymentsConfigurationInvalid } from '../../core/failures.js';
-import { pgTextSchema, pgVarcharSchema } from '../../core/pg-values.js';
+import { INT4_MAX, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from '../../core/pg-values.js';
 import { communicationWebhookSchema } from '../contracts.js';
 import { PaymentProviderError } from '../../core/providers/provider-error.js';
 import { observePayments } from '../../core/telemetry.js';
@@ -82,6 +82,20 @@ const logger = getLogger('arki:payments:dunning');
 
 /** How long a provider call may take before it returns `NotificationProviderTimeout`. */
 const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
+
+/** A provider call's timeout: whole milliseconds from 1 to 2^31 - 1 (a longer timer fires at once). */
+const providerTimeoutSchema = z.number().int().min(1).max(INT4_MAX);
+
+/** Throws `payments.configuration_invalid` at boot for a `timeoutMs` no timer can wait; `undefined` keeps the default. */
+function checkTimeout(setting: string, timeoutMs: number | undefined): void {
+  if (timeoutMs === undefined || providerTimeoutSchema.safeParse(timeoutMs).success) return;
+  throw new UnexpectedFailure(
+    PaymentsConfigurationInvalid({
+      setting,
+      problem: `${String(timeoutMs)} is not a whole number of milliseconds from 1 to ${INT4_MAX}`,
+    }),
+  );
+}
 
 /** The channel and provider name a provider call is about: the bounded span attributes and failure data. */
 type ProviderTarget = { channel: CommunicationChannel; provider: string };
@@ -209,7 +223,8 @@ const resendEmailSchema = jsonTextSchema.pipe(
 
 /**
  * Email communication provider with Resend integration. Each send runs in a
- * `payments.notification.send` span (channel and provider only).
+ * `payments.notification.send` span (channel and provider only). The constructor throws
+ * `payments.configuration_invalid` for a `timeoutMs` that is not a whole number from 1 to 2^31 - 1.
  */
 export class EmailProvider implements CommunicationProvider {
   readonly channel = 'email' as const;
@@ -225,7 +240,9 @@ export class EmailProvider implements CommunicationProvider {
       /** The Resend API origin. Default `https://api.resend.com`. */
       apiBaseUrl?: string;
     },
-  ) {}
+  ) {
+    checkTimeout('email.timeoutMs', config.timeoutMs);
+  }
 
   private get baseUrl(): string {
     return this.config.apiBaseUrl ?? 'https://api.resend.com';
@@ -356,7 +373,9 @@ export class SMSProvider implements CommunicationProvider {
       /** The Twilio API origin. Default `https://api.twilio.com`. */
       apiBaseUrl?: string;
     },
-  ) {}
+  ) {
+    checkTimeout('sms.timeoutMs', config.timeoutMs);
+  }
 
   private get accountUrl(): string {
     return `${this.config.apiBaseUrl ?? 'https://api.twilio.com'}/2010-04-01/Accounts/${this.config.accountSid}`;
@@ -572,16 +591,20 @@ export class WebhookProvider implements CommunicationProvider {
   private readonly target: ProviderTarget = { channel: 'webhook', provider: 'webhook' };
   private readonly allowedHosts: ReadonlySet<string>;
 
-  /** Throws `payments.configuration_invalid` for an empty `allowedHosts` or an entry that is not a bare hostname. */
+  /**
+   * Throws `payments.configuration_invalid` for an empty `allowedHosts`, an entry that is not a bare
+   * hostname, or a `timeoutMs` that is not a whole number from 1 to 2^31 - 1.
+   */
   constructor(
     private config: {
       /** The hostnames a webhook may reach, compared exactly (lowercased) with the URL's host. Never empty. */
       allowedHosts: readonly string[];
       defaultHeaders: Record<string, string>;
-      /** How long one webhook call may take. */
+      /** How long one webhook call may take: whole milliseconds from 1 to 2^31 - 1. */
       timeoutMs: number;
     },
   ) {
+    checkTimeout('webhook.timeoutMs', config.timeoutMs);
     if (config.allowedHosts.length === 0) {
       throw new UnexpectedFailure(
         PaymentsConfigurationInvalid({
@@ -608,6 +631,9 @@ export class WebhookProvider implements CommunicationProvider {
       // For webhook communications, the recipient is the webhook URL (stored customer metadata)
       const webhookUrl = parse(webhookUrlSchema, request.recipient);
       if (isFailure(webhookUrl)) return webhookUrl;
+      // Tracking data is caller JSON sent in the body: a bigint (which JSON.stringify throws on) or U+0000 is refused
+      const trackingData = parse(pgJsonRecordSchema.optional(), request.trackingData);
+      if (isFailure(trackingData)) return trackingData;
       const host = new URL(webhookUrl).hostname.toLowerCase();
       if (!this.allowedHosts.has(host)) return NotificationWebhookHostNotAllowed({ host });
 
@@ -622,7 +648,7 @@ export class WebhookProvider implements CommunicationProvider {
       // Add metadata to payload
       payload['metadata'] = {
         ...(metadata.success ? metadata.data : {}),
-        ...request.trackingData,
+        ...trackingData,
         timestamp: now().toString(),
       };
 
@@ -820,6 +846,8 @@ export class CommunicationOrchestrationService {
   /**
    * Send the pending communications. Returns how many were handled and each one that was not sent:
    * a channel with no provider, a provider failure (the row is marked `failed`), or a thrown error.
+   * `limit` is a whole number of 0 or more (a precondition: anything else throws an invariant failure
+   * before any query).
    */
   async processPendingCommunications(limit = 100): Promise<DunningTickReport> {
     const pendingCommunications = await this.communicationRepo.findPendingCommunications(limit);
@@ -936,7 +964,8 @@ export class CommunicationOrchestrationService {
   }
 
   /**
-   * List communications with filtering
+   * List communications with filtering. `limit` and `offset` are whole numbers of 0 or more and the
+   * times fall in the years 1 to 9999 (preconditions: anything else throws an invariant failure).
    */
   async listCommunications(query: ListCommunicationsQuery): Promise<DunningCommunication[]> {
     return this.communicationRepo.findMany(query);
@@ -1014,8 +1043,11 @@ export class CommunicationOrchestrationService {
    * whose execution is `failed` with a `nextRetryAt` (`retryFailedExecutions` will send it again), or
    * that a later communication of the same execution replaced, is skipped. What is left is the latest
    * failed send of an execution no retry will run (refused with a 4xx, timed out, retries used up).
+   * `limit` is a whole number of 0 or more (a precondition: anything else throws an invariant failure
+   * before any query).
    */
   async retryFailedCommunications(limit = 50): Promise<DunningTickReport> {
+    invariant(Number.isSafeInteger(limit) && limit >= 0, '[@arki/payments] limit must be a whole number of 0 or more');
     const { dunningCommunications: communications, dunningExecutions: executions } = this.tables;
     const later = alias(communications, 'later_communication');
     const failedCommunications = await this.db

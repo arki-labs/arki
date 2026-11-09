@@ -28,13 +28,18 @@ export type FailoverOptions = {
   readonly now?: () => Date;
 };
 
-/** Throws `ARKI_MAIL_E001` when the list is empty or two transports share an id. */
+/**
+ * Throws `ARKI_MAIL_E001` when the list is empty, two transports share an id, or a `quotaPerMonth` is not a
+ * whole number of at least 0 (NaN would never count as spent, so the budget would be silently ignored).
+ */
 export function assertTransports(transports: readonly MailTransport[]): void {
   if (transports.length === 0) invalidConfig('At least one transport is required.');
   const seen = new Set<string>();
-  for (const { id } of transports) {
+  for (const { id, quotaPerMonth } of transports) {
     if (id.trim() === '') invalidConfig('A transport id is empty.');
     if (seen.has(id)) invalidConfig(`Two transports have the id "${id}". Pass a distinct \`id\` to each.`);
+    if (quotaPerMonth !== undefined && !(Number.isSafeInteger(quotaPerMonth) && quotaPerMonth >= 0))
+      invalidConfig(`${id}: \`quotaPerMonth\` must be a whole number of at least 0, got ${quotaPerMonth}.`);
     seen.add(id);
   }
 }

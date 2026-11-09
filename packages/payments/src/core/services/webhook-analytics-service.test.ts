@@ -9,7 +9,7 @@ import { defineRelations } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 
 import { core, openDb } from '../../test-support.js';
 import { PaymentRepository } from '../repository.js';
@@ -74,5 +74,30 @@ describe('WebhookAnalyticsService.getWebhookMetrics', () => {
     const metrics = await service.getWebhookMetrics();
 
     expect(metrics).toMatchObject({ totalEvents: 2, processedEvents: 1, processingRate: 50 });
+  });
+});
+
+describe('WebhookAnalyticsService refuses numbers it cannot use', () => {
+  it.each([Number.NaN, -1, Number.POSITIVE_INFINITY])(
+    'recordProcessingTime(%s) breaks the stated precondition and records nothing',
+    processingTime => {
+      const fresh = new WebhookAnalyticsService(new PaymentRepository(drizzle({ client, relations }), core));
+
+      expect(() => fresh.recordProcessingTime(processingTime)).toThrow(
+        expect.objectContaining({ code: FAILURE_ERROR_CODES.invariant }),
+      );
+      expect(fresh.getAllAlerts()).toEqual([]);
+    },
+  );
+
+  it.each([
+    ['a NaN error rate', { errorRate: Number.NaN, slowProcessing: 5000, maxAlerts: 100 }],
+    ['a negative slow-processing time', { errorRate: 5, slowProcessing: -1, maxAlerts: 100 }],
+    ['a fractional alert count', { errorRate: 5, slowProcessing: 5000, maxAlerts: 1.5 }],
+    ['no room for any alert', { errorRate: 5, slowProcessing: 5000, maxAlerts: 0 }],
+  ])('%s fails when the service is built, as payments.configuration_invalid', (_what, thresholds) => {
+    expect(
+      () => new WebhookAnalyticsService(new PaymentRepository(drizzle({ client, relations }), core), thresholds),
+    ).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
   });
 });

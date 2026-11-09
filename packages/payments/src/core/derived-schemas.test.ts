@@ -195,12 +195,17 @@ describe('insert schemas refuse what the columns refuse', () => {
     ['U+0000 in the customer name', customerInsertSchema, { userId, providerCustomerId: 'cus_1', email: 'a@example.com', name: 'N\u0000' }],
     ['webhook attempts past the integer range', webhookEventInsertSchema, { provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_1', data: {}, attempts: 2_147_483_648 }],
     ['U+0000 in webhook data', webhookEventInsertSchema, { provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_1', data: { a: '\u0000' } }],
+    ['U+0000 in a plan id', planInsertSchema, { ...planBase, id: 'plan_a\u0000b' }],
+    ['U+0000 in a customer id', customerInsertSchema, { id: 'cust_a\u0000b', userId, providerCustomerId: 'cus_1', email: 'a@example.com' }],
+    ['U+0000 in a webhook id', webhookEventInsertSchema, { id: 'wh_a\u0000b', provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_1', data: {} }],
   ] as const)('%s', (_what, schema, value) => {
     expect(schema.safeParse(value).success).toBe(false);
   });
 
   it('a free plan costs zero, and the update schema leaves out what the caller did not send', () => {
     expect(planInsertSchema.safeParse({ ...planBase, priceMinor: 0 }).success).toBe(true);
+    // The id refinement refuses only what a column cannot hold
+    expect(planInsertSchema.safeParse({ ...planBase, id: 'plan_ab' }).success).toBe(true);
     // A `.default` here would reset the stored features on every update
     expect(planUpdateSchema.parse({ name: 'Renamed' })).toEqual({ name: 'Renamed' });
   });

@@ -2,7 +2,7 @@ import type { UserId } from '../user-id.js';
 import type { Instant } from '@arki/date';
 import { fromDate } from '@arki/date';
 import type { IdGenerationFailure } from '@arki/contracts';
-import type { FailureOf, Result } from '@arki/failure';
+import type { FailureOf, Result, SchemaFailure } from '@arki/failure';
 import type { CommandNotFound } from '@arki/journal';
 import type { MoneyFailure } from '@arki/money';
 import { invariant, isFailure } from '@arki/failure';
@@ -104,13 +104,23 @@ export class SubscriptionManager {
   /**
    * Start a subscription for a user who has a customer and no active subscription. Returns the
    * provider's subscription, or a failure: `ReferenceNotFound` (no customer for the user, or no
-   * plan), `PlanInactive`, `SubscriptionAlreadyActive`, or what the provider returned.
+   * plan), `PlanInactive`, `SubscriptionAlreadyActive`, or what the provider returned (its
+   * `InvalidInput` for `options.metadata` no column or provider can hold among them).
+   * `options.trialPeriodDays`, when given, is a whole number from 1 to 365, as the contract says (a
+   * precondition: anything else throws an invariant failure before any read).
    */
   async createSubscription(
     userId: UserId,
     planId: PlanId,
     options: SubscriptionCreationOptions = {},
-  ): Promise<Result<Subscription, Declined | Conflict | NotFound | IdGenerationFailure | Inactive | AlreadyActive>> {
+  ): Promise<
+    Result<Subscription, Declined | Conflict | NotFound | IdGenerationFailure | Inactive | AlreadyActive | SchemaFailure>
+  > {
+    const days = options.trialPeriodDays;
+    invariant(
+      days === undefined || (Number.isInteger(days) && days >= 1 && days <= 365),
+      '[@arki/payments] trialPeriodDays must be a whole number from 1 to 365',
+    );
     const customer = await this.paymentRepository.findCustomerByUserId(userId);
     if (!customer) return ReferenceNotFound({ kind: 'customer', id: userId, missing: 'row' });
 
@@ -141,7 +151,15 @@ export class SubscriptionManager {
     newPlanId: PlanId,
     options: SubscriptionChangeOptions = {},
   ): Promise<
-    SubscriptionChange | NotFound | InvalidState | Inactive | MoneyFailure | Declined | Conflict | StoreFailure
+    | SubscriptionChange
+    | NotFound
+    | InvalidState
+    | Inactive
+    | MoneyFailure
+    | Declined
+    | Conflict
+    | SchemaFailure
+    | StoreFailure
   > {
     const currentSubscription = await this.subscriptionIn(subscriptionId, ['active'], 'update');
     if (isFailure(currentSubscription)) return currentSubscription;
@@ -182,7 +200,7 @@ export class SubscriptionManager {
   async setCancelAtPeriodEnd(
     subscriptionId: SubscriptionId,
     cancelAtPeriodEnd: boolean,
-  ): Promise<Subscription | NotFound | InvalidState | Declined | Conflict | StoreFailure> {
+  ): Promise<Subscription | NotFound | InvalidState | Declined | Conflict | SchemaFailure | StoreFailure> {
     const currentSubscription = await this.subscriptionNotCanceled(subscriptionId, 'set_cancel_at_period_end');
     if (isFailure(currentSubscription)) return currentSubscription;
 

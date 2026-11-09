@@ -4,7 +4,7 @@ import type { Instant } from '@arki/date';
 import { now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
-import { isFailure } from '@arki/failure';
+import { invariant, isFailure } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
 import { Money } from '@arki/money';
 
@@ -12,6 +12,7 @@ import type { PaymentRetryService } from '../../core/services/payment-retry-serv
 import { ReferenceNotFound } from '../../core/providers/provider-error.js';
 import type { CoreTables } from '../../core/tables.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types.js';
+import { MAX_DUNNING_DAYS } from '../contracts.js';
 import type { DunningCampaignId } from '../primitives.js';
 import type { DunningTables } from '../tables.js';
 import type { DunningTickReport } from '../failures.js';
@@ -189,8 +190,11 @@ export class DunningIntegrationService {
   }
 
   /**
-   * Handle subscription status changes. An unknown customer or subscription returns `ReferenceNotFound`;
-   * a campaign run that throws is thrown, so the caller can retry the event.
+   * Handle subscription status changes. An unknown customer returns `ReferenceNotFound` (`kind: 'customer'`)
+   * from the risk profile update, before any campaign runs. The subscription id is not looked up: an
+   * unknown one returns no failure (the campaigns pick customers from stored subscriptions). A row
+   * deleted while a campaign schedules returns its `ReferenceNotFound`, and a stored segment range money
+   * refuses its `MoneyFailure`. A campaign run that throws is thrown, so the caller can retry the event.
    */
   async handleSubscriptionStatusChange(event: {
     subscriptionId: SubscriptionId;
@@ -217,8 +221,10 @@ export class DunningIntegrationService {
   }
 
   /**
-   * Handle trial ending notifications. An unknown customer or subscription returns `ReferenceNotFound`;
-   * a campaign run that throws is thrown, so the caller can retry the event.
+   * Handle trial ending notifications. The customer and subscription ids are not looked up: an unknown
+   * one matches no stored trial, so no campaign runs and no failure is returned. A row deleted while a
+   * campaign schedules returns its `ReferenceNotFound`, and a stored segment range money refuses its
+   * `MoneyFailure`. A campaign run that throws is thrown, so the caller can retry the event.
    */
   async handleTrialEnding(event: {
     subscriptionId: SubscriptionId;
@@ -647,7 +653,9 @@ export class DunningIntegrationService {
   /**
    * Execution and communication counts of the last `days` days, from the stored rows. `successRate`
    * is completed executions over all executions (0 to 1); `averageProcessingTime` is the mean
-   * processing time, in milliseconds, recorded on completed executions.
+   * processing time, in milliseconds, recorded on completed executions. Precondition (anything else
+   * throws an invariant failure and runs no query): `days` is a whole number from 0 to `MAX_DUNNING_DAYS`
+   * (100 years).
    */
   async getIntegrationMetrics(days = 30): Promise<{
     totalExecutions: number;
@@ -657,6 +665,10 @@ export class DunningIntegrationService {
     successRate: number;
     averageProcessingTime: number;
   }> {
+    invariant(
+      Number.isSafeInteger(days) && days >= 0 && days <= MAX_DUNNING_DAYS,
+      () => `[@arki/payments] days must be a whole number from 0 to ${MAX_DUNNING_DAYS}`,
+    );
     const since = sub(now(), { hours: days * 24 });
     const executions = this.dunningExecutions;
     const communications = this.dunningCommunications;

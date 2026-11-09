@@ -32,6 +32,8 @@
  * ```
  */
 
+import { invariant } from '@arki/failure';
+
 import { debugFactories } from './debug.js';
 
 /**
@@ -144,7 +146,8 @@ export function createFactory<T>(generator: () => T, defaults?: Partial<T>): Fac
  * Create multiple instances from a factory
  *
  * @param factory - Factory function to use
- * @param count - Number of instances to create
+ * @param count - Number of instances to create (a whole number of at least 0, or the invariant failure
+ *   `ARKI_FAILURE_E008` is thrown: `Array.from` would throw a raw RangeError for -1 and make 0 of NaN)
  * @param overrides - Optional overrides for all instances or function to generate per-instance overrides
  * @returns Array of instances
  *
@@ -164,6 +167,10 @@ export function createMany<T>(
   count: number,
   overrides?: Partial<T> | ((index: number) => Partial<T>),
 ): T[] {
+  invariant(
+    Number.isSafeInteger(count) && count >= 0,
+    `createMany: count must be a whole number of at least 0, got ${count}.`,
+  );
   return Array.from({ length: count }, (_, index) => {
     const instanceOverrides = typeof overrides === 'function' ? overrides(index) : overrides;
     return factory(instanceOverrides);

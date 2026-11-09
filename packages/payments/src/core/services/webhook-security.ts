@@ -5,15 +5,23 @@ import { isBefore, now, sub } from '@arki/date';
 import { isFailure } from '@arki/failure';
 import { WebhookMalformed, WebhookStale, stripe } from '@arki/http/webhooks';
 import { is, recordSchema } from '@arki/schema';
+import { z } from '@arki/contracts';
 
 import type { PaymentProviderType, WebhookValidationResult } from '../types.js';
+import { misconfigured } from '../failures.js';
 import { mapStripeEventType } from '../providers/stripe-event-types.js';
 
-export type WebhookSecurityConfig = {
-  allowedIps: string[];
-  replayWindowSeconds: number;
-  maxRetries: number;
-};
+/**
+ * The verifier's settings. `replayWindowSeconds` is whole seconds from 1 to one day: it is both the
+ * timestamp window and Stripe's signature tolerance. `maxRetries` is a whole number of 0 or more.
+ */
+const webhookSecurityConfigSchema = z.object({
+  allowedIps: z.array(z.string()),
+  replayWindowSeconds: z.number().int().min(1).max(86_400),
+  maxRetries: z.number().int().min(0),
+});
+
+export type WebhookSecurityConfig = z.output<typeof webhookSecurityConfigSchema>;
 
 export type WebhookValidationOptions = {
   skipIpValidation?: boolean;
@@ -21,7 +29,12 @@ export type WebhookValidationOptions = {
   skipSignatureValidation?: boolean;
 };
 
-type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
+/** A parsed JSON body. `JSON.parse` returns one; the schema says so to the type system without a cast. */
+const jsonValueSchema = z.json();
+type JsonValue = z.output<typeof jsonValueSchema>;
+
+/** The one field of a Stripe event the verifier reads: its type, to name the event. */
+const stripeTypedEventSchema = z.looseObject({ type: z.string() });
 
 /** A whole number of seconds since the epoch, as Stripe writes `t=`. */
 const UNIX_SECONDS = /^\d+$/;
@@ -59,7 +72,15 @@ export class WebhookSecurityService {
   private readonly config: WebhookSecurityConfig;
   private lastCleanupAt: Instant = now();
 
+  /** Throws `payments.configuration_invalid` for a config that breaks `WebhookSecurityConfig`'s rules. */
   constructor(config: WebhookSecurityConfig) {
+    const checked = webhookSecurityConfigSchema.safeParse(config);
+    if (!checked.success) {
+      throw misconfigured(
+        'webhookSecurity',
+        checked.error.issues.map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`).join('; '),
+      );
+    }
     this.config = config;
   }
 
@@ -120,10 +141,9 @@ export class WebhookSecurityService {
       // Mark event as processed
       this.markEventAsProcessed(eventId);
 
+      const typed = stripeTypedEventSchema.safeParse(sanitizedPayload);
       const eventType =
-        provider === 'stripe' && typeof sanitizedPayload['type'] === 'string'
-          ? (mapStripeEventType(sanitizedPayload['type']) ?? undefined)
-          : undefined;
+        provider === 'stripe' && typed.success ? (mapStripeEventType(typed.data.type) ?? undefined) : undefined;
 
       return {
         isValid: true,
@@ -324,7 +344,8 @@ export class WebhookSecurityService {
   private sanitizePayload(payload: string | Buffer): Record<string, unknown> {
     try {
       const payloadStr = typeof payload === 'string' ? payload : payload.toString();
-      const parsed = JSON.parse(payloadStr) as JsonValue;
+      const parsed: unknown = JSON.parse(payloadStr);
+      if (!is(parsed, jsonValueSchema)) return {};
       const sanitized = this.deepSanitize(parsed);
       return is(sanitized, recordSchema) ? sanitized : {};
     } catch {

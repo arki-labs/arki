@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
 import { now, sub } from '@arki/date';
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 import { KV } from '@arki/kv';
 import { money } from '@arki/money';
 
@@ -110,6 +110,24 @@ describe('record methods while KV is down', () => {
       code: 'kv.unavailable',
     });
   });
+
+  it.each([Number.NaN, -1, Number.POSITIVE_INFINITY])(
+    'a duration of %s breaks the stated precondition, and nothing is recorded',
+    async duration => {
+      const monitor = monitorWithKvDown();
+
+      await expect(monitor.recordWebhookProcessing(duration, true)).rejects.toMatchObject({
+        code: FAILURE_ERROR_CODES.invariant,
+      });
+      await expect(
+        monitor.recordPaymentAttempt({ success: true, status: 'succeeded', processingTime: duration }),
+      ).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+
+      const health = await monitor.getSystemHealth();
+      expect(health.payments).toMatchObject({ successRate: 0, avgProcessingTime: 0 });
+      expect(health.webhooks).toMatchObject({ successRate: 0, avgProcessingTime: 0 });
+    },
+  );
 
   it('counts an attempt as successful by its outcome, whatever the payment status is called', async () => {
     const monitor = monitorWithKvDown();

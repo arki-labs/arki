@@ -8,11 +8,14 @@ import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
 import { Money } from '@arki/money';
+import { parse } from '@arki/schema';
 
 import type { CoreTables } from '../../core/tables.js';
 import type { Customer, CustomerId } from '../../core/types.js';
 import type { UserId } from '../../core/user-id.js';
 import type { CreateCustomerSegmentInput, ListCustomerSegmentsQuery, UpdateCustomerSegmentInput } from '../contracts.js';
+import { segmentCriteriaSchema } from '../contracts.js';
+import { pgJsonRecordSchema } from '../../core/pg-values.js';
 import type { CustomerSegmentId, RiskCategory } from '../primitives.js';
 import type { DunningDatabase } from '../repository.js';
 import type { DunningTables } from '../tables.js';
@@ -28,6 +31,13 @@ import type { DunningTickReport } from '../failures.js';
 import { CustomerSegmentNotFound, tickFault } from '../failures.js';
 import { createCustomerRiskProfileRepository, createCustomerSegmentRepository } from '../repository.js';
 import { valueList } from '../sql-list.js';
+
+/**
+ * Segment criteria as they are stored: the contract's criteria, with the spend range already turned into
+ * stored JSON (`Money.fromJSON` checks it when the criteria become SQL). A plan tier holding U+0000, a
+ * span or count outside its range, or NaN is refused here, so it never reaches a query.
+ */
+const storedCriteriaSchema = segmentCriteriaSchema.extend({ totalSpent: pgJsonRecordSchema.optional() });
 
 const logger = getLogger('arki:payments:dunning');
 
@@ -74,15 +84,17 @@ export class CustomerSegmentationService {
   }
 
   /**
-   * Create a new customer segment. The criteria are checked first: a spend range that is not valid money
-   * returns its `MoneyFailure` and an actor id Postgres cannot store `schema.invalid_input`; nothing is
-   * written then. After a good write, the count can only fail with a
+   * Create a new customer segment. The criteria are checked first: criteria `segmentCriteriaSchema`
+   * refuses, or an actor id, text or JSON Postgres cannot store, return `schema.invalid_input`, and a spend
+   * range that is not valid money returns its `MoneyFailure`; nothing is written then. After a good write, the count can only fail with a
    * database error, which throws (this service holds no transaction, so the saved row stays).
    */
   async createSegment(
     input: CreateCustomerSegmentInput,
     createdBy: UserId,
   ): Promise<CustomerSegment | MoneyFailure | FailureOf<typeof CustomerSegmentNotFound> | SchemaFailure> {
+    const criteria = parse(storedCriteriaSchema, input.criteria);
+    if (isFailure(criteria)) return criteria;
     const valid = this.buildSegmentConditions(input.criteria);
     if (isFailure(valid)) return valid;
 
@@ -106,19 +118,23 @@ export class CustomerSegmentationService {
   }
 
   /**
-   * Update an existing segment. As in `createSegment`, new criteria with a spend range that is not valid
-   * money return their `MoneyFailure` before anything is written.
+   * Update an existing segment. As in `createSegment`, new criteria the schema refuses, or text, JSON or an
+   * update frequency Postgres cannot store, return `schema.invalid_input`, and a spend range that is not
+   * valid money returns its `MoneyFailure`, before anything is written. `null` for an unknown segment.
    */
   async updateSegment(
     segmentId: CustomerSegmentId,
     input: UpdateCustomerSegmentInput,
   ): Promise<CustomerSegment | null | MoneyFailure | FailureOf<typeof CustomerSegmentNotFound> | SchemaFailure> {
     if (input.criteria) {
+      const criteria = parse(storedCriteriaSchema, input.criteria);
+      if (isFailure(criteria)) return criteria;
       const valid = this.buildSegmentConditions(input.criteria);
       if (isFailure(valid)) return valid;
     }
 
     const dbSegment = await this.segmentRepo.update(segmentId, input);
+    if (isFailure(dbSegment)) return dbSegment;
 
     if (!dbSegment) {
       return null;
@@ -144,7 +160,8 @@ export class CustomerSegmentationService {
   }
 
   /**
-   * List segments with filtering and pagination
+   * List segments with filtering and pagination. `limit` and `offset` are whole numbers of 0 or more (a
+   * precondition: anything else throws an invariant failure); a `search` holding U+0000 matches nothing.
    */
   async listSegments(query: ListCustomerSegmentsQuery): Promise<CustomerSegment[]> {
     const dbSegments = await this.segmentRepo.findMany(query);
@@ -197,8 +214,11 @@ export class CustomerSegmentationService {
 
   /**
    * Get customers matching segment criteria. An unknown segment returns `CustomerSegmentNotFound`.
+   * `limit` is a whole number of 0 or more (a precondition: anything else throws an invariant failure
+   * before any query).
    */
   async getCustomersInSegment(segmentId: CustomerSegmentId, limit = 100) {
+    assertLimit(limit);
     const dbSegment = await this.segmentRepo.findById(segmentId);
     if (!dbSegment) {
       return CustomerSegmentNotFound({ segmentId });
@@ -209,9 +229,18 @@ export class CustomerSegmentationService {
   }
 
   /**
-   * Get customers matching specific criteria
+   * Get customers matching specific criteria. Criteria the stored-criteria schema refuses (a plan tier
+   * holding U+0000, a span or count outside its range, NaN) return `schema.invalid_input`, and a spend
+   * range money refuses its `MoneyFailure`, before any query. `limit` is a whole number of 0 or more (a
+   * precondition: anything else throws an invariant failure).
    */
-  async getCustomersMatchingCriteria(criteria: SegmentCriteria, limit = 100): Promise<SegmentCustomer[] | MoneyFailure> {
+  async getCustomersMatchingCriteria(
+    criteria: SegmentCriteria,
+    limit = 100,
+  ): Promise<SegmentCustomer[] | MoneyFailure | SchemaFailure> {
+    assertLimit(limit);
+    const checked = parse(storedCriteriaSchema, criteria);
+    if (isFailure(checked)) return checked;
     const conditions = this.buildSegmentConditions(criteria);
     if (isFailure(conditions)) return conditions;
 
@@ -1006,9 +1035,11 @@ export class CustomerSegmentationService {
 
   /**
    * Recalculate the risk profile of up to `limit` customers. Returns how many were tried and each
-   * customer whose profile was not updated (a stored range money refuses, or a thrown error).
+   * customer whose profile was not updated (a stored range money refuses, or a thrown error). `limit` is
+   * a whole number of 0 or more (a precondition: anything else throws an invariant failure before any query).
    */
   async bulkUpdateRiskProfiles(limit = 100): Promise<DunningTickReport> {
+    assertLimit(limit);
     const customerIds = await this.db.select({ id: this.customers.id }).from(this.customers).limit(limit);
     const report: DunningTickReport = { processed: customerIds.length, failed: [] };
 
@@ -1106,7 +1137,8 @@ export class CustomerSegmentationService {
   }
 
   /**
-   * Get customers by risk category
+   * Get customers by risk category. `limit` is a whole number of 0 or more (a precondition: anything else
+   * throws an invariant failure before any query).
    */
   async getCustomersByRiskCategory(category: RiskCategory, limit = 100): Promise<CustomerRiskProfile[]> {
     const dbProfiles = await this.riskProfileRepo.findByRiskCategory(category, limit);
@@ -1123,4 +1155,9 @@ export function createCustomerSegmentationService(
   dunningTables: SegmentationDunningTables,
 ) {
   return new CustomerSegmentationService(db, coreTables, dunningTables);
+}
+
+/** The precondition of a row count: a whole number Postgres takes in LIMIT. */
+function assertLimit(limit: number): void {
+  invariant(Number.isSafeInteger(limit) && limit >= 0, '[@arki/payments] limit must be a whole number of 0 or more');
 }

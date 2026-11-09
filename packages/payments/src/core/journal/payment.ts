@@ -45,10 +45,15 @@ type PaymentRow = CoreTables['payments']['$inferSelect'];
 
 const paymentMethodSchema = z.enum(paymentMethodTypeValues);
 const metadataSchema = pgJsonRecordSchema;
+/** The id a command reads its payment stream by: one a text column can hold. */
+const paymentRefSchema = paymentIdSchema.refine(
+  id => pgTextSchema.safeParse(id).success,
+  'An id cannot contain the NUL character (U+0000)',
+);
 
 export const initiatePaymentInputSchema = z.object({
   /** Left out: the command makes a new id */
-  paymentId: paymentIdSchema.optional(),
+  paymentId: paymentRefSchema.optional(),
   subscriptionId: subscriptionIdSchema.nullable().optional(),
   userId: userIdSchema,
   customerId: customerIdSchema,
@@ -60,24 +65,24 @@ export const initiatePaymentInputSchema = z.object({
 });
 
 export const completePaymentInputSchema = z.object({
-  paymentId: paymentIdSchema,
+  paymentId: paymentRefSchema,
   receiptUrl: pgTextSchema.nullable().optional(),
 });
 
-export const failPaymentInputSchema = z.object({ paymentId: paymentIdSchema, failureReason: pgTextSchema });
+export const failPaymentInputSchema = z.object({ paymentId: paymentRefSchema, failureReason: pgTextSchema });
 
-export const cancelPaymentInputSchema = z.object({ paymentId: paymentIdSchema });
+export const cancelPaymentInputSchema = z.object({ paymentId: paymentRefSchema });
 
-export const markPaymentRequiresActionInputSchema = z.object({ paymentId: paymentIdSchema });
+export const markPaymentRequiresActionInputSchema = z.object({ paymentId: paymentRefSchema });
 
 /** `refundedAmount` is the total refunded so far, not this refund alone: a resent report writes nothing. */
 export const recordPaymentRefundInputSchema = z.object({
-  paymentId: paymentIdSchema,
+  paymentId: paymentRefSchema,
   refundedAmount: nonNegativeMoneySchema,
 });
 
 export const recordPaymentDisputeInputSchema = z.object({
-  paymentId: paymentIdSchema,
+  paymentId: paymentRefSchema,
   disputeId: pgVarcharSchema(255).min(1),
   status: pgVarcharSchema(64).min(1),
   reason: pgTextSchema.nullable().optional(),

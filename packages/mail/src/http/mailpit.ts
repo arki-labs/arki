@@ -8,6 +8,7 @@ import { isFailure } from '@arki/failure';
 
 import type { MailTransport } from '../types.js';
 import type { FetchFn } from './post-json.js';
+import { invalidConfig } from '../errors.js';
 import { listOf } from '../message.js';
 import { traceTransport } from '../telemetry.js';
 import { badResponse, checkTimeoutMs, everyRecipient, logged, rejection } from '../transport-failures.js';
@@ -44,6 +45,15 @@ export function mailpit(options: MailpitOptions): MailTransport {
   checkTimeoutMs(id, options.timeoutMs);
   const fetchFn = options.fetch ?? globalThis.fetch;
   const url = `${options.baseUrl.replace(/\/+$/, '')}/api/v1/send`;
+  // `fetch` refuses anything else before sending, which would read as an uncertain send on every mail.
+  const parsed = URL.canParse(url) ? new URL(url) : undefined;
+  if (
+    parsed === undefined ||
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    parsed.username !== '' ||
+    parsed.password !== ''
+  )
+    invalidConfig(`${id}: \`baseUrl\` must be an http(s) URL without credentials, such as http://localhost:8025.`);
   return traceTransport('mailpit', {
     id,
     async send(message, sendOptions) {

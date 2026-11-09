@@ -15,9 +15,9 @@ import { defineRelations, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { add, now, toMillis } from '@arki/date';
+import { add, fromDate, now, toMillis } from '@arki/date';
 import { findDatabaseError } from '@arki/db/errors';
-import { InvalidInput, orThrow, UnexpectedFailure } from '@arki/failure';
+import { FAILURE_ERROR_CODES, InvalidInput, orThrow, UnexpectedFailure } from '@arki/failure';
 
 import type { DunningExecutionId } from './primitives.js';
 import type {
@@ -446,6 +446,31 @@ describe('WebhookProvider', () => {
     expect(bootFailureCode(factory)).toBe('payments.configuration_invalid');
   });
 
+  it('tracking data with a bigint returns schema.invalid_input and sends nothing, where JSON.stringify would throw', async () => {
+    lastRequest = undefined;
+
+    const refused = await webhook().send({ ...request, recipient: `${origin}/hook`, trackingData: { amount: 10n } });
+
+    expect(refused).toMatchObject({ code: 'schema.invalid_input' });
+    expect(lastRequest).toBeUndefined();
+  });
+
+  it('a timeoutMs no timer can wait fails at boot with payments.configuration_invalid, for every timed provider', () => {
+    for (const timeoutMs of [Number.NaN, 0, -1, 1.5, Number.POSITIVE_INFINITY, 2 ** 31]) {
+      expect(bootFailureCode(() => webhook(timeoutMs))).toBe('payments.configuration_invalid');
+      expect(bootFailureCode(() => email(timeoutMs))).toBe('payments.configuration_invalid');
+      expect(bootFailureCode(() => sms(timeoutMs))).toBe('payments.configuration_invalid');
+    }
+    const factory = () =>
+      createCommunicationOrchestrationService(db, tables, {
+        webhook: { allowedHosts: ['127.0.0.1'], timeoutMs: Number.NaN },
+      });
+    expect(bootFailureCode(factory)).toBe('payments.configuration_invalid');
+    // The default and the bounds themselves are accepted
+    expect(webhook(1).channel).toBe('webhook');
+    expect(email(2 ** 31 - 1).channel).toBe('email');
+  });
+
   it('the webhook channel is off unless it is configured', async () => {
     const service = createCommunicationOrchestrationService(db, tables);
 
@@ -801,6 +826,30 @@ describe('CommunicationOrchestrationService.sendCommunication', () => {
     };
     expect(await statuses(retried.execution.id)).toEqual(['failed', 'failed']);
     expect(await statuses(givenUp.execution.id)).toEqual(['failed', 'sent']);
+  });
+
+  it('a page size, offset or time that is not a precondition value throws the invariant failure before any query', async () => {
+    const service = new CommunicationOrchestrationService(db, tables);
+    const page = { offset: 0, sortBy: 'createdAt', sortOrder: 'desc' } as const;
+
+    for (const limit of [1.5, -1, Number.NaN]) {
+      await expect(service.processPendingCommunications(limit)).rejects.toMatchObject({
+        code: FAILURE_ERROR_CODES.invariant,
+      });
+      await expect(service.retryFailedCommunications(limit)).rejects.toMatchObject({
+        code: FAILURE_ERROR_CODES.invariant,
+      });
+      await expect(service.listCommunications({ ...page, limit })).rejects.toMatchObject({
+        code: FAILURE_ERROR_CODES.invariant,
+      });
+    }
+    await expect(service.listCommunications({ ...page, limit: 10, offset: -1 })).rejects.toMatchObject({
+      code: FAILURE_ERROR_CODES.invariant,
+    });
+    await expect(
+      service.listCommunications({ ...page, limit: 10, sentAfter: fromDate(new Date('+010000-01-01T00:00:00Z')) }),
+    ).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+    expect(await service.listCommunications({ ...page, limit: 0 })).toEqual([]);
   });
 
   it('processPendingCommunications lists each communication it could not send', async () => {

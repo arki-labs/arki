@@ -2,7 +2,7 @@
  * `@arki/auth/testing/integration-tester` — `IntegrationTester`: a real Postgres and Redis, repositories and role callers for one backend's tests.
  */
 // Fixture setup needs concrete IDs; abort setup if secure generation fails.
-import { orThrow } from '@arki/failure';
+import { invariant, orThrow } from '@arki/failure';
 import crypto from 'node:crypto';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { getTableConfig, PgTable } from 'drizzle-orm/pg-core';
@@ -14,7 +14,8 @@ import type { UserId } from '../../ids.js';
 import { createUserId } from '../../ids.js';
 import { initDb } from '@arki/db/builder';
 import { KV } from '@arki/kv';
-import { is as matchesSchema, recordSchema } from '@arki/schema';
+import { is as matchesSchema } from '@arki/schema';
+import { z } from 'zod';
 
 import type {
   IntegrationTesterConfig,
@@ -36,6 +37,7 @@ import * as debug from '@arki/testing/debug';
 import { debugTester } from '@arki/testing/debug';
 import { faker } from '@arki/testing/factories';
 import * as performance from '@arki/testing/performance';
+import type { PaginatedResponse } from '@arki/testing/assertions';
 import type { Timestamp, Timestamps } from '@arki/testing/timestamps';
 import { assertTimestamps, assertUpdatedAfterCreated, epochMilliseconds } from '@arki/testing/timestamps';
 
@@ -48,37 +50,25 @@ type CallerCollection<TCaller> = {
 
 /**
  * `drizzle(...)` puts the connection on `$client`, but the `NodePgDatabase` type does not declare it.
- * These guards check for it at runtime instead of casting.
+ * These schemas check for it at runtime instead of casting. `matchesSchema` only answers yes or no, so a
+ * method is called on the original object (its `this` intact), never on a parsed copy.
  */
-type Endable = { end(): Promise<void> };
-type Releasable = { release(): void | Promise<void> };
-
-function isObjectWith<K extends string>(value: unknown, key: K): value is Record<K, unknown> {
-  return matchesSchema(value, recordSchema) && key in value;
-}
-
-function isEndable(value: unknown): value is Endable {
-  return isObjectWith(value, 'end') && typeof value.end === 'function';
-}
-
-function isReleasable(value: unknown): value is Releasable {
-  return isObjectWith(value, 'release') && typeof value.release === 'function';
-}
+const endableSchema = z.object({ end: z.function() });
+const releasableSchema = z.object({ release: z.function() });
+const closableSchema = z.object({ close: z.function() });
+const functionSchema = z.function();
 
 /**
  * Close the connection pool (or release the client) that backs a drizzle database.
  * Returns which action ran, or `null` when the database has no `$client`.
  */
 async function closeDatabaseClient(db: object): Promise<'ended' | 'released' | null> {
-  if (!isObjectWith(db, '$client') || !db.$client) {
-    return null;
-  }
-  const client = db.$client;
-  if (isEndable(client)) {
+  const client: unknown = Reflect.get(db, '$client');
+  if (matchesSchema(client, endableSchema)) {
     await client.end();
     return 'ended';
   }
-  if (isReleasable(client)) {
+  if (matchesSchema(client, releasableSchema)) {
     await client.release();
     return 'released';
   }
@@ -413,7 +403,7 @@ export class IntegrationTester<
       debugTester.debug('[tester] Closing event store connection via cleanup function');
       try {
         const closeEventStore = contextForCleanup.closeEventStore;
-        if (typeof closeEventStore === 'function') {
+        if (matchesSchema(closeEventStore, functionSchema)) {
           await closeEventStore();
           debugTester.debug('[tester] Event store connection closed successfully');
         } else {
@@ -437,7 +427,7 @@ export class IntegrationTester<
       debugTester.debug('[tester] No closeEventStore function found, attempting direct close');
       try {
         const eventStore = contextForCleanup.eventStore;
-        if (isObjectWith(eventStore, 'close') && typeof eventStore.close === 'function') {
+        if (matchesSchema(eventStore, closableSchema)) {
           await eventStore.close();
           debugTester.debug('[tester] Event store connection closed via direct method');
         }
@@ -610,7 +600,10 @@ export class IntegrationTester<
   /**
    * Clear tables matching a pattern
    *
-   * @param pattern - RegExp or string pattern to match table names
+   * @param pattern - RegExp or string pattern to match the schema's export names. A RegExp's `g` and `y`
+   *   flags are ignored (they would make `test` skip names). A string that is not a valid regular
+   *   expression throws the invariant failure `ARKI_FAILURE_E008`, as does a pattern that leaves out a
+   *   table referencing a matched one (see {@link IntegrationTester.clearTables}).
    *
    * @example
    * ```typescript
@@ -623,7 +616,7 @@ export class IntegrationTester<
       throw new Error('Tester not initialized. Call setup() first.');
     }
 
-    const regex = typeof pattern === 'string' ? new RegExp(pattern) : pattern;
+    const regex = typeof pattern === 'string' ? compilePattern(pattern) : statelessCopy(pattern);
 
     const tables = Object.entries(this.config.schema)
       .filter((entry): entry is [string, PgTable] => regex.test(entry[0]) && is(entry[1], PgTable))
@@ -660,12 +653,26 @@ export class IntegrationTester<
    * Deletes every row of `tables`, a table before any table it references: a parent emptied before
    * its child still holds rows would be refused by the foreign key (SQLSTATE 23503), whatever order
    * the schema exports them in. Tables in a foreign-key cycle keep their given order.
+   *
+   * A schema table left out that references one of `tables` (without `on delete cascade` or
+   * `set null`) breaks the invariant `ARKI_FAILURE_E008` before any row is deleted: its rows would make
+   * Postgres refuse the parent's delete half-way through.
    */
   private async deleteAllRows(tables: readonly PgTable[]): Promise<void> {
     const db = this._db;
     if (!db) {
       throw new Error('Tester not initialized. Call setup() first.');
     }
+    const blocking = Object.values(this.config.schema)
+      .filter((value): value is PgTable => is(value, PgTable) && !tables.includes(value))
+      .filter(child => blockingParents(child, tables).length > 0);
+    invariant(
+      blocking.length === 0,
+      () =>
+        `Cannot clear ${tables.map(table => getTableConfig(table).name).join(', ')} without ${blocking
+          .map(table => getTableConfig(table).name)
+          .join(', ')}: those tables reference them and are not cleared. Clear them too, or use clearAllTables().`,
+    );
     for (const table of childrenFirst(tables)) {
       // eslint-disable-next-line drizzle/enforce-delete-with-where -- clearing every row is the point of this helper
       await db.delete(table);
@@ -921,7 +928,8 @@ export class IntegrationTester<
    * In event-sourced systems, projections update asynchronously after events are stored.
    * This method waits for a short period to allow projections to process.
    *
-   * @param ms - Milliseconds to wait (default: 100ms)
+   * @param ms - Milliseconds to wait (default: 100ms): from 0 to 2^31 - 1 (the longest timer), or the
+   *   invariant failure `ARKI_FAILURE_E008` is thrown (`setTimeout` would fire at once for NaN or Infinity)
    *
    * @example
    * ```typescript
@@ -931,6 +939,10 @@ export class IntegrationTester<
    * ```
    */
   async waitForProjections(ms = 100): Promise<void> {
+    invariant(
+      Number.isFinite(ms) && ms >= 0 && ms <= MAX_TIMER_MS,
+      `waitForProjections: ms must be a number of milliseconds from 0 to ${MAX_TIMER_MS}, got ${ms}.`,
+    );
     await new Promise(resolve => setTimeout(resolve, ms));
   }
 
@@ -1014,7 +1026,7 @@ export class IntegrationTester<
    * ```
    */
   assertValidId(value: unknown, prefix: string): asserts value is string {
-    if (typeof value !== 'string') {
+    if (!matchesSchema(value, stringSchema)) {
       throw new TypeError(`Expected ID to be a string, got ${typeof value}`);
     }
     if (!value.startsWith(prefix)) {
@@ -1064,7 +1076,8 @@ export class IntegrationTester<
    * Assert that a response has valid pagination structure
    *
    * @param response - Response to check
-   * @throws Error if response doesn't have items array
+   * @throws Error if response is not an object, or has no `items` array, or a `total`, `nextCursor` or
+   *   `hasMore` of the wrong type (checked by the schema behind `assertPaginationValid` in `@arki/testing`)
    *
    * @example
    * ```typescript
@@ -1073,19 +1086,8 @@ export class IntegrationTester<
    * expect(result.items).toHaveLength(10);
    * ```
    */
-  assertPaginatedResponse(response: unknown): asserts response is {
-    items: unknown[];
-    total?: number;
-    nextCursor?: string | null;
-    hasMore?: boolean;
-  } {
-    if (!response || typeof response !== 'object') {
-      throw new Error('Expected paginated response to be an object');
-    }
-
-    if (!('items' in response) || !Array.isArray(response.items)) {
-      throw new TypeError('Expected paginated response to have items array');
-    }
+  assertPaginatedResponse(response: unknown): asserts response is PaginatedResponse {
+    assertions.assertPaginationValid(response);
   }
 
   /**
@@ -1162,7 +1164,8 @@ export class IntegrationTester<
   /**
    * Generate a deterministic random string
    *
-   * @param length - Length of string (default: 16)
+   * @param length - Length of string (default: 16): a whole number from 0 to 64 (one SHA-256 in hex), or the
+   *   invariant failure `ARKI_FAILURE_E008` is thrown instead of a shorter string
    * @returns Generated string
    *
    * @example
@@ -1172,8 +1175,12 @@ export class IntegrationTester<
    * ```
    */
   generateString(length = 16): string {
+    invariant(
+      Number.isSafeInteger(length) && length >= 0 && length <= SHA256_HEX_LENGTH,
+      `generateString: length must be a whole number from 0 to ${SHA256_HEX_LENGTH}, got ${length}.`,
+    );
     const hash = crypto.createHash('sha256').update(`${this.randomSeed}-${this.randomCounter++}`).digest('hex');
-    return hash.slice(0, Math.max(0, Math.min(length, hash.length)));
+    return hash.slice(0, length);
   }
 
   /**
@@ -1217,6 +1224,10 @@ export class IntegrationTester<
    *   between: { from: new Date('2024-01-01'), to: new Date('2024-12-31') }
    * });
    * ```
+   *
+   * Preconditions (each breaks the invariant `ARKI_FAILURE_E008`): `years`, `months` and `days` are finite
+   * and at least 0, and the span ends inside the range a `Date` holds (±8.64e15 ms); `between` holds two
+   * moments (not an `Invalid Date`) with `from` not after `to`.
    */
   generateDate(
     options: {
@@ -1226,8 +1237,10 @@ export class IntegrationTester<
     } = {},
   ): Date {
     if (options.between) {
+      // An Invalid Date bound breaks the invariant inside `epochMilliseconds`.
       const fromTime = epochMilliseconds(options.between.from);
       const toTime = epochMilliseconds(options.between.to);
+      invariant(fromTime <= toTime, `generateDate: between.from must not be after between.to.`);
       const randomTime = this.generateBetween(fromTime, toTime);
       return new Date(randomTime);
     }
@@ -1235,37 +1248,26 @@ export class IntegrationTester<
     const now = Date.now();
 
     if (options.past) {
-      const { years = 0, months = 0, days = 0 } = options.past;
-      const msInDay = 24 * 60 * 60 * 1000;
-      const msInYear = 365 * msInDay;
-      const msInMonth = 30 * msInDay;
-
-      const totalMs = years * msInYear + months * msInMonth + days * msInDay;
-      const randomTime = this.generateBetween(now - totalMs, now);
+      const randomTime = this.generateBetween(now - spanMs('past', options.past), now);
       return new Date(randomTime);
     }
 
     if (options.future) {
-      const { years = 0, months = 0, days = 0 } = options.future;
-      const msInDay = 24 * 60 * 60 * 1000;
-      const msInYear = 365 * msInDay;
-      const msInMonth = 30 * msInDay;
-
-      const totalMs = years * msInYear + months * msInMonth + days * msInDay;
-      const randomTime = this.generateBetween(now, now + totalMs);
+      const randomTime = this.generateBetween(now, now + spanMs('future', options.future));
       return new Date(randomTime);
     }
 
     // Default: random date in past year
-    return new Date(this.generateBetween(now - 365 * 24 * 60 * 60 * 1000, now));
+    return new Date(this.generateBetween(now - 365 * MS_PER_DAY, now));
   }
 
   /**
-   * Generate a random number between min and max (inclusive)
+   * Generate a random whole number between min and max (inclusive)
    *
-   * @param min - Minimum value
-   * @param max - Maximum value
-   * @returns Random number
+   * @param min - Minimum value: a safe integer
+   * @param max - Maximum value: a safe integer, at least `min` (otherwise the invariant failure
+   *   `ARKI_FAILURE_E008` is thrown: a fraction or `min > max` gave values outside the range)
+   * @returns Random whole number
    *
    * @example
    * ```typescript
@@ -1274,6 +1276,10 @@ export class IntegrationTester<
    * ```
    */
   generateBetween(min: number, max: number): number {
+    invariant(
+      Number.isSafeInteger(min) && Number.isSafeInteger(max) && min <= max,
+      `generateBetween: min and max must be whole numbers with min <= max, got ${min} and ${max}.`,
+    );
     const hash = crypto.createHash('sha256').update(`${this.randomSeed}-${this.randomCounter++}`).digest('hex');
 
     // Use first 8 characters as hex number
@@ -1285,7 +1291,7 @@ export class IntegrationTester<
   /**
    * Generate a random value from an enum or array
    *
-   * @param values - Enum object or array of values
+   * @param values - Enum object or array of values; an empty one breaks the invariant `ARKI_FAILURE_E008`
    * @returns Random value
    *
    * @example
@@ -1298,6 +1304,7 @@ export class IntegrationTester<
    */
   generateFromEnum<T>(values: T[] | Record<string, T>): T {
     const valuesArray = Array.isArray(values) ? values : Object.values(values);
+    invariant(valuesArray.length > 0, 'generateFromEnum: values is empty, so there is nothing to pick.');
     const index = this.generateBetween(0, valuesArray.length - 1);
     return valuesArray[index]!;
   }
@@ -1409,6 +1416,54 @@ export class IntegrationTester<
 }
 
 export type * from './types.js';
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+/** The furthest a `Date` reaches from the epoch, either way, in milliseconds. */
+const MAX_DATE_MS = 8.64e15;
+/** The longest delay a runtime timer holds: 2^31 - 1 ms, about 24.8 days. */
+const MAX_TIMER_MS = 2_147_483_647;
+/** The characters of one SHA-256 digest in hex, the most `generateString` draws from. */
+const SHA256_HEX_LENGTH = 64;
+const stringSchema = z.string();
+
+/** A `generateDate` span in whole milliseconds; each part finite and at least 0, the span inside a `Date`'s range. */
+function spanMs(side: 'past' | 'future', span: { years?: number; months?: number; days?: number }): number {
+  const { years = 0, months = 0, days = 0 } = span;
+  for (const [unit, amount] of Object.entries({ years, months, days })) {
+    invariant(
+      Number.isFinite(amount) && amount >= 0,
+      `generateDate: ${side}.${unit} must be a finite number of at least 0, got ${amount}.`,
+    );
+  }
+  const totalMs = Math.round(years * 365 * MS_PER_DAY + months * 30 * MS_PER_DAY + days * MS_PER_DAY);
+  invariant(
+    totalMs <= MAX_DATE_MS,
+    `generateDate: the ${side} span reaches past the range a Date holds (8.64e15 ms from 1970).`,
+  );
+  return totalMs;
+}
+
+/** A string pattern as a RegExp; one that does not compile is a caller bug. */
+function compilePattern(pattern: string): RegExp {
+  try {
+    return new RegExp(pattern);
+  } catch {
+    invariant(false, `clearTablesByPattern: ${JSON.stringify(pattern)} is not a valid regular expression.`);
+  }
+}
+
+/** The same RegExp without `g` and `y`: with them `test` resumes at `lastIndex` and skips matches. */
+function statelessCopy(pattern: RegExp): RegExp {
+  return new RegExp(pattern.source, pattern.flags.replaceAll(/[gy]/g, ''));
+}
+
+/** The tables in `cleared` that `child` references by a foreign key whose delete Postgres would refuse. */
+function blockingParents(child: PgTable, cleared: readonly PgTable[]): PgTable[] {
+  return getTableConfig(child)
+    .foreignKeys.filter(foreignKey => foreignKey.onDelete !== 'cascade' && foreignKey.onDelete !== 'set null')
+    .map(foreignKey => foreignKey.reference().foreignTable)
+    .filter(parent => parent !== child && cleared.includes(parent));
+}
 
 /**
  * `tables` ordered so each comes before every other listed table it references through a foreign

@@ -142,6 +142,32 @@ describe('calculateSubscriptionTax and calculateOneTimeTax', () => {
     expect(requests).toEqual([]);
   });
 
+  it('calculateSubscriptionTax returns money.out_of_range for a plan price past 2^53 of Stripe units, and asks Stripe nothing', async () => {
+    const { tax, requests } = serviceAnswering(200, {});
+
+    const refused = await tax.calculateSubscriptionTax({
+      customerId: input.customerId,
+      planAmount: money('100000000000000000', 'USD'),
+      planInterval: 'yearly',
+    });
+
+    expect(refused).toMatchObject({ code: 'money.out_of_range' });
+    expect(requests).toEqual([]);
+  });
+
+  it('calculateSubscriptionTax returns money.provider_amount for a plan priced in a custom currency, and asks Stripe nothing', async () => {
+    const { tax, requests } = serviceAnswering(200, {});
+
+    const refused = await tax.calculateSubscriptionTax({
+      customerId: input.customerId,
+      planAmount: money('5', Currency.custom({ code: 'GEMS', scale: 0 })),
+      planInterval: 'monthly',
+    });
+
+    expect(refused).toMatchObject({ code: 'money.provider_amount' });
+    expect(requests).toEqual([]);
+  });
+
   it('calculateOneTimeTax returns TaxAddressIncomplete for an address with no country, and asks Stripe nothing', async () => {
     const { tax, requests } = serviceAnswering(200, {});
 

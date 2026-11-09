@@ -42,7 +42,7 @@ type Exists = FailureOf<typeof TaxRowExists>;
 
 /**
  * False when a text holds U+0000. No stored row can hold one, so a read for it finds nothing, and
- * Postgres would refuse it as a parameter (SQLSTATE 22021).
+ * Postgres would refuse it as a parameter (SQLSTATE 22021). Typed ids count: `txj_${string}` can hold one.
  */
 function findable(...texts: (string | undefined)[]): boolean {
   return texts.every(text => text === undefined || is(text, pgTextSchema));
@@ -83,6 +83,7 @@ async function lockJurisdiction(
   id: TaxJurisdictionId | null | undefined,
 ): Promise<NotFound | undefined> {
   if (id === undefined || id === null) return undefined;
+  if (!findable(id)) return TaxReferenceNotFound({ kind: 'jurisdiction', id });
   const [found] = await tx
     .select({ id: taxJurisdictions.id })
     .from(taxJurisdictions)
@@ -122,7 +123,9 @@ export class TaxConfigurationRepository {
     return TaxRowExists({ kind: 'configuration', id: data.id });
   }
 
+  /** Null too for an id no row can hold (U+0000), without a query. */
   async findConfigurationById(id: TaxConfigId): Promise<TaxConfig | null> {
+    if (!findable(id)) return null;
     const results = await this.db
       .select()
       .from(this.taxConfigurations)
@@ -160,6 +163,7 @@ export class TaxConfigurationRepository {
   ): Promise<TaxConfig | NotFound | SchemaFailure> {
     const row = parse(taxConfigurationRowSchema.partial(), data);
     if (isFailure(row)) return row;
+    if (!findable(id)) return TaxReferenceNotFound({ kind: 'configuration', id });
 
     const [updated] = await this.db
       .update(this.taxConfigurations)
@@ -174,6 +178,7 @@ export class TaxConfigurationRepository {
    * leaves the current default as it is: the new default is set before the old one is cleared.
    */
   async setDefaultConfiguration(id: TaxConfigId): Promise<TaxConfig | NotFound> {
+    if (!findable(id)) return TaxReferenceNotFound({ kind: 'configuration', id });
     const [updated] = await this.db
       .update(this.taxConfigurations)
       .set({ isDefault: true, updatedAt: now() })
@@ -191,7 +196,9 @@ export class TaxConfigurationRepository {
     return updated;
   }
 
+  /** An unknown id, or one no row can hold (U+0000), deletes nothing. */
   async deleteConfiguration(id: TaxConfigId): Promise<void> {
+    if (!findable(id)) return;
     await this.db.delete(this.taxConfigurations).where(eq(this.taxConfigurations.id, id));
   }
 }
@@ -237,7 +244,9 @@ export class TaxJurisdictionRepository {
     });
   }
 
+  /** Null too for an id no row can hold (U+0000), without a query. */
   async findJurisdictionById(id: TaxJurisdictionId): Promise<TaxJurisdiction | null> {
+    if (!findable(id)) return null;
     const results = await this.db
       .select()
       .from(this.taxJurisdictions)
@@ -320,6 +329,7 @@ export class TaxJurisdictionRepository {
   ): Promise<TaxJurisdiction | NotFound | SchemaFailure> {
     const row = parse(taxJurisdictionRowSchema.partial(), data);
     if (isFailure(row)) return row;
+    if (!findable(id)) return TaxReferenceNotFound({ kind: 'jurisdiction', id });
 
     return this.db.transaction(async tx => {
       const missing = await lockJurisdiction(tx, this.taxJurisdictions, data.parentId);
@@ -337,9 +347,11 @@ export class TaxJurisdictionRepository {
   /**
    * Deletes the jurisdiction. One that a child jurisdiction or an exemption still names returns
    * `TaxJurisdictionInUse` and is kept. The row is locked first, so a write that would point at it
-   * waits, and then finds it gone (`TaxReferenceNotFound`). An unknown id deletes nothing.
+   * waits, and then finds it gone (`TaxReferenceNotFound`). An unknown id, or one no row can hold
+   * (U+0000), deletes nothing.
    */
   async deleteJurisdiction(id: TaxJurisdictionId): Promise<FailureOf<typeof TaxJurisdictionInUse> | undefined> {
+    if (!findable(id)) return;
     return this.db.transaction(async tx => {
       const [found] = await tx
         .select({ id: this.taxJurisdictions.id })
@@ -416,7 +428,9 @@ export class TaxExemptionRepository {
     });
   }
 
+  /** Null too for an id no row can hold (U+0000), without a query. */
   async findExemptionById(id: TaxExemptionId): Promise<TaxExemption | null> {
+    if (!findable(id)) return null;
     const results = await this.db
       .select()
       .from(this.taxExemptions)
@@ -526,6 +540,7 @@ export class TaxExemptionRepository {
   }
 
   async findJurisdictionExemptions(jurisdictionId: TaxJurisdictionId): Promise<TaxExemption[]> {
+    if (!findable(jurisdictionId)) return [];
     return this.db
       .select()
       .from(this.taxExemptions)
@@ -582,6 +597,7 @@ export class TaxExemptionRepository {
   ): Promise<TaxExemption | NotFound | SchemaFailure> {
     const row = parse(taxExemptionRowSchema.partial(), data);
     if (isFailure(row)) return row;
+    if (!findable(id)) return TaxReferenceNotFound({ kind: 'exemption', id });
 
     return this.db.transaction(async tx => {
       // Lock the row, so the check and the write see the same stored values
@@ -623,6 +639,7 @@ export class TaxExemptionRepository {
   async approveExemption(id: TaxExemptionId, approvedBy: string): Promise<TaxExemption | NotFound | SchemaFailure> {
     const approver = parse(taxExemptionRowSchema.shape.approvedBy, approvedBy);
     if (isFailure(approver)) return approver;
+    if (!findable(id)) return TaxReferenceNotFound({ kind: 'exemption', id });
 
     const [approved] = await this.db
       .update(this.taxExemptions)
@@ -639,6 +656,7 @@ export class TaxExemptionRepository {
 
   /** The revoked row, or `TaxReferenceNotFound` when no exemption has `id`. */
   async revokeExemption(id: TaxExemptionId): Promise<TaxExemption | NotFound> {
+    if (!findable(id)) return TaxReferenceNotFound({ kind: 'exemption', id });
     const [revoked] = await this.db
       .update(this.taxExemptions)
       .set({ status: 'revoked', updatedAt: now() })
@@ -647,7 +665,9 @@ export class TaxExemptionRepository {
     return revoked ?? TaxReferenceNotFound({ kind: 'exemption', id });
   }
 
+  /** An unknown id, or one no row can hold (U+0000), deletes nothing. */
   async deleteExemption(id: TaxExemptionId): Promise<void> {
+    if (!findable(id)) return;
     await this.db.delete(this.taxExemptions).where(eq(this.taxExemptions.id, id));
   }
 

@@ -27,7 +27,7 @@ import { invalidConfig, isMailError } from './errors.js';
 import { failover } from './failover.js';
 import { MailUncertain } from './failures.js';
 import { errorField, log } from './log.js';
-import { checkMessage, listOf, redirect } from './message.js';
+import { checkIdempotencyKey, checkMessage, listOf, redirect } from './message.js';
 import { observeMail } from './telemetry.js';
 import { renderTemplate } from './template.js';
 
@@ -111,7 +111,7 @@ export function mailer(options: MailerOptions): Mailer {
     message: MailMessage,
     sendOptions: Pick<SendOptions, 'idempotencyKey' | 'signal'>,
   ): Promise<Result<SentMail, SendRawFailure>> => {
-    const invalid = checkMessage(message);
+    const invalid = checkMessage(message) ?? checkIdempotencyKey(sendOptions.idempotencyKey);
     if (invalid !== undefined) return fail(invalid, message.template);
     const outgoing = redirectTo === undefined ? message : redirect(message, redirectTo);
     await emit({ type: 'sending', transport: transport.id, template: message.template });

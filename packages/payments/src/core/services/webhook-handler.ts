@@ -17,9 +17,10 @@ import type { StripeChargeRefund } from './webhook-event-payloads.js';
 import type { WebhookSecurityService } from './webhook-security.js';
 import { refundIdSchema } from '../../refunds/primitives.js';
 import { REFUND_SETTLED_STATUSES, refundRunId } from '../../refunds/workflow.js';
+import { misconfigured } from '../failures.js';
 import { createWebhookId, webhookEventTypeValues } from '../primitives.js';
 import { observePayments } from '../telemetry.js';
-import { pgJsonRecordSchema, pgVarcharSchema } from '../pg-values.js';
+import { INT4_MAX, pgJsonRecordSchema, pgVarcharSchema } from '../pg-values.js';
 import {
   parseStripeCharge,
   parseStripeDispute,
@@ -105,27 +106,34 @@ export type WebhookEventData = {
   webhookId: WebhookId;
 };
 
-export type WebhookHandlerConfig = {
-  /** Attempts after which an unprocessed event is given up on, and the provider told to stop resending. */
-  maxRetries: number;
-  retryDelayMs: number;
+/** One year in milliseconds: the longest lease and retry delay the handler takes. */
+const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
+/** The handler's settings, checked when it is built. */
+const webhookHandlerConfigSchema = z.object({
+  /** Attempts after which an unprocessed event is given up on, and the provider told to stop resending. A whole number from 1 up. */
+  maxRetries: z.number().int().min(1).max(INT4_MAX),
+  /** Whole milliseconds, 0 to one year. */
+  retryDelayMs: z.number().int().min(0).max(YEAR_MS),
   /**
    * Answer before the event is processed. Off by default: the provider's
    * resends are the retry mechanism, and they only happen when the answer
    * says the event failed. An early answer turns every processing failure
    * into a lost event.
    */
-  enableAsync: boolean;
-  enableEventEmitter: boolean;
+  enableAsync: z.boolean(),
+  enableEventEmitter: z.boolean(),
   /**
    * How long an attempt may run before another delivery may take the event
    * over. An attempt older than this with no recorded error is treated as
-   * crashed.
+   * crashed. Whole milliseconds, 0 to one year.
    */
-  processingLeaseMs: number;
+  processingLeaseMs: z.number().int().min(0).max(YEAR_MS),
   /** Skip the source-address check. For routes with no real client address; the signature check still runs. */
-  skipIpValidation: boolean;
-};
+  skipIpValidation: z.boolean(),
+});
+
+export type WebhookHandlerConfig = z.output<typeof webhookHandlerConfigSchema>;
 
 // eslint-disable-next-line unicorn/prefer-event-target -- public API: apps subscribe with `.on('payment:refunded', ...)`; Node's EventEmitter is what they listen on
 export class WebhookHandler extends EventEmitter {
@@ -138,11 +146,12 @@ export class WebhookHandler extends EventEmitter {
     private readonly webhookSecurity: WebhookValidator,
     /** Every change of a `payments` or `subscriptions` row goes through the journal: `paymentsJournal.writes(run)`. */
     private readonly writes: WebhookWrites,
+    /** Throws `payments.configuration_invalid` for a count or duration outside its range (see `WebhookHandlerConfig`). */
     config: Partial<WebhookHandlerConfig> = {},
     private readonly refunds?: WebhookRefunds,
   ) {
     super();
-    this.config = {
+    const merged = {
       maxRetries: 3,
       retryDelayMs: 1000,
       enableAsync: false,
@@ -151,6 +160,15 @@ export class WebhookHandler extends EventEmitter {
       skipIpValidation: false,
       ...config,
     };
+    // A count or a duration the handler cannot use fails here, not on the first delivery
+    const checked = webhookHandlerConfigSchema.safeParse(merged);
+    if (!checked.success) {
+      throw misconfigured(
+        'webhookHandler',
+        checked.error.issues.map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`).join('; '),
+      );
+    }
+    this.config = merged;
   }
 
   /**

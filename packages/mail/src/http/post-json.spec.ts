@@ -122,3 +122,78 @@ describe('a bad timeoutMs fails when the transport is built (audit-2 #12)', () =
     expect(resend({ apiKey: 're_x', timeoutMs: MAX_TIMEOUT_MS }).id).toBe('resend');
   });
 });
+
+// Why (audit-3 #10): `fetch` refuses a header value with a line break, a NUL character or a character above
+// U+00FF before sending, so a bad key made every send `mail.uncertain` ("the mail may have been sent") although
+// nothing went out. A bad key is a configuration mistake: it must fail when the transport is built.
+describe('a key no HTTP header can carry fails when the transport is built (audit-3 #10)', () => {
+  const builders = {
+    resend: (key: string) => resend({ apiKey: key }),
+    unosend: (key: string) => unosend({ apiKey: key }),
+    cloudflare: (key: string) => cloudflare({ accountId: 'acc', apiToken: key }),
+    'ses accessKeyId': (key: string) =>
+      ses({ region: 'eu-west-1', credentials: { accessKeyId: key, secretAccessKey: 's' } }),
+    'ses sessionToken': (key: string) =>
+      ses({ region: 'eu-west-1', credentials: { accessKeyId: 'AKID', secretAccessKey: 's', sessionToken: key } }),
+  };
+  const bad = ['re_x\n', 're_\rx', 're_\u0000x', 're_🙂', 're_\u0100', 're_\uD800'];
+  it.each(Object.entries(builders).flatMap(([name, build]) => bad.map(key => [name, key, build] as const)))(
+    '%s with key %j throws MailError ARKI_MAIL_E001 without echoing the key',
+    (_name, key, build) => {
+      let thrown: unknown;
+      try {
+        build(key);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toMatchObject({ name: 'MailError', code: MAIL_ERROR_CODES.invalidConfig });
+      expect(String(thrown)).toMatch(/no HTTP header can carry/);
+      expect(String(thrown)).not.toContain(key);
+    },
+  );
+
+  it('a Latin-1 key with surrounding spaces is accepted (fetch trims and sends it)', () => {
+    expect(resend({ apiKey: ' re_é ' }).id).toBe('resend');
+  });
+
+  it('a bad key no longer reaches fetch as an uncertain send', () => {
+    let calls = 0;
+    expect(() =>
+      resend({
+        apiKey: 're_x\n',
+        fetch: () => {
+          calls += 1;
+          return Promise.resolve(new Response('{}'));
+        },
+      }),
+    ).toThrow(expect.objectContaining({ code: MAIL_ERROR_CODES.invalidConfig }));
+    expect(calls).toBe(0);
+  });
+});
+
+// Why: these values also make the request fail before it is sent (fetch refuses the URL, encodeURIComponent
+// throws a raw URIError, the AWS SDK refuses the region), which read as an uncertain send or a raw throw.
+describe('other transport settings no request can use fail when the transport is built', () => {
+  const invalidConfig = expect.objectContaining({ name: 'MailError', code: MAIL_ERROR_CODES.invalidConfig });
+
+  it.each(['not a url', 'ftp://localhost:8025', 'http://user:pass@localhost:8025', ''])(
+    'mailpit baseUrl %j throws ARKI_MAIL_E001',
+    baseUrl => {
+      expect(() => mailpit({ baseUrl })).toThrow(invalidConfig);
+    },
+  );
+
+  it.each(['', '  ', 'acc\uD800'])('cloudflare accountId %j throws ARKI_MAIL_E001', accountId => {
+    expect(() => cloudflare({ accountId, apiToken: 'tok' })).toThrow(invalidConfig);
+  });
+
+  it.each(['', 'eu west', 'eu-west-1\n', '-eu', 'eu-', 'a'.repeat(64)])('ses region %j throws ARKI_MAIL_E001', region => {
+    expect(() => ses({ region })).toThrow(invalidConfig);
+  });
+
+  it('accepts the usual values', () => {
+    expect(mailpit({ baseUrl: 'https://mail.test/' }).id).toBe('mailpit');
+    expect(cloudflare({ accountId: '023e105f4ecef8ad9ca31a8372d0c353', apiToken: 'tok' }).id).toBe('cloudflare');
+    expect(ses({ region: 'us-gov-west-1' }).id).toBe('ses');
+  });
+});

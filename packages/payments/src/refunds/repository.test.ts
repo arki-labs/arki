@@ -62,6 +62,17 @@ describe('RefundRepository.findByProviderRefundId with U+0000', () => {
   it('finds nothing', async () => {
     expect(await repo.findByProviderRefundId('re_\u0000')).toBeNull();
   });
+
+  // Typed ids (`rfnd${string}`, `pay_${string}`, `usr_${string}`) can hold U+0000 too; each of these sent it and
+  // rejected with a raw 22021. The empty answer comes back instead, and no query is sent
+  it('finds nothing by a typed id holding U+0000, and totals zero', async () => {
+    expect(await repo.findById('rfnd\u0000')).toBeNull();
+    expect(await repo.findByPaymentId('pay_\u0000')).toEqual([]);
+    expect(await repo.findByUser('usr_\u0000')).toEqual([]);
+    expect(await repo.searchRefunds({ userId: 'usr_\u0000' })).toEqual([]);
+    const total = await repo.getTotalRefundedAmount('pay_\u0000', 'USD');
+    expect(total.toString()).toBe('0.00 USD');
+  });
 });
 
 describe('RefundRepository.getRefundMetrics', () => {

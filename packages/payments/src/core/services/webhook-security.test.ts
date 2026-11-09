@@ -252,3 +252,35 @@ describe('WebhookSecurityService: providers without verification', () => {
     expect(result).toMatchObject({ isValid: false, error: 'Invalid timestamp format' });
   });
 });
+
+describe('WebhookSecurityService: a window it cannot enforce fails when it is built', () => {
+  it.each([
+    ['a NaN window, which would let every timestamp through', { replayWindowSeconds: Number.NaN }],
+    ['a fractional window', { replayWindowSeconds: 1.5 }],
+    ['no window at all', { replayWindowSeconds: 0 }],
+    ['a window past one day', { replayWindowSeconds: 86_401 }],
+    ['a negative retry count', { maxRetries: -1 }],
+  ])('%s is payments.configuration_invalid', (_what, change) => {
+    expect(() => new WebhookSecurityService({ allowedIps: [ALLOWED_IP], replayWindowSeconds: 300, maxRetries: 3, ...change })).toThrow(
+      expect.objectContaining({ code: 'payments.configuration_invalid' }),
+    );
+  });
+});
+
+describe('WebhookSecurityService: the body is read through a JSON schema', () => {
+  it('a signed body with a non-string type is valid but names no event', async () => {
+    const payload = JSON.stringify({ id: EVENT_ID, object: 'event', type: 42, data: { object: {} } });
+
+    const result = await validateStripe(payload, sign(payload));
+
+    expect(result).toMatchObject({ isValid: true, provider: 'stripe', eventType: undefined, data: { type: 42 } });
+  });
+
+  it('a signed body that is not an object hands back empty data', async () => {
+    const payload = '[1,2,3]';
+
+    const result = await validateStripe(payload, sign(payload));
+
+    expect(result).toMatchObject({ isValid: true, data: {} });
+  });
+});

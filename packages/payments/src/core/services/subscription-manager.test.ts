@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
 import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
-import { Money } from '@arki/money';
+import { Money, UnknownCurrency } from '@arki/money';
 
 import type { AppDb } from '../../test-support.js';
 import type { CoreWrites } from '../journal.js';
@@ -457,6 +457,43 @@ describe('a journal refusal after the provider answered is handed back unchanged
 
     expect(result).toMatchObject({ code: 'schema.invalid_input' });
     expect(await countEvents(db)).toBe(eventsBefore);
+  });
+});
+
+describe('updateSubscription hands back a money failure of the provider preview', () => {
+  it('returns money.unknown_currency from the preview, asks for no change and writes nothing', async () => {
+    const { id } = await seedSubscription(writes, 'active');
+    const rowBefore = await subscriptionRow(db, id);
+    const eventsBefore = await countEvents(db);
+    const manager = new SubscriptionManager(
+      {
+        ...providerReporting(current => current),
+        previewSubscriptionChange: () => Promise.resolve(UnknownCurrency()),
+        updateSubscription: unexpectedCall('updateSubscription'),
+      },
+      reads,
+      writes,
+    );
+
+    const result = await manager.updateSubscription(id, planId);
+
+    expect(result).toMatchObject({ code: 'money.unknown_currency' });
+    expect(await subscriptionRow(db, id)).toEqual(rowBefore);
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+});
+
+describe('createSubscription refuses a trial length the contract refuses', () => {
+  it.each([Number.NaN, 1.5, 0, 366])('trialPeriodDays %s breaks the stated precondition before any read or provider call', async days => {
+    const manager = new SubscriptionManager(
+      providerReporting(current => current),
+      { ...reads, findCustomerByUserId: unexpectedCall('findCustomerByUserId'), findPlanById: unexpectedCall('findPlanById') },
+      writes,
+    );
+
+    await expect(manager.createSubscription(adminId, planId, { trialPeriodDays: days })).rejects.toMatchObject({
+      code: FAILURE_ERROR_CODES.invariant,
+    });
   });
 });
 

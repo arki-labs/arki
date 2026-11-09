@@ -17,6 +17,8 @@ import { test as base } from '@playwright/test';
 import type { TestType } from '@playwright/test';
 
 import { orThrow } from '@arki/failure';
+import { is } from '@arki/schema';
+import { z } from 'zod';
 import { getLogger } from '@arki/log';
 
 import type { MailpitWorker, Mailbox, MailSummary, ReceivedMail } from '../services/mailpit.js';
@@ -86,6 +88,10 @@ type TestFixtures<TUser, TFactories> = {
   freshWorker: undefined;
   serverLog: undefined;
   actingAs(user?: { readonly email?: string }): Promise<Actor<TUser>>;
+  /**
+   * Posts to `/api/cron/<name>` with the stack's cron secret. Throws `CRON_FAILED` for a status that is not
+   * ok and `CRON_BAD_BODY` for an answer that is not JSON (an empty answer is `null`).
+   */
   cron: { run(name: string): Promise<CronRun> };
   factories: TFactories;
 };
@@ -179,9 +185,8 @@ export function e2eTest<M extends E2EServices, TServices, TUser, TFactories>(
         async run(name) {
           const response = await request.post(`/api/cron/${name}`, { headers: { authorization: `Bearer ${secret}` }, timeout: 0 });
           const text = await response.text();
-          const body: unknown = text === '' ? null : JSON.parse(text);
           if (!response.ok()) throw new Error(`CRON_FAILED: ${name} answered ${response.status()}: ${text}`);
-          return { status: response.status(), body };
+          return { status: response.status(), body: cronBody(name, text) };
         },
       });
     },
@@ -219,12 +224,24 @@ export function e2eTest<M extends E2EServices, TServices, TUser, TFactories>(
   return { test, expect, story };
 }
 
+/** A cron route's answer as JSON (`null` when empty). Text that is not JSON is the app's bug, named as such. */
+function cronBody(name: string, text: string): unknown {
+  if (text === '') return null;
+  try {
+    const body: unknown = JSON.parse(text);
+    return body;
+  } catch {
+    throw new Error(`CRON_BAD_BODY: ${name} answered text that is not JSON: ${text.slice(0, 200)}`);
+  }
+}
+
+/** What a service that serves HTTP publishes for a worker: at least its `url`. */
+const publishedUrlSchema = z.object({ url: z.string() });
+
 /** The `url` a service published for this worker, when the stack has that service. */
 function urlOf(values: object, service: string): string | undefined {
   const published: unknown = Reflect.get(values, service);
-  if (typeof published !== 'object' || published === null) return undefined;
-  const url: unknown = Reflect.get(published, 'url');
-  return typeof url === 'string' ? url : undefined;
+  return is(published, publishedUrlSchema) ? published.url : undefined;
 }
 
 /** `name=value` from a `cookie` header, installed on the browser context for the server's host. */

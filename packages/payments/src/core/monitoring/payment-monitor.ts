@@ -2,6 +2,7 @@ import type { Instant } from '@arki/date';
 import type { KV } from '@arki/kv';
 import type { Money } from '@arki/money';
 import { now, sub } from '@arki/date';
+import { invariant } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { PaymentRepository } from '../repository.js';
@@ -78,6 +79,11 @@ type PaymentSystemHealth = {
 /** The stored counts the monitor reads. A `PaymentRepository` fits. */
 type MonitorReads = Pick<PaymentRepository, 'getActiveSubscriptionCount' | 'countPaymentsCreatedBetween'>;
 
+/** The precondition of a measured duration: a finite number of milliseconds, 0 or more. */
+function assertDuration(value: number, name: string): void {
+  invariant(Number.isFinite(value) && value >= 0, () => `[@arki/payments] ${name} must be a finite number of milliseconds, 0 or more`);
+}
+
 /** How many past hours the payment volume of the last hour is compared with. */
 const VOLUME_HISTORY_HOURS = 24;
 
@@ -130,8 +136,13 @@ export class PaymentMonitoringService {
    * (`kv.unavailable`, `kv.cancelled`) when a metric or an alert was not persisted.
    */
 
-  /** `outcome` (`success` or `failure`) is what the success and refund rates count; `status` is the payment's own. */
+  /**
+   * `outcome` (`success` or `failure`) is what the success and refund rates count; `status` is the payment's own.
+   * `result.processingTime` is a finite number of milliseconds, 0 or more (a precondition: anything else
+   * throws an invariant failure before anything is recorded).
+   */
   async recordPaymentAttempt(result: PaymentResult): Promise<KvWriteFailure | undefined> {
+    assertDuration(result.processingTime, 'processingTime');
     const outcome = result.success ? 'success' : 'failure';
     const writes = [
       await this.recordMetric('payment_attempts_total', 1, { status: result.status, outcome }),
@@ -161,7 +172,12 @@ export class PaymentMonitoringService {
     return writes.find(write => write !== undefined);
   }
 
+  /**
+   * `duration` is a finite number of milliseconds, 0 or more (a precondition: anything else throws an
+   * invariant failure before anything is recorded).
+   */
   async recordWebhookProcessing(duration: number, success: boolean): Promise<KvWriteFailure | undefined> {
+    assertDuration(duration, 'duration');
     const outcome = success ? 'success' : 'failure';
     const writes = [
       await this.recordMetric('webhook_processing_time', duration),

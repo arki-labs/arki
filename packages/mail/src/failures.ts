@@ -109,8 +109,10 @@ export const MailExpired = defineFailure('mail.expired', {
 /**
  * The message cannot be sent as written: no recipient, an empty address, a line break in an address,
  * the subject or a header (header injection), a header the message owns, or a NUL character (U+0000)
- * in any field. `enqueue` also returns it for an `idempotencyKey` that is empty, holds NUL or is over
- * 256 characters (the journal's dedupe column). Nothing was sent or queued.
+ * in any field. `send` and `sendRaw` also return it for an `idempotencyKey` holding a line break, a NUL
+ * character or a character above U+00FF (it travels as an HTTP header). `enqueue` also returns it for an
+ * `idempotencyKey` that is empty, holds NUL or is over 256 characters (the journal's dedupe column).
+ * Nothing was sent or queued.
  * Recipients are usually typed by a user, so this is an expected outcome, not a bug.
  *
  * @fix Show the user what is wrong with the address, or remove the line break, NUL character or reserved header. The same message fails again.

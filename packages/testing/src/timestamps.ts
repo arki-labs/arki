@@ -7,41 +7,55 @@
  * never depend on a time zone.
  */
 
-import type { Timeline } from '@arki/date/types';
-import { isInstant, isZonedDateTime } from '@arki/date/types';
+import { z } from 'zod';
+
+import { invariant } from '@arki/failure';
+import { Temporal } from '@arki/date/types';
+import { is, recordSchema } from '@arki/schema';
+
+/** A `Date` that holds a time (zod refuses `Invalid Date`), a Temporal `Instant`, or a `ZonedDateTime`. */
+const timestampSchema = z.union([z.date(), z.instanceof(Temporal.Instant), z.instanceof(Temporal.ZonedDateTime)]);
 
 /** A moment in time: a `Date`, or a Temporal `Instant` or `ZonedDateTime`. */
-export type Timestamp = Date | Timeline;
+export type Timestamp = z.output<typeof timestampSchema>;
 
 /** An object with the two timestamps every table row carries. */
 export type Timestamps = { createdAt: Timestamp; updatedAt: Timestamp };
 
 const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
 
-function isValidDate(value: unknown): value is Date {
-  return value instanceof Date && !Number.isNaN(value.getTime());
-}
-
 /** Whether a value is a `Date` (not `Invalid Date`), `Instant` or `ZonedDateTime`. */
 export function isTimestamp(value: unknown): value is Timestamp {
-  return isValidDate(value) || isInstant(value) || isZonedDateTime(value);
+  return is(value, timestampSchema);
 }
 
 /** Name the kind of a value that failed `isTimestamp`, for an error message. */
 export function describeKind(value: unknown): string {
-  if (value instanceof Date) {
+  if (is(value, z.instanceof(Date))) {
     return 'an invalid Date';
   }
 
   return typeof value;
 }
 
-/** The exact epoch of a timestamp in nanoseconds, whatever its kind. */
+/**
+ * The exact epoch of a timestamp in nanoseconds, whatever its kind.
+ *
+ * @throws FailureError `ARKI_FAILURE_E008` (invariant) for an `Invalid Date`: it holds no moment. Check
+ *   untrusted values with {@link isTimestamp} first.
+ */
 export function epochNanoseconds(value: Timestamp): bigint {
-  return value instanceof Date ? BigInt(value.getTime()) * NANOSECONDS_PER_MILLISECOND : value.epochNanoseconds;
+  if (!(value instanceof Date)) return value.epochNanoseconds;
+  const milliseconds = value.getTime();
+  invariant(!Number.isNaN(milliseconds), 'epochNanoseconds: the Date is an Invalid Date and holds no moment.');
+  return BigInt(milliseconds) * NANOSECONDS_PER_MILLISECOND;
 }
 
-/** The epoch of a timestamp in whole milliseconds, rounded toward the past. */
+/**
+ * The epoch of a timestamp in whole milliseconds, rounded toward the past.
+ *
+ * @throws FailureError `ARKI_FAILURE_E008` (invariant) for an `Invalid Date`, as {@link epochNanoseconds}.
+ */
 export function epochMilliseconds(value: Timestamp): number {
   const nanoseconds = epochNanoseconds(value);
   const milliseconds = nanoseconds / NANOSECONDS_PER_MILLISECOND;
@@ -60,16 +74,16 @@ function format(value: Timestamp): string {
  *   a `Date`, `Instant` or `ZonedDateTime`, or is an invalid `Date`
  */
 export function assertTimestamps(obj: unknown): asserts obj is Timestamps {
-  if (!obj || typeof obj !== 'object') {
+  if (!is(obj, recordSchema)) {
     throw new Error('Expected object with timestamps');
   }
 
-  const createdAt = 'createdAt' in obj ? obj.createdAt : undefined;
+  const createdAt = obj['createdAt'];
   if (!isTimestamp(createdAt)) {
     throw new TypeError(`Expected createdAt to be a Date, Instant or ZonedDateTime, got ${describeKind(createdAt)}`);
   }
 
-  const updatedAt = 'updatedAt' in obj ? obj.updatedAt : undefined;
+  const updatedAt = obj['updatedAt'];
   if (!isTimestamp(updatedAt)) {
     throw new TypeError(`Expected updatedAt to be a Date, Instant or ZonedDateTime, got ${describeKind(updatedAt)}`);
   }
@@ -79,6 +93,7 @@ export function assertTimestamps(obj: unknown): asserts obj is Timestamps {
  * Assert that updatedAt is greater than or equal to createdAt.
  *
  * @throws Error if updatedAt is before createdAt
+ * @throws FailureError `ARKI_FAILURE_E008` (invariant) if either is an `Invalid Date`
  */
 export function assertUpdatedAfterCreated(obj: Timestamps): void {
   if (epochNanoseconds(obj.updatedAt) < epochNanoseconds(obj.createdAt)) {

@@ -16,7 +16,7 @@ import { startPostgresContainer } from '@arki/testing/containers';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 
 import { createUserId } from '../../ids.js';
 
@@ -42,8 +42,15 @@ const visits = pgTable('visits', {
     .notNull()
     .references(() => owners.id),
 });
-const relations = defineRelations({ widgets, owners, pets, visits }, () => ({}));
-const schema = { widgets, widgetKind, owners, pets, visits, relations };
+// A child whose foreign key cascades: Postgres deletes its rows with the parent's, so it never blocks a clear.
+const collars = pgTable('collars', {
+  id: integer('id').primaryKey(),
+  petId: integer('pet_id')
+    .notNull()
+    .references(() => pets.id, { onDelete: 'cascade' }),
+});
+const relations = defineRelations({ widgets, owners, pets, visits, collars }, () => ({}));
+const schema = { widgets, widgetKind, owners, pets, visits, collars, relations };
 
 type AppDb = NodePgDatabase<typeof relations>;
 type Handle = AppDb | NodePgTransaction<typeof relations>;
@@ -81,6 +88,9 @@ describe('IntegrationTester.clearAllTables', () => {
     await db.execute(
       sql`create table visits (id integer primary key, pet_id integer not null references pets(id), owner_id integer not null references owners(id))`,
     );
+    await db.execute(
+      sql`create table collars (id integer primary key, pet_id integer not null references pets(id) on delete cascade)`,
+    );
   }, 120_000);
 
   afterAll(async () => {
@@ -95,6 +105,7 @@ describe('IntegrationTester.clearAllTables', () => {
     await database.insert(owners).values({ id: 1 });
     await database.insert(pets).values({ id: 1, ownerId: 1 });
     await database.insert(visits).values({ id: 1, petId: 1, ownerId: 1 });
+    await database.insert(collars).values({ id: 1, petId: 1 });
     const tester = new AttachedTester({
       schema,
       migrationsFolder: '',
@@ -136,6 +147,46 @@ describe('IntegrationTester.clearAllTables', () => {
 
     expect(await database.select().from(widgets)).toEqual([{ id: 1, name: 'one' }]);
     expect(await database.select().from(visits)).toEqual([]);
+    expect(await database.select().from(collars)).toEqual([]);
+    await tester.clearAllTables();
+  });
+
+  // Why (audit-3 #9): a set that leaves out a table referencing one it clears made Postgres refuse the parent's
+  // delete half-way through, as a raw 23503 after some tables were already emptied. It is the caller's bug, so it
+  // is the invariant failure, named with the missing tables, before any row is deleted.
+  it('refuses, before deleting anything, a set that leaves out a table referencing a cleared one', async () => {
+    const { database, tester } = await seeded();
+    const invariantBroken = expect.objectContaining({ code: FAILURE_ERROR_CODES.invariant });
+
+    await expect(tester.clearTablesByPattern(/^(owners|pets)$/)).rejects.toThrow(invariantBroken);
+    await expect(tester.clearTablesByPattern(/^(owners|pets)$/)).rejects.toThrow(/without visits/);
+    await expect(tester.clearTables(owners)).rejects.toThrow(invariantBroken);
+    await expect(tester.clearTablesExcept(visits)).rejects.toThrow(invariantBroken);
+
+    expect(await database.select().from(owners)).toEqual([{ id: 1 }]);
+    expect(await database.select().from(pets)).toEqual([{ id: 1, ownerId: 1 }]);
+    await tester.clearAllTables();
+  });
+
+  // Why (audit-3 #9): `test` on a `g` or `y` RegExp resumes at `lastIndex`, so every other matching table was skipped.
+  it.each([/^(owners|pets|visits)$/g, /^(owners|pets|visits)$/y])('a %s pattern still clears every matching table', async pattern => {
+    const { database, tester } = await seeded();
+
+    await tester.clearTablesByPattern(pattern);
+
+    expect(await database.select().from(owners)).toEqual([]);
+    expect(await database.select().from(pets)).toEqual([]);
+    expect(await database.select().from(visits)).toEqual([]);
+    expect(await database.select().from(widgets)).toEqual([{ id: 1, name: 'one' }]);
+    await tester.clearAllTables();
+  });
+
+  it('a string pattern that is not a regular expression is the invariant failure, not a raw SyntaxError', async () => {
+    const { tester } = await seeded();
+
+    await expect(tester.clearTablesByPattern('(')).rejects.toThrow(
+      expect.objectContaining({ code: FAILURE_ERROR_CODES.invariant }),
+    );
     await tester.clearAllTables();
   });
 });

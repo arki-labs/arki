@@ -11,6 +11,7 @@ import { orThrow } from '@arki/failure';
 import type { MailEvent, MailMessage, MailTransport } from './types.js';
 import { MAIL_ERROR_CODES, MailError } from './errors.js';
 import { MailInvalidInput, MailInvalidMessage, MailQuotaExhausted, MailUncertain } from './failures.js';
+import { resend } from './http/resend.js';
 import { logTransport } from './log-transport.js';
 import { mailer } from './mailer.js';
 import { defineTemplate } from './template.js';
@@ -116,6 +117,43 @@ describe('an unsent mail is a returned failure; misuse throws', () => {
     expect(MailUncertain.is(await mail.sendRaw({ to: 'a@b.c', subject: 's', text: 't' }))).toBe(true);
     const failed = events.find(event => event.type === 'failed');
     expect(failed?.type === 'failed' && MailUncertain.is(failed.failure)).toBe(true);
+  });
+});
+
+// Why (audit-3 #10): Resend sends the key as an `Idempotency-Key` header, and `fetch` refuses a line break or a
+// character above U+00FF before sending, so such a key read as an uncertain send although nothing went out.
+describe('an idempotencyKey no HTTP header can carry is an invalid message', () => {
+  it.each(['retry\nkey', 'nul\u0000key', 'emoji-🙂', 'accent-\u0101'])(
+    'sendRaw with idempotencyKey %j returns MailInvalidMessage and never calls fetch',
+    async idempotencyKey => {
+      let calls = 0;
+      const transport = resend({
+        apiKey: 're_x',
+        fetch: () => {
+          calls += 1;
+          return Promise.resolve(new Response('{"id":"e1"}', { status: 200 }));
+        },
+      });
+      const mail = mailer({ transport, from: 'hi@app.dev' });
+      const result = await mail.sendRaw({ to: 'ada@example.com', subject: 's', text: 't' }, { idempotencyKey });
+      expect(result).toMatchObject({ code: 'mail.invalid_message' });
+      expect(MailInvalidMessage.is(result)).toBe(true);
+      expect(calls).toBe(0);
+    },
+  );
+
+  it('a Latin-1 key still goes out as the Idempotency-Key header', async () => {
+    const seen: (string | null)[] = [];
+    const transport = resend({
+      apiKey: 're_x',
+      fetch: (_url, init) => {
+        seen.push(new Headers(init?.headers).get('idempotency-key'));
+        return Promise.resolve(new Response('{"id":"e1"}', { status: 200 }));
+      },
+    });
+    const mail = mailer({ transport, from: 'hi@app.dev' });
+    await orThrow(mail.sendRaw({ to: 'ada@example.com', subject: 's', text: 't' }, { idempotencyKey: 'order-42-é' }));
+    expect(seen).toEqual(['order-42-é']);
   });
 });
 

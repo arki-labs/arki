@@ -7,7 +7,11 @@
 export const MAIL_ERROR_CODES = {
   /**
    * No transport, a duplicate transport id, an empty key or sender, a transport SDK that cannot load,
-   * a transport `timeoutMs` that is not more than 0 and at most 2^31 - 1.
+   * a transport `timeoutMs` that is not more than 0 and at most 2^31 - 1, an API key or token (or an
+   * SES key id or session token) holding a line break, a NUL character or a character above U+00FF,
+   * a Mailpit `baseUrl` that is not an http(s) URL without credentials, an empty or malformed
+   * Cloudflare `accountId`, an SES `region` that is not a host name label, a `quotaPerMonth` that is
+   * not a whole number of at least 0, or an outbox `maxBytes` that is not a whole number above 0.
    *
    * @fix Pass one transport with a unique id and a sender, and install the transport's SDK peer.
    * @verify bun run test -- src/mailer.spec.ts

@@ -15,6 +15,7 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { sql } from 'drizzle-orm';
 
+import { invariant } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 /**
@@ -175,7 +176,8 @@ export async function dumpDatabase<TSchema extends AnyRelations>(db: NodePgDatab
  *
  * @param db - Database instance
  * @param tableName - Name of the table to dump
- * @param limit - Maximum number of rows to display (default: 10)
+ * @param limit - Maximum number of rows to display (default: 10): a whole number of at least 0, or the
+ *   invariant failure `ARKI_FAILURE_E008` is thrown (`LIMIT NaN` was a SQL error)
  *
  * @example
  * ```typescript
@@ -187,6 +189,10 @@ export async function dumpTable<TSchema extends AnyRelations>(
   tableName: string,
   limit = 10,
 ): Promise<void> {
+  invariant(
+    Number.isSafeInteger(limit) && limit >= 0,
+    `dumpTable: limit must be a whole number of at least 0, got ${limit}.`,
+  );
   if (!debugEnabled) return;
 
   try {

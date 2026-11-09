@@ -26,7 +26,7 @@ import type { Mailer } from '../mailer.js';
 import type { MailTemplate, renderTemplate } from '../template.js';
 import type { SendOptions } from '../types.js';
 import type { QueuedArgs } from './args.js';
-import { isMailError, MAIL_ERROR_CODES, MailError } from '../errors.js';
+import { invalidConfig, isMailError, MAIL_ERROR_CODES, MailError } from '../errors.js';
 import {
   MailEnqueueContended,
   MailExpired,
@@ -57,7 +57,7 @@ export type MailOutboxOptions = {
   readonly tables: Pick<JournalTables, 'jobs'>;
   /** Waits between tries. Default: 5 s doubling to 1 h, 5 tries in all. */
   readonly retry?: Backoff;
-  /** Largest stored message, in bytes of JSON. Default 256 KiB. */
+  /** Largest stored message, in bytes of JSON. Default 256 KiB. A whole number above 0, or `mailOutbox` throws `ARKI_MAIL_E001`. */
   readonly maxBytes?: number;
 };
 
@@ -127,6 +127,9 @@ export function mailOutbox(options: MailOutboxOptions): MailOutbox {
   const { mailer, tables } = options;
   const retry = options.retry ?? DEFAULT_RETRY;
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+  // NaN would let every mail through and a negative size would refuse every mail, silently.
+  if (!(Number.isSafeInteger(maxBytes) && maxBytes > 0))
+    invalidConfig(`mailOutbox: \`maxBytes\` must be a whole number of bytes above 0, got ${maxBytes}.`);
   // The journal's wake channel: every journal worker of this table hears it.
   const tableSchema = getTableConfig(tables.jobs).schema;
   const channel = tableSchema === undefined ? 'journal_wake' : `${tableSchema}_journal_wake`;

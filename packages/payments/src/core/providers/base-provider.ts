@@ -1,5 +1,5 @@
 import type { IdGenerationFailure } from '@arki/contracts';
-import type { FailureOf, Result } from '@arki/failure';
+import type { FailureOf, Result, SchemaFailure } from '@arki/failure';
 import type { Money, MoneyFailure } from '@arki/money';
 
 import type { RefundId } from '../../refunds/primitives.js';
@@ -62,6 +62,11 @@ export type ProviderRefundResult = {
   failureReason: string | null;
 };
 
+/**
+ * What every payment provider implements. A call that takes `metadata` returns `SchemaFailure`
+ * (`schema.invalid_input`) before any request for metadata a jsonb column cannot store (a `bigint`
+ * anywhere, U+0000 in a key or a string).
+ */
 export abstract class BasePaymentProvider {
   protected config: PaymentProviderConfig;
   abstract readonly providerType: PaymentProviderType;
@@ -76,7 +81,7 @@ export abstract class BasePaymentProvider {
     email: string;
     name?: string;
     metadata?: Record<string, unknown>;
-  }): Promise<Result<Customer, IdGenerationFailure>>;
+  }): Promise<Result<Customer, IdGenerationFailure | SchemaFailure>>;
 
   abstract getCustomer(customerId: CustomerId): Promise<Customer | null>;
 
@@ -87,7 +92,7 @@ export abstract class BasePaymentProvider {
       name?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<Result<Customer, NotFound>>;
+  ): Promise<Result<Customer, NotFound | SchemaFailure>>;
 
   abstract deleteCustomer(customerId: CustomerId): Promise<Result<undefined, NotFound>>;
 
@@ -102,7 +107,7 @@ export abstract class BasePaymentProvider {
     intervalCount?: number;
     trialPeriodDays?: number;
     metadata?: Record<string, unknown>;
-  }): Promise<Result<Plan, IdGenerationFailure | BadAmount>>;
+  }): Promise<Result<Plan, IdGenerationFailure | BadAmount | SchemaFailure>>;
 
   /** `null` when the plan has no row; `ReferenceNotFound` when its row has no provider price. */
   abstract getPlan(planId: PlanId): Promise<Result<Plan | null, NotFound | NotFlat | BadAmount>>;
@@ -113,7 +118,7 @@ export abstract class BasePaymentProvider {
       name?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<Result<Plan, NotFound | NotFlat | BadAmount>>;
+  ): Promise<Result<Plan, NotFound | NotFlat | BadAmount | SchemaFailure>>;
 
   abstract deletePlan(planId: PlanId): Promise<Result<undefined, NotFound>>;
 
@@ -128,7 +133,7 @@ export abstract class BasePaymentProvider {
     metadata?: Record<string, unknown>;
     /** Same key, same parameters: the provider returns the first result instead of creating a second subscription. */
     idempotencyKey?: string;
-  }): Promise<Result<Subscription, Declined | Conflict | NotFound | IdGenerationFailure>>;
+  }): Promise<Result<Subscription, Declined | Conflict | NotFound | IdGenerationFailure | SchemaFailure>>;
 
   abstract getSubscription(subscriptionId: SubscriptionId): Promise<Subscription | null>;
 
@@ -143,7 +148,7 @@ export abstract class BasePaymentProvider {
       prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
       idempotencyKey?: string;
     },
-  ): Promise<Result<Subscription, Declined | Conflict | NotFound>>;
+  ): Promise<Result<Subscription, Declined | Conflict | NotFound | SchemaFailure>>;
 
   abstract cancelSubscription(
     subscriptionId: SubscriptionId,
@@ -174,7 +179,7 @@ export abstract class BasePaymentProvider {
     paymentMethodId: string;
     description?: string;
     metadata?: Record<string, unknown>;
-  }): Promise<Result<Payment, Declined | NotFound | IdGenerationFailure | BadAmount>>;
+  }): Promise<Result<Payment, Declined | NotFound | IdGenerationFailure | BadAmount | SchemaFailure>>;
 
   abstract getPayment(paymentId: PaymentId): Promise<Result<Payment | null, BadAmount>>;
 
@@ -195,7 +200,7 @@ export abstract class BasePaymentProvider {
       reason?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<Result<ProviderRefundResult, NotFound | Conflict | BadAmount>>;
+  ): Promise<Result<ProviderRefundResult, NotFound | Conflict | BadAmount | SchemaFailure>>;
 
   // Payment Methods
   abstract attachPaymentMethod(params: {

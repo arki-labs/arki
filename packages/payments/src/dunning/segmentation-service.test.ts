@@ -15,7 +15,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { add, now, sub } from '@arki/date';
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 import { UnknownCurrency } from '@arki/money';
 
 import { fromMinorColumn } from '../core/money.js';
@@ -24,7 +24,7 @@ import { userIdFactory } from '../core/user-id.js';
 import { core, planId, schema, users } from '../test-support.js';
 import { CustomerSegmentNotFound } from './failures.js';
 import { createCustomerSegmentId } from './primitives.js';
-import { createCustomerSegmentRepository } from './repository.js';
+import { createCustomerRiskProfileRepository, createCustomerSegmentRepository } from './repository.js';
 import { CustomerSegmentationService } from './services/segmentation-service.js';
 import { createDunningTables } from './tables.js';
 
@@ -311,5 +311,54 @@ describe('the segmentation doors name what Postgres would refuse', () => {
     expect(await segments.updateCustomerCount(segment.id, 3_000_000_000)).toMatchObject({ code: 'schema.invalid_input' });
     expect(await segments.updateCustomerCount(segment.id, 1.5)).toMatchObject({ code: 'schema.invalid_input' });
     expect(await segments.updateCustomerCount(segment.id, 7)).toMatchObject({ customerCount: 7 });
+  });
+});
+
+describe('the segmentation doors check what the type allows but Postgres refuses', () => {
+  const NUL = '\u0000';
+  const base = { type: 'custom', criteria: {}, autoUpdate: false, updateFrequency: 24 } as const;
+
+  it('segment writes refuse text, JSON and frequencies their columns cannot store, and criteria the schema refuses', async () => {
+    const segments = createCustomerSegmentRepository(db, tables);
+    const kept = orThrow(await service.createSegment({ ...base, name: 'Kept segment' }, 'usr_admin'));
+
+    // Each would be a raw SQLSTATE (22001, 22021, 22P05, 22003) or a NaN date in a query
+    const refused = [
+      await segments.create({ ...base, name: 'n'.repeat(256), createdBy: 'usr_admin' }),
+      await segments.create({ ...base, name: 'Text', description: `bad${NUL}`, createdBy: 'usr_admin' }),
+      await segments.create({ ...base, name: 'Json', criteria: { customAttributes: { [`k${NUL}`]: 1 } }, createdBy: 'usr_admin' }),
+      await segments.create({ ...base, name: 'Frequency', updateFrequency: 3_000_000_000, createdBy: 'usr_admin' }),
+      await segments.update(kept.id, { name: `bad${NUL}` }),
+      await service.createSegment({ ...base, name: 'Tier', criteria: { planTier: [`pro${NUL}`] } }, 'usr_admin'),
+      await service.updateSegment(kept.id, { criteria: { lastPaymentDate: { daysAgo: Number.NaN } } }),
+      await service.getCustomersMatchingCriteria({ subscriptionDuration: { min: Number.NaN } }),
+      await service.getCustomersMatchingCriteria({ planTier: [`pro${NUL}`] }),
+    ];
+
+    for (const answer of refused) expect(answer).toMatchObject({ code: 'schema.invalid_input' });
+    const rows = await db.select({ name: tables.customerSegments.name }).from(tables.customerSegments);
+    const names = rows.map(row => row.name);
+    expect(names).not.toEqual(expect.arrayContaining(['Text', 'Json', 'Frequency', 'Tier']));
+    expect(await service.getSegment(kept.id)).toMatchObject({ name: 'Kept segment', criteria: {} });
+  });
+
+  it('a row count, page size or offset outside its precondition throws the invariant failure before any query', async () => {
+    const kept = orThrow(await service.createSegment({ ...base, name: 'Paged segment' }, 'usr_admin'));
+    const profiles = createCustomerRiskProfileRepository(db, tables);
+    const page = { limit: 10, offset: 0, sortBy: 'createdAt', sortOrder: 'desc' } as const;
+    const invariantFailure = { code: FAILURE_ERROR_CODES.invariant };
+
+    for (const bad of [1.5, -1, Number.NaN]) {
+      await expect(service.getCustomersInSegment(kept.id, bad)).rejects.toMatchObject(invariantFailure);
+      await expect(service.getCustomersMatchingCriteria({}, bad)).rejects.toMatchObject(invariantFailure);
+      await expect(service.bulkUpdateRiskProfiles(bad)).rejects.toMatchObject(invariantFailure);
+      await expect(service.getCustomersByRiskCategory('low', bad)).rejects.toMatchObject(invariantFailure);
+      await expect(profiles.findBySegmentId(kept.id, bad)).rejects.toMatchObject(invariantFailure);
+      await expect(service.listSegments({ ...page, limit: bad })).rejects.toMatchObject(invariantFailure);
+      await expect(service.listSegments({ ...page, offset: bad })).rejects.toMatchObject(invariantFailure);
+    }
+
+    expect(await service.listSegments({ ...page, search: `a${NUL}` })).toEqual([]);
+    expect(await service.listSegments({ ...page, search: 'Paged segment' })).toEqual([expect.objectContaining({ id: kept.id })]);
   });
 });

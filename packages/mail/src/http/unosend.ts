@@ -9,7 +9,15 @@ import type { MailTransport } from '../types.js';
 import type { FetchFn } from './post-json.js';
 import { listOf } from '../message.js';
 import { traceTransport } from '../telemetry.js';
-import { badResponse, checkTimeoutMs, everyRecipient, logged, rejection, unsupported } from '../transport-failures.js';
+import {
+  badResponse,
+  checkHeaderValue,
+  checkTimeoutMs,
+  everyRecipient,
+  logged,
+  rejection,
+  unsupported,
+} from '../transport-failures.js';
 import { codeText, readAnswer, unosendRefusalSchema, unosendSentSchema } from './answers.js';
 import { postJson } from './post-json.js';
 
@@ -47,6 +55,7 @@ function errorDetail(body: unknown): { message?: string; providerCode?: string }
 export function unosend(options: UnosendOptions): MailTransport {
   const id = options.id ?? 'unosend';
   checkTimeoutMs(id, options.timeoutMs);
+  checkHeaderValue(id, 'apiKey', options.apiKey);
   const fetchFn = options.fetch ?? globalThis.fetch;
   return traceTransport('unosend', {
     id,

@@ -5,12 +5,25 @@
  * beyond the basic assertions built into IntegrationTester.
  */
 
+import { z } from 'zod';
+
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
-import { InvalidInput, orThrow } from '@arki/failure';
-import { formatIssues, parse } from '@arki/schema';
+import { InvalidInput, invariant, orThrow } from '@arki/failure';
+import { formatIssues, is, parse, recordSchema } from '@arki/schema';
 
 import type { Timestamp } from './timestamps.js';
 import { describeKind, epochNanoseconds, isTimestamp } from './timestamps.js';
+
+/** The page shape `assertPaginationValid` checks: an `items` array, and `total`, `nextCursor` and `hasMore` when present. */
+const paginatedResponseSchema = z.object({
+  items: z.array(z.unknown()),
+  total: z.number().optional(),
+  nextCursor: z.string().nullable().optional(),
+  hasMore: z.boolean().optional(),
+});
+
+/** A page of results: what {@link assertPaginationValid} narrows a response to. */
+export type PaginatedResponse = z.output<typeof paginatedResponseSchema>;
 
 /**
  * Assert that a pagination response is valid
@@ -36,29 +49,27 @@ export function assertPaginationValid(
     hasMore?: boolean;
     itemSchema?: StandardSchemaV1;
   },
-): asserts response is {
-  items: unknown[];
-  total?: number;
-  nextCursor?: string | null;
-  hasMore?: boolean;
-} {
-  if (!response || typeof response !== 'object') {
+): asserts response is PaginatedResponse {
+  if (!is(response, recordSchema)) {
     throw new Error('Expected paginated response to be an object');
   }
 
-  if (!('items' in response) || !Array.isArray(response.items)) {
-    throw new TypeError('Expected paginated response to have items array');
+  const page = parse(paginatedResponseSchema, response);
+  if (InvalidInput.is(page)) {
+    throw new TypeError(`Expected paginated response to have an items array: ${formatIssues(page.data.issues)}`, {
+      cause: page,
+    });
   }
-  const items: unknown[] = response.items;
+  const { items } = orThrow(page);
 
   if (options?.itemsCount !== undefined && items.length !== options.itemsCount) {
     throw new Error(`Expected items array to have length ${options.itemsCount}, got ${items.length}`);
   }
 
   if (options?.total !== undefined) {
-    const total: unknown = 'total' in response ? response.total : undefined;
-    if (typeof total !== 'number') {
-      throw new TypeError(`Expected total to be a number, got ${typeof total}`);
+    const { total } = orThrow(page);
+    if (total === undefined) {
+      throw new TypeError('Expected total to be a number, got undefined');
     }
     if (total !== options.total) {
       throw new Error(`Expected total to be ${options.total}, got ${total}`);
@@ -66,7 +77,7 @@ export function assertPaginationValid(
   }
 
   if (options?.hasMore !== undefined) {
-    const hasMore: unknown = 'hasMore' in response ? response.hasMore : undefined;
+    const { hasMore } = orThrow(page);
     if (hasMore !== options.hasMore) {
       throw new Error(`Expected hasMore to be ${options.hasMore}, got ${String(hasMore)}`);
     }
@@ -93,7 +104,8 @@ export function assertPaginationValid(
  * from `@arki/date`. It is compared with now by its exact epoch.
  *
  * @param timestamp - Timestamp to check
- * @param options - Options including withinSeconds (default: 10)
+ * @param options - Options including withinSeconds (default: 10; a finite number of at least 0, or the
+ *   invariant failure `ARKI_FAILURE_E008` is thrown: `NaN` would let every timestamp pass)
  *
  * @example
  * ```typescript
@@ -106,6 +118,10 @@ export function assertTimestampRecent(
   options: { withinSeconds?: number; label?: string } = {},
 ): asserts timestamp is Timestamp {
   const { withinSeconds = 10, label = 'timestamp' } = options;
+  invariant(
+    Number.isFinite(withinSeconds) && withinSeconds >= 0,
+    `assertTimestampRecent: withinSeconds must be a finite number of at least 0, got ${withinSeconds}.`,
+  );
 
   if (!isTimestamp(timestamp)) {
     throw new TypeError(`Expected ${label} to be a Date, Instant or ZonedDateTime, got ${describeKind(timestamp)}`);
@@ -313,15 +329,15 @@ export function assertDeepPartialMatch(
   label = 'object',
   path: string[] = [],
 ): void {
-  if (typeof expected !== 'object' || expected === null) {
+  if (!isObjectLike(expected)) {
     return;
   }
 
-  for (const key in expected) {
+  for (const key of Object.keys(expected)) {
     const currentPath = [...path, key];
     const pathStr = currentPath.join('.');
 
-    if (typeof actual !== 'object' || actual === null || !(key in actual)) {
+    if (!isObjectLike(actual) || !(key in actual)) {
       throw new Error(`Expected ${label} to have property '${pathStr}'`);
     }
 
@@ -332,7 +348,7 @@ export function assertDeepPartialMatch(
       if (actualValue !== null) {
         throw new Error(`Expected ${label}.${pathStr} to be null, got ${JSON.stringify(actualValue)}`);
       }
-    } else if (typeof expectedValue === 'object' && !Array.isArray(expectedValue)) {
+    } else if (is(expectedValue, recordSchema)) {
       assertDeepPartialMatch(actualValue, expectedValue, label, currentPath);
     } else if (actualValue !== expectedValue) {
       throw new Error(
@@ -377,16 +393,37 @@ export function assertArraySorted<T extends object>(array: T[], field: keyof T, 
   }
 }
 
+const anyArraySchema = z.array(z.unknown());
+
+/** An object or an array: something `in` and `for...in` can read keys from. */
+function isObjectLike(value: unknown): value is Record<string, unknown> | unknown[] {
+  return is(value, recordSchema) || is(value, anyArraySchema);
+}
+
+/** A sortable number: finite, or an infinity. `NaN` has no order, so it cannot be compared. */
+const sortNumberSchema = z.union([
+  z.number(),
+  z.literal(Number.POSITIVE_INFINITY),
+  z.literal(Number.NEGATIVE_INFINITY),
+]);
+const numberPairSchema = z.tuple([sortNumberSchema, sortNumberSchema]);
+const bigintPairSchema = z.tuple([z.bigint(), z.bigint()]);
+const stringPairSchema = z.tuple([z.string(), z.string()]);
+/** `z.date()` refuses an `Invalid Date`, which has no order either. */
+const datePairSchema = z.tuple([z.date(), z.date()]);
+
 /**
  * Compare two sort-field values: numbers, strings, bigints and dates, each with its own kind.
+ * `NaN` and an `Invalid Date` have no order and throw like a mix of kinds.
  */
 function compareValues(a: unknown, b: unknown, field: PropertyKey): number {
-  if (typeof a === 'number' && typeof b === 'number') return a - b;
-  if (typeof a === 'bigint' && typeof b === 'bigint') return a > b ? 1 : a < b ? -1 : 0;
-  if (typeof a === 'string' && typeof b === 'string') return a > b ? 1 : a < b ? -1 : 0;
-  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime();
+  const pair = [a, b];
+  if (is(pair, numberPairSchema)) return pair[0] === pair[1] ? 0 : pair[0] - pair[1];
+  if (is(pair, bigintPairSchema)) return pair[0] > pair[1] ? 1 : pair[0] < pair[1] ? -1 : 0;
+  if (is(pair, stringPairSchema)) return pair[0] > pair[1] ? 1 : pair[0] < pair[1] ? -1 : 0;
+  if (is(pair, datePairSchema)) return pair[0].getTime() - pair[1].getTime();
   throw new TypeError(
-    `Cannot compare values of '${String(field)}': expected two numbers, bigints, strings or dates, got ${a === null ? 'null' : typeof a} and ${b === null ? 'null' : typeof b}`,
+    `Cannot compare values of '${String(field)}': expected two numbers, bigints, strings or dates (NaN and an Invalid Date have no order), got ${a === null ? 'null' : typeof a} and ${b === null ? 'null' : typeof b}`,
   );
 }
 

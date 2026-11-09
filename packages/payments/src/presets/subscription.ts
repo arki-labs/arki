@@ -16,6 +16,7 @@ import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { PaymentRepository } from '../core/repository.js';
 import type { PlanId, SubscriptionStatus } from '../core/types.js';
 import { subscriptionStatusSchema } from '../core/contracts.js';
+import { misconfigured } from '../core/failures.js';
 import { pgTextSchema, pgVarcharSchema } from '../core/pg-values.js';
 import {
   PriceNotConfigured,
@@ -66,6 +67,9 @@ type StripeSubscriptionFields = z.output<typeof stripeSubscriptionSchema>;
 
 /** What the checkout stores for a new customer: the `customers.email` column holds 255 characters. */
 const checkoutEmailSchema = pgVarcharSchema(255).pipe(z.email());
+
+/** The trial Stripe Checkout takes: `trial_period_days` is a whole number from 1 to 730. */
+const trialDaysSchema = z.int().min(1).max(730);
 
 /**
  * A Stripe time in Unix seconds, up to the last second of year 9999, read as an `Instant`. The
@@ -233,7 +237,10 @@ export type SubscriptionBillingConfig = {
   prices: readonly PriceToPlan[];
   /** Where Checkout sends the browser back to. */
   urls: { success: string; cancel: string };
-  /** Free-trial length applied to new subscriptions; omit for no trial. */
+  /**
+   * Free-trial length applied to new subscriptions; omit for no trial. A whole number of days from 1 to
+   * 730 (Stripe's range): anything else throws `payments.configuration_invalid` when the preset is built.
+   */
   trialDays?: number;
   /** Enable Stripe Tax at checkout (EU VAT). Requires Stripe Tax configured on the account. */
   automaticTax?: boolean;
@@ -258,9 +265,15 @@ export type StripeWebhookOutcome =
  * Customers are found-or-created at checkout: the `subscriptions` table's `customerId`/`planId`
  * are NOT NULL, so a local customer row must exist *before* the subscription webhook arrives (the
  * projection resolves the owning user via the Stripe customer id).
+ *
+ * A `trialDays` Stripe cannot take is a configuration fault: it throws `payments.configuration_invalid`
+ * here, at boot, instead of failing every checkout.
  */
 export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
   const { provider, repo, writes, urls, trialDays, automaticTax } = config;
+  if (trialDays !== undefined && !trialDaysSchema.safeParse(trialDays).success) {
+    throw misconfigured('presets.subscription.trialDays', `must be a whole number of days from 1 to 730; got ${String(trialDays)}`);
+  }
   const planByPrice = new Map(config.prices.map((p) => [p.priceId, p.planId]));
 
   return {
@@ -329,7 +342,7 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
       | FailureOf<typeof PriceNotConfigured>
       | ProjectionFailure
     > {
-      const event = provider.constructWebhookEvent(payload, signature);
+      const event = await provider.constructWebhookEvent(payload, signature);
       if (isFailure(event)) return event;
 
       if (

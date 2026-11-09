@@ -494,6 +494,25 @@ describe('a step that needs a sender the app did not pass fails at boot', () => 
     );
   });
 
+  it.each([Number.NaN, 1.5, -1, 3651])(
+    'a rule delayed by %s days (no real scheduled date) fails at boot and in updateConfiguration, keeping the old rules',
+    delayDays => {
+      const late: DunningRule = { ...ruleDoing('pause_subscription'), trigger: { event: 'payment_failed', delayDays } };
+      // A disabled rule is checked too: enabling it later must not be what breaks the schedule
+      const disabled: DunningRule = { ...late, enabled: false };
+
+      expect(bootFailureCode(() => new DunningService(provider(), reads, writes, { rules: [late] }))).toBe(
+        'payments.configuration_invalid',
+      );
+      expect(bootFailureCode(() => new DunningService(provider(), reads, writes, { rules: [disabled] }))).toBe(
+        'payments.configuration_invalid',
+      );
+      const service = new DunningService(provider(), reads, writes, { rules: [ruleDoing('pause_subscription')] });
+      expect(bootFailureCode(() => service.updateConfiguration({ rules: [late] }))).toBe('payments.configuration_invalid');
+      expect(service.getConfiguration().rules.map(rule => rule.trigger.delayDays)).toEqual([0]);
+    },
+  );
+
   it('updateConfiguration refuses a rule it has no sender for and keeps the old rules', () => {
     const service = new DunningService(provider(), reads, writes, { rules: [ruleDoing('pause_subscription')] });
 
@@ -517,5 +536,31 @@ describe('getDunningStats', () => {
       'subscriptionsInDunning',
       'totalFailedPayments',
     ]);
+  });
+});
+
+describe('a cancel step sends the reason its config names', () => {
+  it.each([
+    [{ reason: 'fraud_review' }, 'fraud_review'],
+    [{ reason: 42 }, 'payment_failure'],
+    [{ reason: '' }, 'payment_failure'],
+    [{}, 'payment_failure'],
+  ] as const)('config %j cancels with reason %s', async (config, expected) => {
+    const reasons: (string | undefined)[] = [];
+    const base = providerWhereRetryEnds('succeeded');
+    const provider: Provider = {
+      ...base,
+      async cancelSubscription(subscriptionId, options) {
+        reasons.push(options.reason);
+        return base.cancelSubscription(subscriptionId, options);
+      },
+    };
+    const rule: DunningRule = { ...ruleDoing('cancel_subscription'), action: { type: 'cancel_subscription', config } };
+    const service = new DunningService(provider, reads, writes, { rules: [rule] }, senders);
+
+    await failedPaymentOn(service);
+    await service.processDunningEvents();
+
+    expect(reasons).toEqual([expected]);
   });
 });

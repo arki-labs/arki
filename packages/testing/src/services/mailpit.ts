@@ -5,6 +5,8 @@
 import { GenericContainer, Wait } from 'testcontainers';
 import { z } from 'zod';
 
+import { invariant } from '@arki/failure';
+
 import { service } from '../stack/index.js';
 import { nothingToStop, once, RUN_LABEL } from './labels.js';
 
@@ -45,7 +47,8 @@ export type Mailbox = {
   all(to?: string): Promise<readonly MailSummary[]>;
   /**
    * Waits until a mail to `to` whose subject matches arrives, and returns it in full.
-   * Polls Mailpit; on timeout the error lists what Mailpit does hold (MAIL_NOT_RECEIVED).
+   * Polls Mailpit; on timeout the error lists what Mailpit does hold (MAIL_NOT_RECEIVED). `timeoutMs`
+   * (default 30 000) is finite and at least 0, or the invariant failure `ARKI_FAILURE_E008` is thrown.
    */
   waitFor(match: { readonly to: string; readonly subject?: string | RegExp; readonly timeoutMs?: number }): Promise<ReceivedMail>;
   /** Deletes the mails to `to`, or every mail when omitted. */
@@ -93,6 +96,11 @@ export function mailbox(httpUrl: string): Mailbox {
   return {
     all,
     async waitFor({ to, subject, timeoutMs = 30_000 }) {
+      // NaN made the deadline pass at once and read as MAIL_NOT_RECEIVED; a negative wait is a typo.
+      invariant(
+        Number.isFinite(timeoutMs) && timeoutMs >= 0,
+        `waitFor: timeoutMs must be a finite number of milliseconds of at least 0, got ${timeoutMs}.`,
+      );
       const deadline = Date.now() + timeoutMs;
       const matches = (mail: MailSummary) =>
         subject === undefined ? true : typeof subject === 'string' ? mail.subject === subject : subject.test(mail.subject);

@@ -247,9 +247,37 @@ describe('retry strategies belong to one service', () => {
     if (!standard) throw new Error('the package ships default strategies');
 
     first.addRetryStrategy({ ...oneRetryNow, name: 'only_this_instance' });
-    first.updateRetryStrategy(standard.name, { maxAttempts: 99 });
+    first.updateRetryStrategy(standard.name, { maxAttempts: 9 });
 
     const second = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes);
     expect(second.getRetryStrategies()).toEqual(defaults);
+  });
+});
+
+describe('a strategy the schedule cannot follow fails where it is set', () => {
+  const unusable: [string, Partial<RetryStrategy>][] = [
+    ['a fractional attempt count', { maxAttempts: 1.5 }],
+    ['an attempt count past 10, which an exponential backoff would carry past the last date', { maxAttempts: 11 }],
+    ['a delay that is not a number', { delayMinutes: [Number.NaN] }],
+    ['a delay past a year', { delayMinutes: [525_601] }],
+  ];
+
+  it.each(unusable)('%s is payments.configuration_invalid, and changes nothing', (_what, change) => {
+    const service = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes);
+    const before = structuredClone(service.getRetryStrategies());
+    const [first] = before;
+    if (!first) throw new Error('the package ships default strategies');
+
+    expect(
+      () =>
+        new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes, [{ ...oneRetryNow, ...change }]),
+    ).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
+    expect(() => service.addRetryStrategy({ ...oneRetryNow, ...change })).toThrow(
+      expect.objectContaining({ code: 'payments.configuration_invalid' }),
+    );
+    expect(() => service.updateRetryStrategy(first.name, change)).toThrow(
+      expect.objectContaining({ code: 'payments.configuration_invalid' }),
+    );
+    expect(service.getRetryStrategies()).toEqual(before);
   });
 });

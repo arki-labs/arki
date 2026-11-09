@@ -21,6 +21,14 @@ import {
 } from './primitives.js';
 import { userIdSchema } from './user-id.js';
 
+/** An id schema for a written row: an id with U+0000 is refused, as Postgres would refuse it (SQLSTATE 22021). */
+function storedId<S extends z.ZodType<string>>(schema: S) {
+  return schema.refine(
+    value => pgTextSchema.safeParse(value).success,
+    'An id cannot contain the NUL character (U+0000)',
+  );
+}
+
 /** A currency code as the columns store it: an ISO 4217 code, upper case, so `planPrice` and `paymentAmount` can read it back. */
 const storedCurrencySchema = z.string().toUpperCase().pipe(currencyCodeSchema);
 
@@ -87,6 +95,7 @@ function buildCoreDerivedSchemas({
   const planInsertSchema = createInsertSchema(plans, {
     ...planFields,
     ...writtenTimestamps,
+    id: () => storedId(planIdSchema),
     name: () => pgVarcharSchema(255).min(1),
     description: () => pgTextSchema,
     // Whole minor units, zero for a free plan, at most Stripe's 8 digits (99,999,999), as in `core/money.ts`
@@ -104,6 +113,7 @@ function buildCoreDerivedSchemas({
   const customerInsertSchema = createInsertSchema(customers, {
     ...customerFields,
     ...writtenTimestamps,
+    id: () => storedId(customerIdSchema),
     providerCustomerId: () => pgVarcharSchema(255).min(1),
     email: () => z.email().max(255),
     name: () => pgVarcharSchema(255).min(1),
@@ -117,6 +127,9 @@ function buildCoreDerivedSchemas({
   const subscriptionInsertSchema = createInsertSchema(subscriptions, {
     ...subscriptionFields,
     ...writtenTimestamps,
+    id: () => storedId(subscriptionIdSchema),
+    planId: () => storedId(planIdSchema),
+    customerId: () => storedId(customerIdSchema),
     providerSubscriptionId: () => pgVarcharSchema(255).min(1),
     currentPeriodStart: () => pgInstantSchema(),
     currentPeriodEnd: () => pgInstantSchema(),
@@ -131,6 +144,9 @@ function buildCoreDerivedSchemas({
   const paymentInsertSchema = createInsertSchema(payments, {
     ...paymentFields,
     ...writtenTimestamps,
+    id: () => storedId(paymentIdSchema),
+    subscriptionId: () => storedId(subscriptionIdSchema),
+    customerId: () => storedId(customerIdSchema),
     providerPaymentId: () => pgVarcharSchema(255).min(1),
     amountMinor: () => z.number().int().positive().max(99_999_999),
     currency: () => storedCurrencySchema,
@@ -148,6 +164,7 @@ function buildCoreDerivedSchemas({
   const webhookEventInsertSchema = createInsertSchema(webhookEvents, {
     ...webhookFields,
     ...writtenTimestamps,
+    id: () => storedId(webhookIdSchema),
     processedAt: () => pgInstantSchema(),
     lastAttemptAt: () => pgInstantSchema(),
     providerEventId: () => pgVarcharSchema(255).min(1),

@@ -146,8 +146,10 @@ describe('requestRefund', () => {
     const eventsBefore = await countEvents(db);
     const noWindow = new RefundService(refundReads(db), writes, coreReads(db), {
       systemUserId: adminId,
-      refundWindowMs: -1,
+      refundWindowMs: 0,
     });
+    // A window of 0 ms: any payment at least 1 ms old is past it
+    await new Promise(resolve => setTimeout(resolve, 5));
 
     const refused = await noWindow.requestRefund({
       paymentId: payment.id,
@@ -284,6 +286,16 @@ describe('auto-approval limits per currency', () => {
     expect(() => serviceWith({ USD: '10.001' })).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
     expect(() => serviceWith({ NOPE: '10' })).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
   });
+
+  // A NaN window compared false on every refund, so the window was silently off
+  it.each([Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY])(
+    'turns down a refund window of %s milliseconds when the service is built',
+    refundWindowMs => {
+      expect(
+        () => new RefundService(refundReads(db), writes, coreReads(db), { systemUserId: adminId, refundWindowMs }),
+      ).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
+    },
+  );
 });
 
 describe('approveRefund', () => {

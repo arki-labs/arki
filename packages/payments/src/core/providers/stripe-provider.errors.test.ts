@@ -136,20 +136,20 @@ function signed(type: string) {
 describe('constructWebhookEvent', () => {
   const payload = JSON.stringify({ id: 'evt_1', object: 'event', type: 'invoice.paid', data: { object: {} } });
 
-  it('returns payments.invalid_signature for a body signed with another secret, with the Stripe error as cause', () => {
+  it('returns payments.invalid_signature for a body signed with another secret, with the Stripe error as cause', async () => {
     // Anyone can POST to a webhook URL: a forged delivery is an answer for the route (HTTP 400), not a crash
     const { stripe } = provider(invalid);
 
-    const event = stripe.constructWebhookEvent(payload, sign(payload, 'whsec_someone_else'));
+    const event = await stripe.constructWebhookEvent(payload, sign(payload, 'whsec_someone_else'));
 
     expect(InvalidWebhookSignature.is(event)).toBe(true);
     expect(InvalidWebhookSignature.is(event) && event.cause).toBeInstanceOf(Stripe.errors.StripeSignatureVerificationError);
   });
 
-  it('returns the typed Stripe event for a body signed with the webhook secret', () => {
+  it('returns the typed Stripe event for a body signed with the webhook secret', async () => {
     const { stripe } = provider(invalid);
 
-    const event = stripe.constructWebhookEvent(payload, sign(payload, 'whsec_fake'));
+    const event = await stripe.constructWebhookEvent(payload, sign(payload, 'whsec_fake'));
 
     expect(event).toMatchObject({ id: 'evt_1', type: 'invoice.paid' });
   });

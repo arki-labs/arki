@@ -5,7 +5,7 @@
  */
 import type { FailureOf } from '@arki/failure';
 import type { SchemaWithJson } from '@arki/schema';
-import { defineFailure, isFailure } from '@arki/failure';
+import { defineFailure, invariant, isFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
 import type { Verdict } from './schemas.js';
@@ -77,17 +77,34 @@ export type JudgeOptions = {
   readonly target?: string;
   /** Let the judge be the model under test. It grades its own work more kindly; say so in the test. */
   readonly allowSameModelAsJudge?: boolean;
-  /** Default 7. */
+  /** Default 7. A safe integer, or `createJudge` throws the invariant failure `ARKI_FAILURE_E008`. */
   readonly seed?: number;
-  /** Tokens the judge may write per call. Default 1500. */
+  /** Tokens the judge may write per call. Default 1500. A whole number of at least 1, or the invariant failure. */
   readonly maxTokens?: number;
-  /** How long a chat or embed call may take before it is `OllamaUnavailable`. Default 120 000. */
+  /**
+   * How long a chat or embed call may take before it is `OllamaUnavailable`. Default 120 000. A whole number
+   * of milliseconds from 1 to 2^31 - 1, or the invariant failure.
+   */
   readonly timeoutMs?: number;
 };
 
 const DEFAULT_URL = 'http://127.0.0.1:11434';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
+
+/** The longest delay a runtime timer holds: 2^31 - 1 ms, about 24.8 days. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * `AbortSignal.timeout` takes only a whole number of milliseconds; anything else threw inside `post` and read
+ * as `OllamaUnavailable`, as if the daemon were down.
+ */
+function checkTimeoutMs(timeoutMs: number): void {
+  invariant(
+    Number.isSafeInteger(timeoutMs) && timeoutMs >= 1 && timeoutMs <= MAX_TIMEOUT_MS,
+    `timeoutMs must be a whole number of milliseconds from 1 to ${MAX_TIMEOUT_MS}, got ${timeoutMs}.`,
+  );
+}
 
 /** POSTs to Ollama and returns the JSON answer, or `OllamaUnavailable` when it cannot be reached or refuses. */
 async function post(
@@ -140,6 +157,15 @@ const JUDGE_SYSTEM =
 
 export async function createJudge(options: JudgeOptions): Promise<Judge> {
   const url = options.url ?? DEFAULT_URL;
+  const seed = options.seed ?? 7;
+  const maxTokens = options.maxTokens ?? 1500;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  invariant(Number.isSafeInteger(seed), `createJudge: seed must be a whole number, got ${seed}.`);
+  invariant(
+    Number.isSafeInteger(maxTokens) && maxTokens >= 1,
+    `createJudge: maxTokens must be a whole number of at least 1, got ${maxTokens}.`,
+  );
+  checkTimeoutMs(timeoutMs);
   const digest = await digestOf(url, options.model);
   if (digest === undefined) {
     throw new Error(`OLLAMA_MODEL_MISSING: ${options.model}. Pull with \`ollama pull ${options.model}\`.`);
@@ -152,9 +178,6 @@ export async function createJudge(options: JudgeOptions): Promise<Judge> {
       );
     }
   }
-  const seed = options.seed ?? 7;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-
   async function extract<TOutput>(input: {
     readonly system: string;
     readonly prompt: string;
@@ -170,7 +193,7 @@ export async function createJudge(options: JudgeOptions): Promise<Judge> {
         think: false,
         keep_alive: '10m',
         format,
-        options: { temperature: 0, seed, num_predict: options.maxTokens ?? 1500 },
+        options: { temperature: 0, seed, num_predict: maxTokens },
         messages: [
           { role: 'system', content: `${JUDGE_SYSTEM} ${input.system}` },
           { role: 'user', content: input.prompt },
@@ -215,11 +238,15 @@ export async function createJudge(options: JudgeOptions): Promise<Judge> {
 export async function createEmbedder(options: {
   readonly url?: string;
   readonly model: string;
-  /** How long an embed call may take before it is `OllamaUnavailable`. Default 120 000. */
+  /**
+   * How long an embed call may take before it is `OllamaUnavailable`. Default 120 000. A whole number of
+   * milliseconds from 1 to 2^31 - 1, or the invariant failure `ARKI_FAILURE_E008`.
+   */
   readonly timeoutMs?: number;
 }): Promise<Embedder> {
   const url = options.url ?? DEFAULT_URL;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  checkTimeoutMs(timeoutMs);
   if ((await digestOf(url, options.model)) === undefined) {
     throw new Error(`OLLAMA_MODEL_MISSING: ${options.model}. Pull with \`ollama pull ${options.model}\`.`);
   }

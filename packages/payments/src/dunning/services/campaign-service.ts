@@ -9,7 +9,7 @@ import { getLogger } from '@arki/log';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure, orThrow } from '@arki/failure';
 import { Currency } from '@arki/money';
-import { ensure } from '@arki/schema';
+import { ensure, parse } from '@arki/schema';
 
 import type { CoreTables } from '../../core/tables.js';
 import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
@@ -24,6 +24,7 @@ import type {
   ListExecutionsQuery,
   UpdateDunningCampaignInput,
 } from '../contracts.js';
+import { dunningCampaignTemplatesSchema } from '../contracts.js';
 import type { CustomerSegmentId, DunningCampaignId, DunningCampaignStatus } from '../primitives.js';
 import type { DunningDatabase, ExecutionReferenceMissing } from '../repository.js';
 import { valueList } from '../sql-list.js';
@@ -168,13 +169,16 @@ export class DunningCampaignService {
   }
 
   /**
-   * Create a new dunning campaign with templates. An actor id Postgres cannot store returns
-   * `schema.invalid_input` and writes nothing.
+   * Create a new dunning campaign with templates. The steps are parsed with `dunningCampaignTemplatesSchema`
+   * before any write; steps it refuses, or an actor id, text or JSON Postgres cannot store, return
+   * `schema.invalid_input` and write nothing.
    */
   async createCampaign(
     input: CreateDunningCampaignInput,
     createdBy: UserId,
   ): Promise<DunningCampaignWithSteps | SchemaFailure> {
+    const steps = parse(dunningCampaignTemplatesSchema, input.templates);
+    if (isFailure(steps)) return steps;
     return this.db.transaction(async tx => {
       // The repositories run on the transaction: a template that fails takes the campaign with it
       const campaignRepo = createDunningCampaignRepository(tx, this.tables);
@@ -196,7 +200,8 @@ export class DunningCampaignService {
           delayHours: templateInput.delayHours,
           communication: templateInput.communication,
         });
-        invariant(!isFailure(template), 'the campaign this transaction just wrote is missing');
+        // The steps were parsed above, and the campaign was written in this transaction
+        invariant(!isFailure(template), 'a parsed step of the campaign this transaction just wrote was refused');
         templates.push(template);
       }
 
@@ -215,7 +220,8 @@ export class DunningCampaignService {
    * that points at it, survives), a new number is inserted, and a number that is gone is deleted.
    * A step that already sent a communication cannot be deleted: the update returns
    * `DunningTemplateInUse` and nothing changes. Returns `null` for an unknown campaign, and
-   * `schema.invalid_input` for an actor id Postgres cannot store. Omit `templates` to leave the steps alone.
+   * `schema.invalid_input` for steps `dunningCampaignTemplatesSchema` refuses or an actor id, text or JSON
+   * Postgres cannot store; nothing is written then. Omit `templates` to leave the steps alone.
    */
   async updateCampaign(
     campaignId: DunningCampaignId,
@@ -224,6 +230,10 @@ export class DunningCampaignService {
   ): Promise<DunningCampaignWithSteps | null | FailureOf<typeof DunningTemplateInUse> | SchemaFailure> {
     const { templates: nextTemplates, ...campaignFields } = input;
     const { dunningCommunications, dunningTemplates } = this.tables;
+    if (nextTemplates) {
+      const steps = parse(dunningCampaignTemplatesSchema, nextTemplates);
+      if (isFailure(steps)) return steps;
+    }
 
     return this.db.transaction(async tx => {
       const campaignRepo = createDunningCampaignRepository(tx, this.tables);
@@ -265,15 +275,17 @@ export class DunningCampaignService {
         }
         for (const next of nextTemplates) {
           const current = existing.find(template => template.stepNumber === next.stepNumber);
+          // The steps were parsed above, and the campaign was updated in this transaction
           if (current) {
-            await templateRepo.update(current.id, {
+            const updated = await templateRepo.update(current.id, {
               name: next.name,
               delayHours: next.delayHours,
               communication: next.communication,
             });
+            invariant(!isFailure(updated), 'a parsed step was refused');
           } else {
             const created = await templateRepo.create({ campaignId, ...next });
-            invariant(!isFailure(created), 'the campaign this transaction just updated is missing');
+            invariant(!isFailure(created), 'a parsed step of the campaign this transaction just updated was refused');
           }
         }
       }
@@ -300,7 +312,8 @@ export class DunningCampaignService {
   }
 
   /**
-   * List campaigns with filtering and pagination
+   * List campaigns with filtering and pagination. `limit` and `offset` are whole numbers of 0 or more (a
+   * precondition: anything else throws an invariant failure); a `search` holding U+0000 matches nothing.
    */
   async listCampaigns(query: ListDunningCampaignsQuery): Promise<DunningCampaign[]> {
     return this.campaignRepo.findMany(query);
@@ -593,7 +606,8 @@ export class DunningCampaignService {
    * so `retryFailedExecutions` retries it; one whose message was refused is listed with the failure's
    * code and marked `failed` (with a `nextRetryAt` only for a 5xx refusal; a timeout is not retried, the
    * message may have gone out). A fault that stops
-   * the whole tick is thrown.
+   * the whole tick is thrown. `limit` is a whole number of 0 or more (a precondition: anything else throws
+   * an invariant failure before any query).
    */
   async processScheduledExecutions(limit = 100): Promise<DunningTickReport> {
     const scheduledExecutions = await this.executionRepo.findScheduledExecutions(limit);
@@ -1018,13 +1032,17 @@ export class DunningCampaignService {
   }
 
   /**
-   * Get campaign analytics and performance metrics
+   * Campaign analytics of the last `days` days. Precondition (anything else throws an invariant failure
+   * and runs no query): `days` is a whole number from 0 to `MAX_DUNNING_DAYS` (100 years).
    */
   async getCampaignAnalytics(campaignId?: DunningCampaignId, days = 30) {
     return this.campaignRepo.getAnalyticsSummary(campaignId, days);
   }
 
-  /** One page of executions, filtered and sorted as `query` says. */
+  /**
+   * One page of executions, filtered and sorted as `query` says. `limit` and `offset` are whole numbers of
+   * 0 or more and the times fall in the years 1 to 9999 (preconditions: anything else throws an invariant failure).
+   */
   async listExecutions(query: ListExecutionsQuery): Promise<DunningExecution[]> {
     return this.executionRepo.findMany(query);
   }
@@ -1080,7 +1098,8 @@ export class DunningCampaignService {
    * a 5xx, is `failed` again with the next
    * `nextRetryAt` (30 minutes, then 60, then 120), so a later call picks it again; after
    * `MAX_EXECUTION_RETRIES` (3) retries it stays failed with no `nextRetryAt`. Returns how many were
-   * retried and each retry that threw again.
+   * retried and each retry that threw again. `limit` is a whole number of 0 or more (a precondition:
+   * anything else throws an invariant failure before any query).
    */
   async retryFailedExecutions(limit = 50): Promise<DunningTickReport> {
     const retryableExecutions = await this.executionRepo.findRetryableExecutions(limit);

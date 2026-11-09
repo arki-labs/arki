@@ -9,6 +9,7 @@ import {
   createSubscriptionId,
   createWebhookId,
 } from './primitives.js';
+import { userIdSchema } from './user-id.js';
 
 describe('id factories', () => {
   afterEach(() => {
@@ -37,5 +38,13 @@ describe('id factories', () => {
     const result = create();
     expect(RandomSourceUnavailable.is(result)).toBe(true);
     expect(result).toMatchObject({ code: 'contracts.random_source_unavailable' });
+  });
+});
+
+describe('userIdSchema', () => {
+  it('takes a usr_ id and refuses one holding U+0000, which no user_id column can store', () => {
+    expect(userIdSchema.safeParse('usr_alice').success).toBe(true);
+    expect(userIdSchema.safeParse('usr_a\u0000b').success).toBe(false);
+    expect(userIdSchema.safeParse('cus_alice').success).toBe(false);
   });
 });

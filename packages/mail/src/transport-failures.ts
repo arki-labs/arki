@@ -9,7 +9,7 @@ import type { MailMessage, RecipientOutcome, SentMail, TransportFailure } from '
 import { invalidConfig, MAIL_ERROR_CODES, MailError } from './errors.js';
 import { MailRejected, MailUncertain } from './failures.js';
 import { errorField, log } from './log.js';
-import { listOf } from './message.js';
+import { listOf, unsendableInHeader } from './message.js';
 
 /**
  * The service answered with an error status. 429 and 5xx can pass on a later try; any other
@@ -45,6 +45,19 @@ export function checkTimeoutMs(transport: string, timeoutMs: number | undefined)
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMEOUT_MS)
     invalidConfig(
       `${transport}: \`timeoutMs\` must be more than 0 and at most ${MAX_TIMEOUT_MS} milliseconds, got ${timeoutMs}.`,
+    );
+}
+
+/**
+ * Checks a value the transport sends in an HTTP header (an API key, a token, an AWS key id) when the
+ * transport is built. `fetch` refuses a line break, a NUL character or a character above U+00FF before
+ * anything is sent, so such a value would make every send `MailUncertain` although no mail went out.
+ * It fails at boot as `MailError` (`ARKI_MAIL_E001`) instead. The value is never echoed: it is a secret.
+ */
+export function checkHeaderValue(transport: string, option: string, value: string): void {
+  if (unsendableInHeader(value))
+    invalidConfig(
+      `${transport}: \`${option}\` holds a line break, a NUL character or a character above U+00FF, which no HTTP header can carry.`,
     );
 }
 

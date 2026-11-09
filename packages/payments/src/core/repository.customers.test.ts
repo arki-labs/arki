@@ -320,6 +320,46 @@ describe('PaymentRepository reads with values no row can hold', () => {
     await expect(repo.findUnprocessedWebhookEvents(0.5)).rejects.toMatchObject(invariantBroken);
     await expect(repo.reclaimWebhookEvent(orThrow(createWebhookId()), 0.5, instant('2026-01-01T00:00:00Z'))).rejects.toMatchObject(invariantBroken);
   });
+
+  it('a list query its contract schema refuses breaks the stated precondition before any query', async () => {
+    const invariantBroken = { code: FAILURE_ERROR_CODES.invariant };
+
+    await expect(repo.findPlans({ limit: 1.5, offset: 0 })).rejects.toMatchObject(invariantBroken);
+    await expect(repo.findSubscriptions({ limit: 20, offset: Number.NaN })).rejects.toMatchObject(invariantBroken);
+    await expect(
+      repo.findPayments({ limit: 20, offset: 0, startDate: instant('-000100-01-01T00:00:00Z') }),
+    ).rejects.toMatchObject(invariantBroken);
+  });
+
+  it('an id or user id holding U+0000 finds nothing and sends no query, as a provider id does', async () => {
+    // A query by such text would reject with Postgres 22021: answering it proves none was sent
+    const user = 'usr_a\u0000b' as const;
+    const plan = 'plan_a\u0000b' as const;
+    const customer = 'cust_a\u0000b' as const;
+    const subscription = 'sub_a\u0000b' as const;
+    const payment = 'pay_a\u0000b' as const;
+    const event = 'wh_a\u0000b' as const;
+
+    expect(await repo.findActiveSubscriptionByUserId(user)).toBeNull();
+    expect(await repo.findCustomerByUserId(user)).toBeNull();
+    expect(await repo.findSubscriptionsByUserId(user)).toEqual([]);
+    expect(await repo.findPaymentsByUserId(user)).toEqual([]);
+    expect(await repo.findPlanById(plan)).toBeNull();
+    expect(await repo.findCustomerById(customer)).toBeNull();
+    expect(await repo.findSubscriptionById(subscription)).toBeNull();
+    expect(await repo.findPaymentById(payment)).toBeNull();
+    expect(await repo.findPaymentsBySubscriptionId(subscription)).toEqual([]);
+    expect(await repo.findWebhookEventById(event)).toBeNull();
+    expect(await repo.findSubscriptions({ limit: 20, offset: 0, userId: user })).toEqual([]);
+    expect(await repo.findPayments({ limit: 20, offset: 0, customerId: customer })).toEqual([]);
+    expect(await repo.updatePlan(plan, { name: 'x' })).toMatchObject({ code: 'payments.reference_not_found' });
+    expect(await repo.deactivatePlan(plan)).toMatchObject({ code: 'payments.reference_not_found' });
+    expect(await repo.updateCustomer(customer, { name: 'x' })).toMatchObject({ code: 'payments.reference_not_found' });
+    expect(await repo.deleteCustomer(customer)).toBeUndefined();
+    expect(WebhookEventNotFound.is(await repo.markWebhookEventAsProcessed(event))).toBe(true);
+    expect(WebhookEventNotFound.is(await repo.updateWebhookEvent(event, { processed: true }))).toBe(true);
+    expect(WebhookEventNotFound.is(await repo.incrementWebhookEventAttempts(event))).toBe(true);
+  });
 });
 
 describe('PaymentRepository counts', () => {

@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { add, now, sub } from '@arki/date';
 import { findDatabaseError } from '@arki/db/errors';
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 import { money, UnknownCurrency } from '@arki/money';
 
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
@@ -394,6 +394,10 @@ describe('healthCheck and getIntegrationMetrics read the stored rows', () => {
       sentAt: now(),
     });
 
+    // days is a whole number from 0 to 100 years: anything else is a caller bug, refused before any query
+    for (const bad of [Number.NaN, 1e12, 0.01, -1]) {
+      await expect(metrics.getIntegrationMetrics(bad)).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+    }
     expect(await metrics.getIntegrationMetrics(30)).toEqual({
       totalExecutions: 3,
       successfulExecutions: 2,
@@ -512,6 +516,32 @@ describe('an event handler names what the event refers to and has no row', () =>
         expect(answer).toMatchObject({ code: 'payments.reference_not_found', data: { kind: 'customer', id: unknown } });
       }
       expect(await db.select().from(dunning.customerRiskProfiles)).toEqual([]);
+      expect(await db.select().from(dunning.dunningExecutions)).toEqual([]);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('the subscription id is not looked up: an unknown one, or an unknown trial customer, returns no failure', async () => {
+    const { client, db, service, customerId } = await plainDatabase();
+    try {
+      const unknownSubscription = orThrow(createSubscriptionId());
+
+      const changed = await service.handleSubscriptionStatusChange({
+        subscriptionId: unknownSubscription,
+        customerId,
+        oldStatus: 'active',
+        newStatus: 'past_due',
+      });
+      const trial = await service.handleTrialEnding({
+        subscriptionId: unknownSubscription,
+        customerId: orThrow(createCustomerId()),
+        trialEndDate: add(now(), { hours: 72 }),
+        daysUntilEnd: 3,
+      });
+
+      expect(changed).toBeUndefined();
+      expect(trial).toBeUndefined();
       expect(await db.select().from(dunning.dunningExecutions)).toEqual([]);
     } finally {
       await client.close();

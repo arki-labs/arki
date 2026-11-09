@@ -16,7 +16,7 @@ import { fromDate, now, sub } from '@arki/date';
 
 import type { CustomerId } from '../core/primitives.js';
 import type { UserId } from '../core/user-id.js';
-import { INT4_MAX, pgJsonRecordSchema, pgJsonSchema, pgTextSchema, pgVarcharSchema } from '../core/pg-values.js';
+import { INT4_MAX, isPgInstant, pgJsonRecordSchema, pgJsonSchema, pgTextSchema, pgVarcharSchema } from '../core/pg-values.js';
 import { ReferenceNotFound } from '../core/providers/provider-error.js';
 import type {
   CreateCustomerSegmentInput,
@@ -30,7 +30,13 @@ import type {
   UpdateDunningCampaignInput,
   UpdateDunningTemplateInput,
 } from './contracts.js';
-import { dunningActorSchema } from './contracts.js';
+import {
+  createDunningTemplateInputSchema,
+  dunningActorSchema,
+  MAX_DUNNING_DAYS,
+  MAX_DUNNING_HOURS,
+  updateDunningTemplateInputSchema,
+} from './contracts.js';
 import type {
   CustomerSegmentId,
   DunningCampaignId,
@@ -129,6 +135,54 @@ const riskProfileValuesSchema = z.looseObject({
 /** A customer count stored in the segment's `customer_count` (int4). */
 const customerCountSchema = z.number().int().min(0).max(INT4_MAX);
 
+/**
+ * The text and JSON a caller writes into a campaign row, checked against the columns before the write: a
+ * name over 255 characters, U+0000 in text or JSON, or a bigint in JSON returns `schema.invalid_input`
+ * instead of a raw SQLSTATE error. (The contract cannot be parsed again here: its spend range turns
+ * `Money` into stored JSON, so its output is not its input.)
+ */
+const campaignValuesSchema = z.looseObject({
+  name: pgVarcharSchema(255).optional(),
+  description: pgTextSchema.optional(),
+  trigger: pgJsonRecordSchema.optional(),
+  settings: pgJsonRecordSchema.optional(),
+  targetSegments: pgJsonSchema.optional(),
+});
+
+/**
+ * The text, JSON and numbers a caller writes into a segment row, checked against the columns before the
+ * write, as `campaignValuesSchema` does for campaigns.
+ */
+const segmentValuesSchema = z.looseObject({
+  name: pgVarcharSchema(255).optional(),
+  description: pgTextSchema.optional(),
+  criteria: pgJsonRecordSchema.optional(),
+  updateFrequency: z.number().int().min(0).max(INT4_MAX).optional(),
+});
+
+/** The precondition of a page size, an offset or a row count: a whole number Postgres takes in LIMIT and OFFSET. */
+function assertCount(value: number, name: string): void {
+  invariant(Number.isSafeInteger(value) && value >= 0, () => `[@arki/payments] ${name} must be a whole number of 0 or more`);
+}
+
+/** The precondition of a span in whole days or hours: from 0 up to `max` (100 years), so the date it gives stays in range. */
+function assertSpan(value: number, max: number, name: string): void {
+  invariant(
+    Number.isSafeInteger(value) && value >= 0 && value <= max,
+    () => `[@arki/payments] ${name} must be a whole number from 0 to ${max}`,
+  );
+}
+
+/** The precondition of a read bounded by a time: an `instant` column compares only with years 1 to 9999. */
+function assertComparable(value: Instant | undefined, name: string): void {
+  invariant(value === undefined || isPgInstant(value), () => `[@arki/payments] ${name} must fall in the years 1 to 9999`);
+}
+
+/** Whether a search text can match a stored name: text holding U+0000 cannot (no `varchar` holds it). */
+function searchable(search: string | undefined): boolean {
+  return search === undefined || pgTextSchema.safeParse(search).success;
+}
+
 /** SQLSTATE `foreign_key_violation`: the row a new row points at does not exist. */
 const FOREIGN_KEY_VIOLATION = '23503';
 
@@ -194,8 +248,15 @@ export class DunningCampaignRepository {
     return result ?? null;
   }
 
+  /**
+   * One page of campaigns. Preconditions (anything else throws an invariant failure and runs no query):
+   * `limit` and `offset` are whole numbers of 0 or more. A `search` holding U+0000 matches no campaign.
+   */
   async findMany(query: ListDunningCampaignsQuery): Promise<DunningCampaign[]> {
     const { limit, offset, type, status, search, sortBy, sortOrder } = query;
+    assertCount(limit, 'limit');
+    assertCount(offset, 'offset');
+    if (!searchable(search)) return [];
 
     const sortColumn = this.dunningCampaigns[sortBy];
 
@@ -214,10 +275,15 @@ export class DunningCampaignRepository {
       .offset(offset);
   }
 
-  /** The new campaign. An actor id Postgres cannot store returns `schema.invalid_input` and writes nothing. */
+  /**
+   * The new campaign. An actor id, text or JSON Postgres cannot store (a name over 255 characters, U+0000,
+   * a bigint in the trigger or settings) returns `schema.invalid_input` and writes nothing.
+   */
   async create(input: CreateDunningCampaignInput & { createdBy: UserId }): Promise<DunningCampaign | SchemaFailure> {
     const actor = parse(dunningActorSchema, input.createdBy);
     if (isFailure(actor)) return actor;
+    const values = parse(campaignValuesSchema, input);
+    if (isFailure(values)) return values;
     const [campaign] = await this.db
       .insert(this.dunningCampaigns)
       .values({
@@ -236,13 +302,18 @@ export class DunningCampaignRepository {
     return campaign;
   }
 
-  /** The updated campaign, `null` for an unknown id. An actor id Postgres cannot store returns `schema.invalid_input`. */
+  /**
+   * The updated campaign, `null` for an unknown id. An actor id, text or JSON Postgres cannot store returns
+   * `schema.invalid_input` and writes nothing, as in `create`.
+   */
   async update(
     id: DunningCampaignId,
     input: UpdateDunningCampaignInput & { updatedBy: UserId },
   ): Promise<DunningCampaign | null | SchemaFailure> {
     const actor = parse(dunningActorSchema, input.updatedBy);
     if (isFailure(actor)) return actor;
+    const values = parse(campaignValuesSchema, input);
+    if (isFailure(values)) return values;
     const [campaign] = await this.db
       .update(this.dunningCampaigns)
       .set({ ...input, updatedAt: now() })
@@ -332,7 +403,12 @@ export class DunningCampaignRepository {
     return campaign;
   }
 
+  /**
+   * The analytics of the last `days` calendar days, summed. Precondition (anything else throws an
+   * invariant failure and runs no query): `days` is a whole number from 0 to `MAX_DUNNING_DAYS` (100 years).
+   */
   async getAnalyticsSummary(campaignId?: DunningCampaignId, days = 30) {
+    assertSpan(days, MAX_DUNNING_DAYS, 'days');
     // Local-time calendar days, as before: the working value stays a `Date` until the query.
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
@@ -447,8 +523,17 @@ export class DunningTemplateRepository {
       .orderBy(this.dunningTemplates.stepNumber);
   }
 
-  /** The new step, or `DunningCampaignNotFound` when no campaign has `input.campaignId`; nothing is written then. */
-  async create(input: CreateDunningTemplateInput): Promise<DunningTemplate | FailureOf<typeof DunningCampaignNotFound>> {
+  /**
+   * The new step. The input is parsed with `createDunningTemplateInputSchema` first: a value it refuses
+   * (text over its length or holding U+0000, a step number or delay outside its range) returns
+   * `schema.invalid_input`, and no campaign with `input.campaignId` returns `DunningCampaignNotFound`;
+   * nothing is written then.
+   */
+  async create(
+    input: CreateDunningTemplateInput,
+  ): Promise<DunningTemplate | FailureOf<typeof DunningCampaignNotFound> | SchemaFailure> {
+    const valid = parse(createDunningTemplateInputSchema, input);
+    if (isFailure(valid)) return valid;
     const table = this.dunningTemplates;
     return insertOrMissing(
       this.db,
@@ -475,10 +560,16 @@ export class DunningTemplateRepository {
     );
   }
 
+  /**
+   * The updated step, `null` for an unknown id. The input is parsed with `updateDunningTemplateInputSchema`
+   * first: a value it refuses returns `schema.invalid_input` and writes nothing.
+   */
   async update(
     id: DunningTemplateId,
     input: UpdateDunningTemplateInput,
-  ): Promise<DunningTemplate | null> {
+  ): Promise<DunningTemplate | null | SchemaFailure> {
+    const valid = parse(updateDunningTemplateInputSchema, input);
+    if (isFailure(valid)) return valid;
     const [template] = await this.db
       .update(this.dunningTemplates)
       .set({ ...input, updatedAt: now() })
@@ -557,9 +648,18 @@ export class DunningExecutionRepository {
     return result ?? null;
   }
 
+  /**
+   * One page of executions. Preconditions (anything else throws an invariant failure and runs no query):
+   * `limit` and `offset` are whole numbers of 0 or more; `scheduledAfter` and `scheduledBefore` fall in
+   * the years 1 to 9999.
+   */
   async findMany(query: ListExecutionsQuery): Promise<DunningExecution[]> {
     const { limit, offset, campaignId, customerId, status, scheduledAfter, scheduledBefore, sortBy, sortOrder } =
       query;
+    assertCount(limit, 'limit');
+    assertCount(offset, 'offset');
+    assertComparable(scheduledAfter, 'scheduledAfter');
+    assertComparable(scheduledBefore, 'scheduledBefore');
 
     const sortColumn = this.dunningExecutions[sortBy];
 
@@ -695,7 +795,9 @@ export class DunningExecutionRepository {
     return execution;
   }
 
+  /** The due scheduled executions, oldest first. `limit` is a whole number of 0 or more (a precondition: anything else throws an invariant failure). */
   async findScheduledExecutions(limit = 100): Promise<DunningExecution[]> {
+    assertCount(limit, 'limit');
     return this.db
       .select()
       .from(this.dunningExecutions)
@@ -704,7 +806,9 @@ export class DunningExecutionRepository {
       .limit(limit);
   }
 
+  /** The failed executions whose retry is due. `limit` is a whole number of 0 or more (a precondition: anything else throws an invariant failure). */
   async findRetryableExecutions(limit = 50): Promise<DunningExecution[]> {
+    assertCount(limit, 'limit');
     return this.db
       .select()
       .from(this.dunningExecutions)
@@ -761,11 +865,17 @@ export class DunningExecutionRepository {
     return execution;
   }
 
+  /**
+   * The customer's executions of the campaign created in the last `hours` hours, newest first.
+   * Precondition (anything else throws an invariant failure and runs no query): `hours` is a whole
+   * number from 0 to `MAX_DUNNING_HOURS` (100 years).
+   */
   async findRecentForCustomer(
     customerId: CustomerId,
     campaignId: DunningCampaignId,
     hours = 24,
   ): Promise<DunningExecution[]> {
+    assertSpan(hours, MAX_DUNNING_HOURS, 'hours');
     const since = sub(now(), { hours });
 
     return this.db
@@ -800,9 +910,18 @@ export class DunningCommunicationRepository {
     return result ?? null;
   }
 
+  /**
+   * One page of communications. Preconditions (anything else throws an invariant failure and runs no
+   * query): `limit` and `offset` are whole numbers of 0 or more; `sentAfter` and `sentBefore` fall in the
+   * years 1 to 9999.
+   */
   async findMany(query: ListCommunicationsQuery): Promise<DunningCommunication[]> {
     const { limit, offset, executionId, customerId, channel, status, sentAfter, sentBefore, sortBy, sortOrder } =
       query;
+    assertCount(limit, 'limit');
+    assertCount(offset, 'offset');
+    assertComparable(sentAfter, 'sentAfter');
+    assertComparable(sentBefore, 'sentBefore');
 
     const sortColumn = this.dunningCommunications[sortBy];
 
@@ -908,7 +1027,9 @@ export class DunningCommunicationRepository {
     return (communication) ?? null;
   }
 
+  /** The pending communications, oldest first. `limit` is a whole number of 0 or more (a precondition: anything else throws an invariant failure). */
   async findPendingCommunications(limit = 100): Promise<DunningCommunication[]> {
+    assertCount(limit, 'limit');
     return this.db
       .select()
       .from(this.dunningCommunications)
@@ -967,8 +1088,15 @@ export class CustomerSegmentRepository {
     return segment;
   }
 
+  /**
+   * One page of segments. Preconditions (anything else throws an invariant failure and runs no query):
+   * `limit` and `offset` are whole numbers of 0 or more. A `search` holding U+0000 matches no segment.
+   */
   async findMany(query: ListCustomerSegmentsQuery): Promise<CustomerSegmentRow[]> {
     const { limit, offset, type, isActive, search, sortBy, sortOrder } = query;
+    assertCount(limit, 'limit');
+    assertCount(offset, 'offset');
+    if (!searchable(search)) return [];
 
     const sortColumn = this.customerSegments[sortBy];
 
@@ -987,12 +1115,18 @@ export class CustomerSegmentRepository {
       .offset(offset);
   }
 
-  /** The new segment. An actor id Postgres cannot store returns `schema.invalid_input` and writes nothing. */
+  /**
+   * The new segment. An actor id, text, JSON or update frequency Postgres cannot store (a name over 255
+   * characters, U+0000, a bigint in the criteria, a frequency outside int4) returns `schema.invalid_input`
+   * and writes nothing.
+   */
   async create(
     input: CreateCustomerSegmentInput & { createdBy: UserId },
   ): Promise<CustomerSegmentRow | undefined | SchemaFailure> {
     const actor = parse(dunningActorSchema, input.createdBy);
     if (isFailure(actor)) return actor;
+    const values = parse(segmentValuesSchema, input);
+    if (isFailure(values)) return values;
     const [segment] = await this.db
       .insert(this.customerSegments)
       .values({
@@ -1009,10 +1143,16 @@ export class CustomerSegmentRepository {
     return segment;
   }
 
+  /**
+   * The updated segment, `undefined` for an unknown id. Text, JSON or an update frequency Postgres cannot
+   * store returns `schema.invalid_input` and writes nothing, as in `create`.
+   */
   async update(
     id: CustomerSegmentId,
     input: UpdateCustomerSegmentInput,
-  ): Promise<CustomerSegmentRow | undefined> {
+  ): Promise<CustomerSegmentRow | undefined | SchemaFailure> {
+    const values = parse(segmentValuesSchema, input);
+    if (isFailure(values)) return values;
     const [segment] = await this.db
       .update(this.customerSegments)
       .set({ ...input, updatedAt: now() })
@@ -1184,7 +1324,9 @@ export class CustomerRiskProfileRepository {
     );
   }
 
+  /** The profiles in the category, highest score first. `limit` is a whole number of 0 or more (a precondition: anything else throws an invariant failure). */
   async findByRiskCategory(category: RiskCategory, limit = 100): Promise<CustomerRiskProfile[]> {
+    assertCount(limit, 'limit');
     const table = this.customerRiskProfiles;
     const profiles = await this.db
       .select()
@@ -1196,10 +1338,12 @@ export class CustomerRiskProfileRepository {
     return profiles.map(profile => readCustomerRiskProfile(profile));
   }
 
+  /** The profiles in the segment. `limit` is a whole number of 0 or more (a precondition: anything else throws an invariant failure). */
   async findBySegmentId(
     segmentId: CustomerSegmentId,
     limit = 100,
   ): Promise<CustomerRiskProfile[]> {
+    assertCount(limit, 'limit');
     const table = this.customerRiskProfiles;
     const profiles = await this.db
       .select()

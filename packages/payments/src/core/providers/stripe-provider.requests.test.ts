@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { fromUnix, now } from '@arki/date';
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import type { Customer, Plan, Subscription } from '../types.js';
@@ -616,5 +616,91 @@ describe('failures returned by every call that takes our ids', () => {
     }));
 
     expect(await call(stripe)).toMatchObject({ code: 'payments.idempotency_conflict', status: 409 });
+  });
+});
+
+/**
+ * Caller input Stripe and our rows cannot take is refused before any request: metadata that
+ * `JSON.stringify` or a jsonb column cannot take, an id no row can hold, and a day count that is not
+ * a whole number. Each used to reach Stripe or Postgres and come back as a raw error.
+ */
+describe('caller input refused before any request', () => {
+  const nested = { a: { b: 1n } };
+
+  const metadataCalls = {
+    createCustomer: (stripe: StripeProvider) =>
+      stripe.createCustomer({ userId: 'usr_alice', email: 'a@example.com', metadata: nested }),
+    updateCustomer: (stripe: StripeProvider) => stripe.updateCustomer(customer.id, { metadata: nested }),
+    createPlan: (stripe: StripeProvider) =>
+      stripe.createPlan({ name: 'P', tier: 'pro', amount: money('1.00', 'USD'), interval: 'monthly', metadata: nested }),
+    updatePlan: (stripe: StripeProvider) => stripe.updatePlan(proPlan.id, { metadata: nested }),
+    createSubscription: (stripe: StripeProvider) =>
+      stripe.createSubscription({ customerId: customer.id, planId: proPlan.id, metadata: nested }),
+    updateSubscription: (stripe: StripeProvider) =>
+      stripe.updateSubscription(subscriptionRow.id, { metadata: { note: 'a\u0000b' } }),
+    createPayment: (stripe: StripeProvider) =>
+      stripe.createPayment({ customerId: customer.id, amount: money('9.99', 'USD'), paymentMethodId: 'pm_1', metadata: nested }),
+    refundPayment: (stripe: StripeProvider) =>
+      stripe.refundPayment(orThrow(createPaymentId()), {
+        refundId: orThrow(createRefundId()),
+        idempotencyKey: 'k',
+        metadata: nested,
+      }),
+  };
+
+  it.each(Object.entries(metadataCalls))('%s returns schema.invalid_input for metadata with a bigint or U+0000', async (_name, call) => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const result = await call(stripe);
+
+    expect(result).toMatchObject({ code: 'schema.invalid_input' });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('answers an id holding U+0000 as missing without asking the references or Stripe', async () => {
+    let lookups = 0;
+    const counted = {
+      findCustomerById: () => (lookups++, Promise.resolve(null)),
+      findPlanById: () => (lookups++, Promise.resolve(null)),
+      findSubscriptionById: () => (lookups++, Promise.resolve(null)),
+      findPaymentById: () => (lookups++, Promise.resolve(null)),
+    };
+    const http = createFakeStripeHttp(() => ({ body: {} }));
+    const stripe = new StripeProvider(
+      { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
+      { references: counted, httpClient: http.client, maxNetworkRetries: 0 },
+    );
+
+    expect(await stripe.updateCustomer('cust_a\u0000b', { name: 'x' })).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'customer', missing: 'row' },
+    });
+    expect(await stripe.updatePlan('plan_a\u0000b', { name: 'x' })).toMatchObject({ code: 'payments.reference_not_found' });
+    expect(await stripe.cancelSubscription('sub_a\u0000b', {})).toMatchObject({ code: 'payments.reference_not_found' });
+    expect(await stripe.confirmPayment('pay_a\u0000b')).toMatchObject({ code: 'payments.reference_not_found' });
+    expect(await stripe.getCustomer('cust_a\u0000b')).toBeNull();
+    expect(await stripe.getPlan('plan_a\u0000b')).toBeNull();
+    expect(await stripe.getSubscription('sub_a\u0000b')).toBeNull();
+    expect(await stripe.getPayment('pay_a\u0000b')).toBeNull();
+    expect(lookups).toBe(0);
+    expect(http.requests).toHaveLength(0);
+  });
+
+  it.each([1.5, 0, Number.NaN, 366])('a trial or interval count of %s breaks the stated precondition', async days => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    await expect(
+      stripe.createSubscription({ customerId: customer.id, planId: proPlan.id, trialPeriodDays: days }),
+    ).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+    await expect(
+      stripe.createPlan({ name: 'P', tier: 'pro', amount: money('1.00', 'USD'), interval: 'monthly', intervalCount: days }),
+    ).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+    await expect(
+      stripe.createPlan({ name: 'P', tier: 'pro', amount: money('1.00', 'USD'), interval: 'monthly', trialPeriodDays: days }),
+    ).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+    await expect(
+      stripe.createCheckoutSession({ priceId: 'price_pro', successUrl: 'https://a.example/s', cancelUrl: 'https://a.example/c', trialPeriodDays: days === 366 ? 731 : days }),
+    ).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+    expect(requests).toHaveLength(0);
   });
 });

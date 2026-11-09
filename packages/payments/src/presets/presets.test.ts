@@ -1,6 +1,6 @@
 // Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 import type { FailureOf } from '@arki/failure';
-import { InvalidInput, orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, InvalidInput, orThrow } from '@arki/failure';
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { CommandConflict } from '@arki/journal';
 
@@ -447,6 +447,21 @@ describe('Stripe: createSubscriptionBilling().createCheckoutSession for a user w
     return { billing, requests: http.requests };
   }
 
+  // A bad trial failed every checkout at Stripe, or (NaN) went out as no trial at all: it is a boot fault now
+  it.each([0, 1.5, Number.NaN, 731])('a trialDays of %s is refused when the preset is built', trialDays => {
+    const provider = new StripeProvider({ apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' });
+    expect(() =>
+      createSubscriptionBilling({
+        provider,
+        repo: new PaymentRepository(db, core),
+        writes,
+        prices: [{ priceId: 'price_pro_monthly', planId }],
+        urls: { success: 'https://app.test/ok', cancel: 'https://app.test/cancel' },
+        trialDays,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
+  });
+
   it('an email the customers row cannot hold is refused before Stripe makes a customer', async () => {
     const owner = 'usr_checkout_long_email';
     await db.insert(users).values({ id: owner });
@@ -653,6 +668,20 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
       planId,
     });
   }
+
+  // `fromMillis` used to throw a raw RangeError for a hand-built time; the documented precondition fails first now
+  it.each([
+    ['a fraction of a millisecond', { purchased_at_ms: 1.5 }],
+    ['NaN', { expiration_at_ms: Number.NaN }],
+    ['a time past year 9999', { expiration_at_ms: 9e15 }],
+  ])('an event built by hand with %s breaks the stated precondition, and nothing is written', async (_label, times) => {
+    const before = await countEvents(db);
+
+    await expect(deliver('rc_hand_built_time', times)).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+
+    expect(await rowsOf('rc_hand_built_time')).toEqual([]);
+    expect(await countEvents(db)).toBe(before);
+  });
 
   it('returns an ID refusal without acknowledging or writing the native subscription', async () => {
     const before = await countEvents(db);

@@ -30,7 +30,11 @@ export type SendOptions = {
   readonly cc?: Addresses;
   readonly bcc?: Addresses;
   readonly replyTo?: Addresses;
-  /** Forwarded to transports that support it, so a retried send is not delivered twice. */
+  /**
+   * Forwarded to transports that support it, so a retried send is not delivered twice. It may travel as an
+   * HTTP header, so a key holding a line break, a NUL character or a character above U+00FF is refused as
+   * `MailInvalidMessage` before any transport sees it.
+   */
   readonly idempotencyKey?: string;
   readonly signal?: AbortSignal;
   readonly locale?: string;
@@ -75,7 +79,7 @@ export type SendFailure = SendRawFailure | FailureOf<typeof renderTemplate>;
 export type MailTransport = {
   /** Stable name for logs and quota counters; unique within a mailer. */
   readonly id: string;
-  /** Monthly budget, counted per UTC month by `failover`. Omit for none. */
+  /** Monthly budget, counted per UTC month by `failover`. Omit for none. A whole number of at least 0, or the mailer throws `ARKI_MAIL_E001`. */
   readonly quotaPerMonth?: number;
   /**
    * The sent mail, or a returned failure for what the service answered. Throws only `MailError`

@@ -25,7 +25,7 @@ import { isFailure } from '@arki/failure';
 import { CommandConflict, CommandNotFound } from '@arki/journal';
 
 import type { CoreTables } from '../tables.js';
-import { pgInstantSchema, pgJsonRecordSchema, pgVarcharSchema } from '../pg-values.js';
+import { pgInstantSchema, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from '../pg-values.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
 import {
   createSubscriptionId,
@@ -41,6 +41,11 @@ type SubscriptionRow = CoreTables['subscriptions']['$inferSelect'];
 const statusSchema = z.enum(subscriptionStatusValues);
 const isoSchema = z.iso.datetime();
 const metadataSchema = pgJsonRecordSchema;
+/** The id a command reads its subscription stream by: one a text column can hold. */
+const subscriptionRefSchema = subscriptionIdSchema.refine(
+  id => pgTextSchema.safeParse(id).success,
+  'An id cannot contain the NUL character (U+0000)',
+);
 
 /** What the provider says about a subscription, plus who owns it and which plan it is on. */
 const snapshotShape = {
@@ -145,11 +150,11 @@ export const syncSubscriptionInputSchema = z.object({
 
 export const createSubscriptionInputSchema = syncSubscriptionInputSchema.extend({
   /** Left out: the command makes a new id */
-  subscriptionId: subscriptionIdSchema.optional(),
+  subscriptionId: subscriptionRefSchema.optional(),
 });
 
 export const cancelSubscriptionInputSchema = z.object({
-  subscriptionId: subscriptionIdSchema,
+  subscriptionId: subscriptionRefSchema,
   /** The status the provider reports. A cancel at the end of the period keeps the subscription `active`. */
   status: statusSchema.default('canceled'),
   canceledAt: pgInstantSchema().nullable().optional(),
@@ -157,35 +162,35 @@ export const cancelSubscriptionInputSchema = z.object({
 });
 
 export const reactivateSubscriptionInputSchema = z.object({
-  subscriptionId: subscriptionIdSchema,
+  subscriptionId: subscriptionRefSchema,
   status: statusSchema.default('active'),
 });
 
 export const pauseSubscriptionInputSchema = z.object({
-  subscriptionId: subscriptionIdSchema,
+  subscriptionId: subscriptionRefSchema,
   status: statusSchema.default('paused'),
 });
 
 export const resumeSubscriptionInputSchema = z.object({
-  subscriptionId: subscriptionIdSchema,
+  subscriptionId: subscriptionRefSchema,
   status: statusSchema.default('active'),
 });
 
 export const changeSubscriptionPlanInputSchema = z.object({
-  subscriptionId: subscriptionIdSchema,
+  subscriptionId: subscriptionRefSchema,
   /** The plan the provider moved the subscription to */
   planId: planIdSchema,
 });
 
 export const setSubscriptionCancelAtPeriodEndInputSchema = z.object({
-  subscriptionId: subscriptionIdSchema,
+  subscriptionId: subscriptionRefSchema,
   /** The flag the provider reports after the change */
   cancelAtPeriodEnd: z.boolean(),
 });
 
-export const markSubscriptionPastDueInputSchema = z.object({ subscriptionId: subscriptionIdSchema });
+export const markSubscriptionPastDueInputSchema = z.object({ subscriptionId: subscriptionRefSchema });
 
-export const activateSubscriptionInputSchema = z.object({ subscriptionId: subscriptionIdSchema });
+export const activateSubscriptionInputSchema = z.object({ subscriptionId: subscriptionRefSchema });
 
 export type SyncSubscriptionInput = z.input<typeof syncSubscriptionInputSchema>;
 export type CreateSubscriptionInput = z.input<typeof createSubscriptionInputSchema>;

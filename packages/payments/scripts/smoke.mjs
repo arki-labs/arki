@@ -1,7 +1,8 @@
 // Cross-runtime smoke test. Runs the BUILT entries under Node, Bun and Deno via
 // `bun run test:runtimes`. No Stripe account and no database: a webhook is signed with
 // Stripe's own scheme and verified by the real service, money and tax checks run on values,
-// and a RevenueCat event is projected into a recording write port.
+// and a RevenueCat event is projected into a recording write port. StripeProvider checks the same
+// signature with Stripe's async check, which Bun, Deno and workers need (their crypto is async only).
 // Entries: root and ./core (ids, tables), ./core/money, ./presets (RevenueCat projector),
 // ./tax (tax-id format), ./dunning, ./refunds, ./repositories, ./env (loaded).
 
@@ -11,6 +12,8 @@ import { isFailure } from '@arki/failure';
 
 import * as core from '../dist/core/index.js';
 import { fromMinorColumn, positiveMoneySchema, toMinorColumn } from '../dist/core/money.js';
+import { InvalidWebhookSignature } from '../dist/core/providers/provider-error.js';
+import { StripeProvider } from '../dist/core/providers/stripe-provider.js';
 import { createWebhookSecurityService } from '../dist/core/security/webhook-security.js';
 import * as dunning from '../dist/dunning/index.js';
 import { createPlanId, paymentProviderValues, planIdSchema } from '../dist/index.js';
@@ -73,6 +76,18 @@ const wrongIp = await security.validateWebhook(
   secret,
 );
 
+// No request leaves the process: checking a webhook signature is local work
+const stripe = new StripeProvider({ apiKey: 'sk_test_smoke', webhookSecret: secret, environment: 'sandbox' });
+const stripeValid = await stripe.validateWebhook(payload, sign(payload, timestamp), String(timestamp), '1.2.3.4');
+const stripeForged = await stripe.validateWebhook(
+  payload,
+  sign(payload, timestamp).replace(/.$/, '0'),
+  String(timestamp),
+  '1.2.3.4',
+);
+const stripeEvent = await stripe.constructWebhookEvent(payload, sign(payload, timestamp));
+const stripeForgedEvent = await stripe.constructWebhookEvent(payload, sign(payload, timestamp).replace(/.$/, '0'));
+
 const calls = [];
 const writes = { syncSubscription: async input => (calls.push(input), {}) };
 const event = revenueCatWebhookSchema.parse({
@@ -108,6 +123,14 @@ const checks = [
     'an address outside the allow list is refused',
     `${wrongIp.isValid}:${String(wrongIp.error).includes('unauthorized IP')}`,
     'false:true',
+  ],
+  ['StripeProvider.validateWebhook accepts a correctly signed webhook', stripeValid.isValid, true],
+  ['StripeProvider.validateWebhook answers a forged signature as not valid', stripeForged.isValid, false],
+  ['StripeProvider.constructWebhookEvent returns the signed event', stripeEvent.id, 'evt_1'],
+  [
+    'StripeProvider.constructWebhookEvent returns payments.invalid_signature for a forged one',
+    InvalidWebhookSignature.is(stripeForgedEvent),
+    true,
   ],
   ['minor units round trip through money', toMinorColumn(money), 1999],
   ['money keeps its currency', `${money.currency}`, 'USD'],

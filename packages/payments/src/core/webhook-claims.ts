@@ -13,7 +13,7 @@ import type { Instant } from '@arki/date';
 import { z } from '@arki/contracts';
 import { now } from '@arki/date';
 import { invariant, isFailure } from '@arki/failure';
-import { parse } from '@arki/schema';
+import { is, parse } from '@arki/schema';
 
 import type { CoreTables } from './tables.js';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
@@ -27,6 +27,7 @@ import { WebhookClaimConflict } from './services/webhook-failures.js';
  * years 1 to 9999. The enum columns are held by their TypeScript types.
  */
 const claimableEventSchema = z.looseObject({
+  id: pgTextSchema.optional(),
   providerEventId: pgVarcharSchema(255).min(1),
   data: pgJsonRecordSchema,
   attempts: z.number().int().min(0).max(INT4_MAX).optional(),
@@ -98,7 +99,8 @@ export async function claimWebhookEvent(
  * on servers whose clocks disagree), and a counter cannot repeat.
  *
  * Preconditions (anything else throws an invariant failure): `seenAttempts` is the whole `attempts`
- * value read from the row, and `leaseCutoff` falls in the years 1 to 9999.
+ * value read from the row, and `leaseCutoff` falls in the years 1 to 9999. An `id` no row can hold
+ * (U+0000) takes nothing over: false, with no query.
  */
 export async function reclaimWebhookEvent(
   db: WebhookClaimDb,
@@ -112,6 +114,7 @@ export async function reclaimWebhookEvent(
     '[@arki/payments] seenAttempts must be the attempts value read from the row',
   );
   invariant(isPgInstant(leaseCutoff), '[@arki/payments] leaseCutoff must fall in the years 1 to 9999');
+  if (!is(id, pgTextSchema)) return false;
   const attemptAt = now();
   const won = await db
     .update(table)
