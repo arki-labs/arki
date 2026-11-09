@@ -11,10 +11,11 @@ import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { orThrow } from '@arki/failure';
-import { initJournal } from '@arki/journal';
+import { CommandNotFound, initJournal } from '@arki/journal';
 import { money } from '@arki/money';
 
 import type { NotificationService } from '../core/notifications/service.js';
+import { NotificationFailed } from '../core/failures.js';
 import type { AppDb, AppTx } from '../test-support.js';
 import { createCoreJournal } from '../core/journal.js';
 import { coreReads, refundReads, seedPayment } from '../service-test-support.js';
@@ -25,9 +26,24 @@ import { RefundService } from './service.js';
 
 /** The refunds the approvers were mailed about, in order. */
 const approverMails: string[] = [];
+/** The refunds whose customer was told of the rejection, in order. */
+const rejectionMails: string[] = [];
+/** `down`: every send returns `payments.notification_failed`; `refused`: every send returns another failure. */
+let mailFault: 'down' | 'refused' | null = null;
+/** What a send returns while `mailFault` is set. */
+const fault = (notification: 'refund_approval_request' | 'refund_status_update') =>
+  mailFault === 'down'
+    ? NotificationFailed({ channel: 'email', notification })
+    : CommandNotFound({ detail: 'The mailer has no approver list' });
 const notifications: NotificationService = {
   sendRefundApprovalRequest: refund => {
+    if (mailFault !== null) return Promise.resolve(fault('refund_approval_request'));
     approverMails.push(refund.id);
+    return Promise.resolve();
+  },
+  sendRefundStatusUpdate: (refund, status) => {
+    if (mailFault !== null) return Promise.resolve(fault('refund_status_update'));
+    rejectionMails.push(`${refund.id}:${status}`);
     return Promise.resolve();
   },
 };
@@ -133,5 +149,65 @@ describe('createRefundEffects', () => {
 
     await drainAll();
     expect(approverMails).toEqual([waiting.id]);
+  });
+
+  // A mail that did not go out used to be logged and acked: no retry, no lastError, and the approvers never knew.
+  // A transport outage sends nothing, so the job tries again later instead of dying at once.
+  it('a mail that returned payments.notification_failed is retried with backoff, never acked or dropped', async () => {
+    mailFault = 'down';
+    try {
+      const waiting = await requested(30);
+      await drainAll();
+
+      const { jobs: dead } = await journal.jobs(db, { status: 'dead', effect: 'refund-approval-request' });
+      expect(dead).toEqual([]);
+      const { jobs: waitingJobs } = await journal.jobs(db, { effect: 'refund-approval-request' });
+      const retrying = waitingJobs.filter(job => JSON.stringify(job.lastError).includes('payments.notification_failed'));
+      expect(retrying).toHaveLength(1);
+      expect(retrying[0]).toMatchObject({ attempts: 1, deadAt: null });
+      expect(approverMails).not.toContain(waiting.id);
+    } finally {
+      mailFault = null;
+    }
+  });
+
+  it('any other failure the mailer returns makes the job dead at once, with it as lastError', async () => {
+    mailFault = 'refused';
+    try {
+      await requested(31);
+      await drainAll();
+
+      const { jobs } = await journal.jobs(db, { status: 'dead', effect: 'refund-approval-request' });
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]).toMatchObject({ attempts: 1 });
+      expect(JSON.stringify(jobs[0]?.lastError)).toContain('journal.not_found');
+    } finally {
+      mailFault = null;
+    }
+  });
+
+  // The customer's rejection mail used to be sent by RefundService, its failure logged and dropped
+  it('tells the customer of a rejection after the commit, and retries a mail the transport could not send', async () => {
+    const rejected = await requested(25);
+    await orThrow(service().rejectRefund({ refundId: rejected.id, rejectedBy: adminId, reason: 'outside policy' }));
+    expect(rejectionMails).toEqual([]);
+    await drainAll();
+    expect(rejectionMails).toEqual([`${rejected.id}:rejected`]);
+
+    mailFault = 'down';
+    try {
+      const unlucky = await requested(25);
+      await orThrow(service().rejectRefund({ refundId: unlucky.id, rejectedBy: adminId, reason: 'outside policy' }));
+      await drainAll();
+
+      const { jobs: dead } = await journal.jobs(db, { status: 'dead', effect: 'refund-rejection-notice' });
+      expect(dead).toEqual([]);
+      const { jobs } = await journal.jobs(db, { effect: 'refund-rejection-notice' });
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]).toMatchObject({ attempts: 1, deadAt: null });
+      expect(JSON.stringify(jobs[0]?.lastError)).toContain('payments.notification_failed');
+    } finally {
+      mailFault = null;
+    }
   });
 });

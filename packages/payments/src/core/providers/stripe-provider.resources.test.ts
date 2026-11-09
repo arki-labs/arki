@@ -227,6 +227,25 @@ describe('customers', () => {
     expect(result.metadata).toEqual({ plan: 'x', vip: true });
   });
 
+  it('createCustomer sends metadata as Stripe strings, and our userId wins over a userId in it', async () => {
+    // Stripe metadata values are strings: an object sent raw is form-encoded as nested keys, which Stripe refuses
+    const { stripe, requests } = provider(() => ({ body: stripeCustomer() }));
+
+    const created = await stripe.createCustomer({
+      userId: 'usr_alice',
+      email: 'new@example.com',
+      metadata: { order: { id: 7 }, seats: 3, userId: 'usr_mallory' },
+    });
+
+    assert(!isFailure(created), 'customer creation must succeed with working entropy');
+    expect(requests[0]?.form).toMatchObject({
+      'metadata[order]': '{"id":7}',
+      'metadata[seats]': '3',
+      'metadata[userId]': 'usr_alice',
+    });
+    expect(Object.keys(requests[0]?.form ?? {})).not.toContain('metadata[order][id]');
+  });
+
   it('deleteCustomer deletes the Stripe customer', async () => {
     const { stripe, requests } = provider(() => ({ body: { id: 'cus_alice', object: 'customer', deleted: true } }));
 
@@ -337,7 +356,7 @@ describe('plans', () => {
     expect(isFailure(await refunded.stripe.getPayment(paymentRow.id))).toBe(false);
   });
 
-  it('previewSubscriptionChange returns the money failure for a line amount in an unknown currency', async () => {
+  it('previewSubscriptionChange returns money.unknown_currency for an invoice in a currency money does not know', async () => {
     const { stripe } = provider(request =>
       request.path === '/v1/invoices/create_preview'
         ? {
@@ -348,7 +367,7 @@ describe('plans', () => {
 
     const preview = await stripe.previewSubscriptionChange({ subscriptionId: subscriptionRow.id, planId });
 
-    expect(isFailure(preview)).toBe(true);
+    expect(preview).toMatchObject({ code: 'money.unknown_currency' });
   });
 
   it('getPlan is null for an unknown plan', async () => {
@@ -497,6 +516,39 @@ describe('subscriptions', () => {
     });
     expect(preview.nextBillingDate.epochMilliseconds).toBe(T1 * 1000);
   });
+
+  it('previewSubscriptionChange sums every page of invoice lines, not only the first one the preview carries', async () => {
+    // Stripe puts 10 lines in the preview; a larger change must not be under-counted
+    const firstPage = Array.from({ length: 10 }, (_, index) => ({ id: `il_${index}`, ...line(100, false) }));
+    const secondPage = [{ id: 'il_10', ...line(250, false) }, { id: 'il_11', ...line(-300, true) }];
+    const { stripe, requests } = provider(request => {
+      if (request.path === '/v1/invoices/create_preview') {
+        return {
+          body: {
+            id: 'upcoming_in_1',
+            object: 'invoice',
+            currency: 'usd',
+            lines: { object: 'list', url: '/v1/invoices/upcoming_in_1/lines', has_more: true, data: firstPage },
+          },
+        };
+      }
+      if (request.path === '/v1/invoices/upcoming_in_1/lines') {
+        return request.form.starting_after === 'il_9'
+          ? { body: list(secondPage) }
+          : { body: { ...list(firstPage), has_more: true } };
+      }
+      return { body: stripeSubscription() };
+    });
+
+    const preview = await orThrow(stripe.previewSubscriptionChange({ subscriptionId: subscriptionRow.id, planId }));
+
+    expect(requests.filter(request => request.path === '/v1/invoices/upcoming_in_1/lines')).toHaveLength(2);
+    expect(preview.proration).toEqual({
+      immediateTotal: { amount: '0.00', currency: 'USD' },
+      creditApplied: { amount: '3.00', currency: 'USD' },
+      nextInvoiceTotal: { amount: '12.50', currency: 'USD' },
+    });
+  });
 });
 
 describe('payments', () => {
@@ -538,6 +590,14 @@ describe('payments', () => {
       refundedAmountMinor: 500,
       metadata: { order: '7' },
     });
+  });
+
+  it('createPayment returns money.unknown_currency when Stripe answers an intent in a currency money does not know', async () => {
+    const { stripe } = provider(() => ({ body: stripeIntent({ currency: 'zzz' }) }));
+
+    const payment = await stripe.createPayment({ customerId: customer.id, amount: money(15, 'USD'), paymentMethodId: 'pm_1' });
+
+    expect(payment).toMatchObject({ code: 'money.unknown_currency' });
   });
 
   it('createPayment shows a declined card as a failed payment with the reason', async () => {
@@ -683,6 +743,63 @@ describe('amounts Stripe cannot take are returned before any request', () => {
 
     expect(plan).toMatchObject({ code: 'money.provider_amount' });
     // A product made before the price failed would be left behind in Stripe
+    expect(requests).toEqual([]);
+  });
+
+  it('createPlan returns money.out_of_range for an amount past 2^53 of Stripe units, and creates no product', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const plan = await stripe.createPlan({
+      name: 'Pro',
+      tier: 'pro',
+      amount: money('100000000000000000', 'USD'),
+      interval: 'monthly',
+    });
+
+    expect(plan).toMatchObject({ code: 'money.out_of_range' });
+    expect(requests).toEqual([]);
+  });
+
+  it('createPlan deletes the product it made when Stripe refuses the price, then throws the price error', async () => {
+    const { stripe, requests } = provider(request => {
+      if (request.path === '/v1/products' && request.method === 'POST') {
+        return { body: { id: 'prod_new', object: 'product', name: 'Pro' } };
+      }
+      if (request.path === '/v1/prices') {
+        return { status: 400, body: { error: { type: 'invalid_request_error', message: 'Amount too large' } } };
+      }
+      return { body: { id: 'prod_new', object: 'product', deleted: true } };
+    });
+
+    await expect(
+      stripe.createPlan({ name: 'Pro', tier: 'pro', amount: money('9.99', 'USD'), interval: 'monthly' }),
+    ).rejects.toMatchObject({ name: 'PaymentProviderError', code: 'invalid_request' });
+    expect(requests.at(-1)).toMatchObject({ method: 'DELETE', path: '/v1/products/prod_new' });
+  });
+
+  it('createPayment returns money.out_of_range for an amount past 2^53 of Stripe units', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const payment = await stripe.createPayment({
+      customerId: customer.id,
+      amount: money('100000000000000000', 'USD'),
+      paymentMethodId: 'pm_1',
+    });
+
+    expect(payment).toMatchObject({ code: 'money.out_of_range' });
+    expect(requests).toEqual([]);
+  });
+
+  it('createPaymentIntent returns money.provider_amount for a negative amount', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const intent = await stripe.createPaymentIntent({
+      customerId: customer.id,
+      amount: money('-1.00', 'USD'),
+      automatic: false,
+    });
+
+    expect(intent).toMatchObject({ code: 'money.provider_amount' });
     expect(requests).toEqual([]);
   });
 

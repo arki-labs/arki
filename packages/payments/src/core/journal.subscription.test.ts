@@ -21,7 +21,7 @@ import type { AppDb } from '../test-support.js';
 import type { SyncSubscriptionInput } from './journal.js';
 import type { SubscriptionId, SubscriptionStatus } from './types.js';
 import { core, countEvents, customerId, eventTypesOf, meta, openDb, plain, planId, userId } from '../test-support.js';
-import { createSubscriptionId } from './primitives.js';
+import { createCustomerId, createPlanId, createSubscriptionId } from './primitives.js';
 
 const { subscriptions } = core;
 const { journal } = plain;
@@ -511,6 +511,83 @@ describe('syncSubscription (webhooks and provider sync)', () => {
       'SubscriptionCreated',
       'SubscriptionSynced',
     ]);
+  });
+});
+
+describe('what the caller sends that the tables cannot hold is a typed failure, never a raw Postgres error', () => {
+  const missingPlan = () => orThrow(createPlanId());
+  const missingCustomer = () => orThrow(createCustomerId());
+
+  it.each([
+    ['createSubscription', commands.createSubscription],
+    ['syncSubscription', commands.syncSubscription],
+  ] as const)(
+    '%s returns reference_not_found for a plan, customer or user with no row, and writes nothing',
+    async (_name, command) => {
+      const before = await countEvents(db);
+      const plan = missingPlan();
+      const customer = missingCustomer();
+
+      expect(await journal.run(db, command, delivery({ planId: plan }), meta)).toMatchObject({
+        code: 'payments.reference_not_found',
+        data: { kind: 'plan', id: plan, missing: 'row' },
+      });
+      expect(await journal.run(db, command, delivery({ customerId: customer }), meta)).toMatchObject({
+        code: 'payments.reference_not_found',
+        data: { kind: 'customer', id: customer },
+      });
+      expect(await journal.run(db, command, delivery({ userId: 'usr_nobody' }), meta)).toMatchObject({
+        code: 'payments.reference_not_found',
+        data: { kind: 'user', id: 'usr_nobody' },
+      });
+      expect(await countEvents(db)).toBe(before);
+    },
+  );
+
+  it('createSubscription returns journal.conflict for a provider subscription id that is already stored', async () => {
+    const stored = delivery();
+    await orThrow(journal.run(db, commands.createSubscription, stored, meta));
+    const before = await countEvents(db);
+
+    const second = await journal.run(
+      db,
+      commands.createSubscription,
+      { ...stored, subscriptionId: orThrow(createSubscriptionId()) },
+      meta,
+    );
+
+    expect(second).toMatchObject({ code: 'journal.conflict' });
+    expect(await rowsOfProvider(stored.providerSubscriptionId)).toHaveLength(1);
+    expect(await countEvents(db)).toBe(before);
+  });
+
+  it('changeSubscriptionPlan returns reference_not_found for a plan with no row', async () => {
+    const subscriptionId = await seed('active');
+    const plan = missingPlan();
+
+    expect(
+      await journal.run(db, commands.changeSubscriptionPlan, { subscriptionId, planId: plan }, meta),
+    ).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'plan', id: plan },
+    });
+    expect(await rowOf(subscriptionId)).toMatchObject({ planId });
+  });
+
+  it.each([
+    ['U+0000 in metadata', { metadata: { store: 'APP\u0000STORE' } }],
+    ['U+0000 in a metadata key', { metadata: { 'st\u0000ore': 'APP_STORE' } }],
+    ['U+0000 in the provider subscription id', { providerSubscriptionId: 'sub_\u0000' }],
+    ['a provider subscription id past 255 characters', { providerSubscriptionId: 's'.repeat(256) }],
+    ['a period end before year 1', { currentPeriodEnd: instant('-000100-01-01T00:00:00Z') }],
+    ['a trial end after year 9999', { trialEnd: instant('+010000-01-01T00:00:00Z') }],
+  ] as const)('syncSubscription refuses %s as schema.invalid_input', async (_what, overrides) => {
+    const before = await countEvents(db);
+
+    expect(await journal.run(db, commands.syncSubscription, delivery(overrides), meta)).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await countEvents(db)).toBe(before);
   });
 });
 

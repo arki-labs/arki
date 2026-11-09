@@ -49,6 +49,32 @@ export const DunningExecutionNotFound = /* @__PURE__ */ defineFailure('payments.
 });
 
 /**
+ * The customer already has a risk profile, so `CustomerRiskProfileRepository.create` wrote nothing.
+ *
+ * @fix Use `upsert` to replace the stored profile, or `update` to change it.
+ * @verify bun run test -- src/dunning/customer-risk-profile.test.ts
+ */
+export const CustomerRiskProfileExists = /* @__PURE__ */ defineFailure('payments.customer_risk_profile_exists', {
+  status: 409,
+  data: z.object({ customerId: z.string() }),
+  message: 'Customer {customerId} already has a risk profile',
+  remediation: 'Use upsert to replace the stored profile, or update to change it.',
+});
+
+/**
+ * A delivery callback names a provider message id that no dunning communication has. Nothing was written.
+ *
+ * @fix Check that the callback comes from the provider that sent the message; a message sent before its id was stored has none.
+ * @verify bun run test -- src/dunning/communication-service.test.ts
+ */
+export const DunningCommunicationNotFound = /* @__PURE__ */ defineFailure('payments.dunning_communication_not_found', {
+  status: 404,
+  data: z.object({ providerMessageId: z.string() }),
+  message: 'No dunning communication has the provider message id {providerMessageId}',
+  remediation: 'Check that the callback comes from the provider that sent the message.',
+});
+
+/**
  * The campaign exists but is not active, so it cannot run. Nothing was written.
  *
  * @fix Set the campaign status to `active` first.

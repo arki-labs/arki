@@ -9,7 +9,7 @@ import type { MoneyFailure } from '@arki/money';
 import { Money } from '@arki/money';
 
 import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
-import type { ReferenceNotFound } from '../../core/providers/provider-error.js';
+import { ReferenceNotFound } from '../../core/providers/provider-error.js';
 import type { CoreTables } from '../../core/tables.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types.js';
 import type { DunningCampaignId } from '../primitives.js';
@@ -88,7 +88,7 @@ export class DunningIntegrationService {
 
     this.communicationService = createCommunicationOrchestrationService(
       db,
-      { dunningCommunications: dunningTables.dunningCommunications },
+      { dunningCommunications: dunningTables.dunningCommunications, dunningExecutions: dunningTables.dunningExecutions },
       config.communication,
     );
 
@@ -120,6 +120,9 @@ export class DunningIntegrationService {
    *
    * A campaign whose stored spend range is not valid money (`@arki/money` refuses it) is skipped, and the
    * first such failure is returned after the other campaigns have run, so one bad campaign stops no other.
+   * A customer, payment or subscription the event names with no row returns `ReferenceNotFound` (a payment
+   * with no subscription only has no retries). A campaign run that throws (a database error) is thrown,
+   * never logged and dropped, so the caller can retry the event.
    */
   async handlePaymentFailure(event: {
     paymentId: PaymentId;
@@ -140,12 +143,11 @@ export class DunningIntegrationService {
     // First, let the payment retry service handle technical retries (if available)
     if (this.paymentRetryService) {
       const scheduled = await this.paymentRetryService.scheduleRetries(event.paymentId, event.failureReason);
+      // The event names a payment (or its subscription) with no row: nothing else runs
+      if (ReferenceNotFound.is(scheduled)) return scheduled;
+      // A one-off payment has no subscription, so it has no retries to schedule; dunning still runs
       if (isFailure(scheduled)) {
-        logger.warn('No payment retries scheduled for {paymentId}: {code}', {
-          paymentId: event.paymentId,
-          code: scheduled.code,
-          failure: scheduled,
-        });
+        logger.debug('No payment retries for {paymentId}: {code}', { paymentId: event.paymentId, code: scheduled.code });
       }
     }
 
@@ -165,32 +167,27 @@ export class DunningIntegrationService {
 
     // Execute applicable campaigns
     let badRange: MoneyFailure | undefined;
+    // A campaign run that throws (the database is down) is thrown, so the caller can retry the event
     for (const campaign of applicableCampaigns) {
-      try {
-        // Check if campaign conditions are met
-        const applies = this.evaluateCampaignConditions(campaign, event);
-        if (isFailure(applies)) {
-          logger.error('Campaign {campaignId} has a spend range that is not valid money: {code}', {
-            campaignId: campaign.id,
-            code: applies.code,
-          });
-          badRange ??= applies;
-        } else if (applies) {
-          await this.executeCampaignForCustomer(campaign.id, event);
-        }
-      } catch (error) {
-        logger.error('Failed to execute campaign for payment failure', {
+      // Check if campaign conditions are met
+      const applies = this.evaluateCampaignConditions(campaign, event);
+      if (isFailure(applies)) {
+        logger.error('Campaign {campaignId} has a spend range that is not valid money: {code}', {
           campaignId: campaign.id,
-          customerId: event.customerId,
-          error: error instanceof Error ? error.message : String(error),
+          code: applies.code,
         });
+        badRange ??= applies;
+      } else if (applies) {
+        const executed = await this.executeCampaignForCustomer(campaign.id, event);
+        if (isFailure(executed)) return executed;
       }
     }
     return badRange;
   }
 
   /**
-   * Handle subscription status changes
+   * Handle subscription status changes. An unknown customer or subscription returns `ReferenceNotFound`;
+   * a campaign run that throws is thrown, so the caller can retry the event.
    */
   async handleSubscriptionStatusChange(event: {
     subscriptionId: SubscriptionId;
@@ -217,7 +214,8 @@ export class DunningIntegrationService {
   }
 
   /**
-   * Handle trial ending notifications
+   * Handle trial ending notifications. An unknown customer or subscription returns `ReferenceNotFound`;
+   * a campaign run that throws is thrown, so the caller can retry the event.
    */
   async handleTrialEnding(event: {
     subscriptionId: SubscriptionId;
@@ -225,7 +223,7 @@ export class DunningIntegrationService {
     trialEndDate: Instant;
     daysUntilEnd: number;
     metadata?: Record<string, unknown>;
-  }): Promise<void | MoneyFailure> {
+  }): Promise<void | HandlerFailure> {
     logger.info('Processing trial ending', {
       customerId: event.customerId,
       subscriptionId: event.subscriptionId,
@@ -236,30 +234,25 @@ export class DunningIntegrationService {
     const customerSegments = await this.segmentationService.getCustomerSegments(event.customerId);
     if (isFailure(customerSegments)) return customerSegments;
 
+    // A trial-ending campaign is a time-based one (its `trialEndingDays` condition)
     const applicableCampaigns = await this.campaignService.findActiveCampaignsForTrigger(
-      'trial_ending',
+      'time_based',
       customerSegments,
     );
 
+    // A campaign run that throws (the database is down) is thrown, so the caller can retry the event
     for (const campaign of applicableCampaigns) {
-      try {
-        if (this.evaluateTrialEndingConditions(campaign, event)) {
-          await this.executeCampaignForCustomer(campaign.id, {
-            customerId: event.customerId,
-            subscriptionId: event.subscriptionId,
-            triggerData: {
-              daysUntilEnd: event.daysUntilEnd,
-              trialEndDate: event.trialEndDate,
-              ...event.metadata,
-            },
-          });
-        }
-      } catch (error) {
-        logger.error('Failed to execute trial ending campaign', {
-          campaignId: campaign.id,
+      if (this.evaluateTrialEndingConditions(campaign, event)) {
+        const executed = await this.executeCampaignForCustomer(campaign.id, {
           customerId: event.customerId,
-          error: error instanceof Error ? error.message : String(error),
+          subscriptionId: event.subscriptionId,
+          triggerData: {
+            daysUntilEnd: event.daysUntilEnd,
+            trialEndDate: event.trialEndDate,
+            ...event.metadata,
+          },
         });
+        if (isFailure(executed)) return executed;
       }
     }
   }
@@ -291,7 +284,9 @@ export class DunningIntegrationService {
   }
 
   /**
-   * Execute a specific campaign for a customer
+   * Execute a specific campaign for a customer. A customer, subscription or payment the event names
+   * with no row returns its `ReferenceNotFound`. A campaign deleted, paused or emptied since it was
+   * listed as active is skipped (the other campaigns still run).
    */
   private async executeCampaignForCustomer(
     campaignId: DunningCampaignId,
@@ -301,7 +296,7 @@ export class DunningIntegrationService {
       paymentId?: PaymentId;
       triggerData?: Record<string, unknown>;
     },
-  ): Promise<void> {
+  ): Promise<FailureOf<typeof ReferenceNotFound> | undefined> {
     const executions = await this.campaignService.executeCampaign(
       {
         campaignId,
@@ -313,10 +308,12 @@ export class DunningIntegrationService {
       },
       this.systemUserId, // System user for automated executions
     );
+    if (ReferenceNotFound.is(executions)) return executions;
     // The campaign was deleted, paused or emptied since it was listed as active: skip it, the others still run
     if (isFailure(executions)) {
-      logger.warn('Campaign {campaignId} was not executed: {code}', { campaignId, code: executions.code });
+      logger.info('Campaign {campaignId} was not executed: {code}', { campaignId, code: executions.code });
     }
+    return undefined;
   }
 
   /**
@@ -337,26 +334,20 @@ export class DunningIntegrationService {
       customerSegments,
     );
 
+    // A campaign run that throws (the database is down) is thrown, so the caller can retry the event
     for (const campaign of applicableCampaigns) {
-      try {
-        // Check if campaign is for past_due status
-        if (campaign.trigger.conditions.subscriptionStatus?.includes('past_due')) {
-          await this.executeCampaignForCustomer(campaign.id, {
-            customerId: event.customerId,
-            subscriptionId: event.subscriptionId,
-            triggerData: {
-              oldStatus: event.oldStatus,
-              newStatus: event.newStatus,
-              ...event.metadata,
-            },
-          });
-        }
-      } catch (error) {
-        logger.error('Failed to execute past due campaign', {
-          campaignId: campaign.id,
+      // Check if campaign is for past_due status
+      if (campaign.trigger.conditions.subscriptionStatus?.includes('past_due')) {
+        const executed = await this.executeCampaignForCustomer(campaign.id, {
           customerId: event.customerId,
-          error: error instanceof Error ? error.message : String(error),
+          subscriptionId: event.subscriptionId,
+          triggerData: {
+            oldStatus: event.oldStatus,
+            newStatus: event.newStatus,
+            ...event.metadata,
+          },
         });
+        if (isFailure(executed)) return executed;
       }
     }
   }

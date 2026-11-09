@@ -19,6 +19,7 @@ import { money } from '@arki/money';
 import type { NotificationService } from '../core/notifications/service.js';
 import type { AppDb, AppTx } from '../test-support.js';
 import type { RefundStripe } from './workflow.js';
+import { NotificationFailed } from '../core/failures.js';
 import { createCoreJournal } from '../core/journal.js';
 import { IdempotencyConflict, PaymentProviderError } from '../core/providers/provider-error.js';
 import { coreReads, refundReads, refundRow, seedPayment } from '../service-test-support.js';
@@ -92,12 +93,16 @@ let beforeNextCheckpoint: (() => void) | undefined;
 
 /** Every mail the workflow sent, as `<to>:<refundId>[:<status>]`. */
 let mails: string[] = [];
+/** True: the alert transport is down, and support alerts return `payments.notification_failed`. */
+let alertsDown = false;
 const notifications: NotificationService = {
   sendRefundStatusUpdate: (refund, status) => {
     mails.push(`customer:${refund.id}:${status}`);
     return Promise.resolve();
   },
   sendRefundFailureAlert: refund => {
+    if (alertsDown)
+      return Promise.resolve(NotificationFailed({ channel: 'slack', notification: 'refund_failure_alert' }));
     mails.push(`support:${refund.id}`);
     return Promise.resolve();
   },
@@ -132,6 +137,7 @@ const harness = () => workflowHarness({ setup, schema: pushedSchema });
 beforeEach(async () => {
   stripe = stripeAccount();
   mails = [];
+  alertsDown = false;
   beforeNextCheckpoint = undefined;
   h = await harness();
   await seedFixture(h.db);
@@ -294,6 +300,22 @@ describe('settling', () => {
     expect(mails).toEqual([`customer:${refundId}:completed`]);
   });
 
+  // The alert's failure used to be logged and dropped: nothing told an operator that support never heard
+  it('a support alert that did not go out is the run output notificationFailure, and the refund still ends failed', async () => {
+    stripe = stripeAccount({ status: 'failed', failureReason: 'insufficient_funds' });
+    alertsDown = true;
+    const { refundId, runId } = await approvedRefund();
+
+    orThrow(await h.drain());
+
+    expect(await refundRow(h.db, refundId)).toMatchObject({ status: 'failed' });
+    expect(await runRow(runId)).toMatchObject({
+      state: 'completed',
+      output: { providerRefundId: 're_1', outcome: 'failed', notificationFailure: 'payments.notification_failed' },
+    });
+    expect(mails).toEqual([]);
+  });
+
   it('a failed Stripe refund ends the row failed and frees the amount', async () => {
     stripe = stripeAccount({ status: 'failed', failureReason: 'insufficient_funds' });
     const { payment, refundId, runId } = await approvedRefund();
@@ -429,6 +451,7 @@ describe('reading a run', () => {
       providerRefundId: string;
       outcome: 'completed' | 'failed';
       lateFailure?: string | undefined;
+      notificationFailure?: string | undefined;
     } | null>();
     expectTypeOf(read.run.results.payBack).toEqualTypeOf<
       { providerRefundId: string; status: string | null } | undefined

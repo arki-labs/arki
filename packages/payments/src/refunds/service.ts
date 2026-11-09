@@ -7,12 +7,10 @@ import { TransactionDefect, TransactionRejected } from '@arki/db/errors';
 import type { FailureOf } from '@arki/failure';
 import { isFailure } from '@arki/failure';
 import { isJournalError } from '@arki/journal';
-import { getLogger } from '@arki/log';
 import { sum } from '@arki/money';
 import { currencyCodeSchema } from '@arki/money/zod';
 import { parse } from '@arki/schema';
 
-import type { NotificationService } from '../core/notifications/service.js';
 import type { PaymentRepository } from '../core/repository.js';
 import type { PaymentId } from '../core/types.js';
 import type { RefundWrites } from './journal.js';
@@ -34,9 +32,6 @@ import {
 } from './failures.js';
 import { createRefundRepository, refundAmountOf } from './repository.js';
 import { pendingRefundIndexName } from './tables.js';
-
-/** Logs ids only, never refund data. */
-const logger = getLogger('arki:payments');
 
 /**
  * The largest refund approved without a person, per currency: `{ USD: '10.00', JPY: '1500' }`.
@@ -134,8 +129,6 @@ export class RefundService {
     private readonly writes: RefundWrites,
     private readonly paymentRepository: PaymentReads,
     config: RefundServiceConfig,
-    /** Sends the customer's rejection mail only. The approvers' mail is an effect: `createRefundEffects`. */
-    private readonly notificationService?: NotificationService,
   ) {
     this.refundWindow = config.refundWindowMs ?? 90 * 24 * 60 * 60 * 1000;
     this.systemUserId = config.systemUserId;
@@ -225,12 +218,7 @@ export class RefundService {
       rejectedBy: data.rejectedBy,
       rejectionReason: reason,
     });
-    if (isFailure(rejectedRefund)) return rejectedRefund;
-
-    if (this.notificationService) {
-      await this.notifyCustomer(rejectedRefund, 'rejected');
-    }
-
+    // The customer hears from the `refund-rejection-notice` effect (`createRefundEffects`), after the commit
     return rejectedRefund;
   }
 
@@ -303,28 +291,6 @@ export class RefundService {
     return limit !== undefined && amount.lte(limit);
   }
 
-  private async notifyCustomer(refund: Refund, event: 'rejected'): Promise<void> {
-    if (this.notificationService?.sendRefundStatusUpdate) {
-      try {
-        const sent = await this.notificationService.sendRefundStatusUpdate(refund, event);
-        if (isFailure(sent)) {
-          logger.warn('Refund {event} mail for {refundId} was not sent: {code}', {
-            refundId: refund.id,
-            event,
-            code: sent.code,
-            failure: sent,
-          });
-        }
-      } catch (error) {
-        logger.error('Refund {event} mail for {refundId} was not sent: {error}', {
-          refundId: refund.id,
-          event,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-  }
-
   // Analytics methods
   async getRefundMetrics(startDate?: Instant, endDate?: Instant) {
     return this.refundRepository.getRefundMetrics(startDate, endDate);
@@ -345,7 +311,6 @@ export function createRefundService(
   writes: RefundWrites,
   paymentRepository: PaymentRepository,
   config: RefundServiceConfig,
-  notificationService?: NotificationService,
 ) {
-  return new RefundService(createRefundRepository(db, tables), writes, paymentRepository, config, notificationService);
+  return new RefundService(createRefundRepository(db, tables), writes, paymentRepository, config);
 }

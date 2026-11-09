@@ -5,6 +5,7 @@ import type { FailureOf, Result } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
 import { fromUnix, now } from '@arki/date';
 import { isFailure } from '@arki/failure';
+import { getLogger } from '@arki/log';
 import {
   AmountOutOfRange,
   Currency,
@@ -13,6 +14,7 @@ import {
   ProviderAmount,
   ProviderAmountError,
   sum,
+  UnknownCurrencyError,
 } from '@arki/money';
 import { fromStripeAmount, toStripeAmount } from '@arki/money/stripe';
 
@@ -52,6 +54,8 @@ import {
   TaxAddressIncomplete,
 } from './provider-error.js';
 import { mapStripeEventType } from './stripe-event-types.js';
+
+const logger = getLogger('arki:payments:stripe');
 
 /**
  * The rows the provider reads to turn our ids into Stripe ids. A `PaymentRepository` fits.
@@ -93,6 +97,17 @@ function stripeAmountOf(amount: Money) {
     if (error instanceof NumericRangeError) return AmountOutOfRange({ cause: error });
     throw error;
   }
+}
+
+/**
+ * The currency a tax call names, read from the caller's code. A code outside ISO 4217 (a custom
+ * currency such as `PTS`, or a typo such as `us`) has no Stripe rule, so it is returned as
+ * `ProviderAmount` with an `UnknownCurrencyError` as `cause`, as `stripeAmountOf` does for a custom currency.
+ */
+function stripeCurrencyOf(code: string) {
+  const upper = code.toUpperCase();
+  const currency = Currency.parse(upper);
+  return isFailure(currency) ? ProviderAmount({ cause: new UnknownCurrencyError(upper.slice(0, 32)) }) : currency;
 }
 
 /** An amount of ours that Stripe cannot take: what `stripeAmountOf` returns instead of units. */
@@ -155,8 +170,9 @@ type TaxTransactionParams = {
 
 /**
  * The Stripe tax calculation params for line items in one currency. Shared by quotes and recorded transactions.
- * Returns `TaxAddressIncomplete` for an address with no country (the package's `customerDetails` input
- * schema allows one) and the money failure of a line amount Stripe cannot take. A line item in another
+ * Returns `ProviderAmount` for a currency outside ISO 4217, `TaxAddressIncomplete` for an address with no
+ * country (the package's `customerDetails` input schema allows one) and the money failure of a line amount
+ * Stripe cannot take. A line item in another
  * currency than `currency`, or a fractional quantity, throws: both are the caller's own typed values.
  */
 function toTaxCalculationParams(params: {
@@ -164,7 +180,8 @@ function toTaxCalculationParams(params: {
   lineItems: { amount: Money; quantity?: number; reference: string; taxCode?: string }[];
   customerDetails?: TaxCustomerDetails;
 }) {
-  const currency = params.currency.toUpperCase();
+  const currency = stripeCurrencyOf(params.currency);
+  if (isFailure(currency)) return currency;
   const address = params.customerDetails?.address;
   if (address && !address.country) return TaxAddressIncomplete();
 
@@ -346,10 +363,7 @@ export class StripeProvider extends BasePaymentProvider {
       this.stripe.customers.create({
         email: params.email,
         name: params.name,
-        metadata: {
-          userId: params.userId,
-          ...params.metadata,
-        },
+        metadata: toStripeMetadata({ ...params.metadata, userId: params.userId }),
       }),
     );
 
@@ -484,7 +498,11 @@ export class StripeProvider extends BasePaymentProvider {
         // `planId` lets `listPlans` find our row from a Stripe price
         metadata: toStripeMetadata({ ...params.metadata, planId }),
       }),
-    );
+    ).catch(async (error: unknown) => {
+      // A product with no price is no plan: delete it, then throw the price error as before
+      await this.deleteOrphanProduct(stripeProduct.id);
+      throw error;
+    });
 
     const plan: Plan = {
       id: planId,
@@ -503,6 +521,21 @@ export class StripeProvider extends BasePaymentProvider {
       updatedAt: now(),
     };
     return plan;
+  }
+
+  /**
+   * Deletes a product `createPlan` made whose price Stripe refused. A failed delete is logged at WARN
+   * with the product id, and the caller still gets the price error `createPlan` throws.
+   */
+  private async deleteOrphanProduct(productId: string) {
+    try {
+      await this.call('stripe.products.del', () => this.stripe.products.del(productId));
+    } catch (error) {
+      logger.warn('Stripe product {productId} has no price and could not be deleted: {error}', {
+        productId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** `null` when the plan has no row; `ReferenceNotFound` when its row has no Stripe price. */
@@ -799,10 +832,18 @@ export class StripeProvider extends BasePaymentProvider {
     // The invoice's currency is Stripe's answer: one money refuses is a returned failure, not a throw
     const currency = Currency.parse(invoice.currency.toUpperCase());
     if (isFailure(currency)) return currency;
+    // The preview carries the first page of lines (10 by default); the rest are read by the preview's id
+    const lines = invoice.lines.has_more
+      ? await this.call('stripe.invoices.list_line_items', async () => {
+          const all: Stripe.InvoiceLineItem[] = [];
+          for await (const line of this.stripe.invoices.listLineItems(invoice.id, { limit: 100 })) all.push(line);
+          return all;
+        })
+      : invoice.lines.data;
     let charged = Money.zero(currency);
     let credited = Money.zero(currency);
     let next = Money.zero(currency);
-    for (const line of invoice.lines.data) {
+    for (const line of lines) {
       const amount = fromStripeAmount(line.amount, currency);
       if (isFailure(amount)) return amount;
       const proration = line.parent?.subscription_item_details?.proration ?? false;
@@ -1460,7 +1501,6 @@ export class StripeProvider extends BasePaymentProvider {
       );
     }
     const originalTransactionId = params.originalTransactionId;
-    const currency = params.currency.toUpperCase();
 
     let reversal: Stripe.Tax.TransactionCreateReversalParams = {
       mode: 'full',
@@ -1469,6 +1509,8 @@ export class StripeProvider extends BasePaymentProvider {
       expand: ['line_items'],
     };
     if (params.lineItems.length > 0) {
+      const currency = stripeCurrencyOf(params.currency);
+      if (isFailure(currency)) return currency;
       // Stripe wants the refunded total, tax included, as a negative integer
       const refunded = stripeAmountOf(
         sum(

@@ -14,6 +14,9 @@ import type { RefundId, RefundReason, RefundStatus } from './primitives.js';
 import type { RefundsTables } from './tables.js';
 import type { Refund } from './types.js';
 import { fromMinorColumn, toMinorColumn } from '../core/money.js';
+import { isPgInstant, pgTextSchema } from '../core/pg-values.js';
+import { invariant } from '@arki/failure';
+import { is } from '@arki/schema';
 
 /**
  * Structural database type for the refunds repository. Only uses
@@ -50,7 +53,9 @@ export class RefundRepository {
   }
 
   /** The refund the provider knows by `providerRefundId`: the link between a webhook and our row. */
+  /** No row holds U+0000, so an id with one finds nothing (Postgres would refuse the parameter). */
   async findByProviderRefundId(providerRefundId: string): Promise<Refund | null> {
+    if (!is(providerRefundId, pgTextSchema)) return null;
     const [refund] = await this.db
       .select()
       .from(this.refunds)
@@ -106,6 +111,10 @@ export class RefundRepository {
     return fromMinorColumn(result[0]?.total ?? '0', currency);
   }
 
+  /**
+   * Refunds created in the range (both bounds optional): their count, one total per currency, and
+   * counts by status and reason. The bounds fall in the years 1 to 9999, or it throws `FailureError` (`invariant`).
+   */
   async getRefundMetrics(
     startDate?: Instant,
     endDate?: Instant,
@@ -116,6 +125,11 @@ export class RefundRepository {
     byStatus: Record<string, number>;
     byReason: Record<string, number>;
   }> {
+    // Postgres compares an `instant` only in the years 1 to 9999: another typed time is a bug in the caller
+    invariant(
+      [startDate, endDate].every(time => time === undefined || isPgInstant(time)),
+      'getRefundMetrics needs times in the years 1 to 9999 (UTC)',
+    );
     const conditions = [];
     if (startDate) {
       conditions.push(gte(this.refunds.createdAt, startDate));
@@ -135,7 +149,8 @@ export class RefundRepository {
     const byReason: Record<string, number> = {};
     const metrics = {
       totalCount: allRefunds.length,
-      totalAmount: MoneyBag.empty().plus(...allRefunds.map(refund => refundAmountOf(refund))),
+      // Folded one by one: spreading every refund as arguments overflows the call stack on Node past ~100k refunds
+      totalAmount: allRefunds.reduce((bag, refund) => bag.plus(refundAmountOf(refund)), MoneyBag.empty()),
       byStatus,
       byReason,
     };
@@ -170,6 +185,7 @@ export class RefundRepository {
     return totalTime / completedRefunds.length;
   }
 
+  /** The refunds that match every filter given, newest first. `startDate` and `endDate` fall in the years 1 to 9999, or it throws `FailureError` (`invariant`). */
   async searchRefunds(filters: {
     status?: RefundStatus;
     reason?: RefundReason;
@@ -180,6 +196,10 @@ export class RefundRepository {
     minAmount?: Money;
     maxAmount?: Money;
   }): Promise<Refund[]> {
+    invariant(
+      [filters.startDate, filters.endDate].every(time => time === undefined || isPgInstant(time)),
+      'searchRefunds needs times in the years 1 to 9999 (UTC)',
+    );
     const conditions = [];
 
     if (filters.status) {

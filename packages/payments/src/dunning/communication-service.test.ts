@@ -15,7 +15,7 @@ import { defineRelations, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { add, now } from '@arki/date';
+import { add, now, toMillis } from '@arki/date';
 import { findDatabaseError } from '@arki/db/errors';
 import { InvalidInput, orThrow, UnexpectedFailure } from '@arki/failure';
 
@@ -26,6 +26,7 @@ import type {
   InAppNotificationStore,
   StoredInAppNotification,
 } from './services/communication-service.js';
+import { createCustomerId } from '../core/primitives.js';
 import { PaymentProviderError } from '../core/providers/provider-error.js';
 import { core, customerId, schema, userId, users } from '../test-support.js';
 import {
@@ -35,6 +36,7 @@ import {
   NotificationProviderTimeout,
   NotificationWebhookHostNotAllowed,
 } from './failures.js';
+import { createDunningExecutionId, createDunningTemplateId } from './primitives.js';
 import { DunningCampaignService } from './services/campaign-service.js';
 import {
   CommunicationOrchestrationService,
@@ -534,7 +536,7 @@ describe('CommunicationOrchestrationService.sendCommunication', () => {
         throw new Error('not used');
       },
     );
-    const campaign = await campaigns.createCampaign(
+    const created = await campaigns.createCampaign(
       {
         name: 'Notify',
         type: 'payment_failed',
@@ -565,6 +567,7 @@ describe('CommunicationOrchestrationService.sendCommunication', () => {
       },
       'usr_admin',
     );
+    const campaign = orThrow(created);
     const template = campaign.templates[0];
     if (!template) throw new Error('the campaign has no template');
     const [execution] = await db
@@ -630,6 +633,85 @@ describe('CommunicationOrchestrationService.sendCommunication', () => {
     expect(sent).toMatchObject({ status: 'sent', providerMessageId: 'email_sent' });
   });
 
+  it('an unknown execution, step or customer returns its not-found code, writes no row and sends nothing', async () => {
+    const service = new CommunicationOrchestrationService(db, tables);
+    service.registerProvider(email());
+    const { execution, template } = await scheduledExecution();
+    const unknownExecution = { ...execution, id: orThrow(createDunningExecutionId()) };
+    const unknownStep = { ...template, id: orThrow(createDunningTemplateId()) };
+    const unknownCustomer = { ...execution, customerId: orThrow(createCustomerId()) };
+    const requestsBefore = requestCount;
+
+    const answers = [
+      await service.sendCommunication(unknownExecution, template, customer),
+      await service.sendCommunication(execution, unknownStep, customer),
+      await service.sendCommunication(unknownCustomer, template, customer),
+    ];
+
+    expect(answers).toMatchObject([
+      { code: 'payments.dunning_execution_not_found', data: { executionId: unknownExecution.id } },
+      { code: 'payments.dunning_template_not_found', data: { templateId: unknownStep.id } },
+      { code: 'payments.reference_not_found', data: { kind: 'customer', id: unknownCustomer.customerId } },
+    ]);
+    expect(requestCount).toBe(requestsBefore);
+    expect(await communicationsOf(execution.id)).toHaveLength(0);
+    expect(await communicationsOf(unknownExecution.id)).toHaveLength(0);
+  });
+
+  it('a recipient the column cannot store returns schema.invalid_input, writes no row and sends nothing', async () => {
+    const service = new CommunicationOrchestrationService(db, tables);
+    service.registerProvider(email());
+    const { execution, template } = await scheduledExecution();
+    const requestsBefore = requestCount;
+
+    const tooLong = await service.sendCommunication(execution, template, {
+      ...customer,
+      email: `${'a'.repeat(250)}@example.com`,
+    });
+    const withNul = await service.sendCommunication(execution, template, {
+      ...customer,
+      email: 'buyer\u0000@example.com',
+    });
+
+    expect(tooLong).toMatchObject({ code: 'schema.invalid_input' });
+    expect(withNul).toMatchObject({ code: 'schema.invalid_input' });
+    expect(requestCount).toBe(requestsBefore);
+    expect(await communicationsOf(execution.id)).toHaveLength(0);
+  });
+
+  it('a refusal whose message holds U+0000 is still returned typed, with no upstream message, and the row is failed', async () => {
+    const service = new CommunicationOrchestrationService(db, tables);
+    service.registerProvider(email());
+    const { execution, template } = await scheduledExecution();
+    answerWith({ status: 422, body: JSON.stringify({ message: 'bad\u0000' }) });
+
+    const refused = await service.sendCommunication(execution, template, customer);
+
+    expect(refused).toMatchObject({
+      code: 'payments.notification_provider_rejected',
+      data: { upstreamStatus: 422, upstreamMessage: null },
+    });
+    expect(await communicationsOf(execution.id)).toEqual([
+      expect.objectContaining({ status: 'failed', failureReason: 'resend refused the notification with status 422' }),
+    ]);
+  });
+
+  it('an accepted message whose id the column cannot store is payments.notification_provider_response_invalid', async () => {
+    const service = new CommunicationOrchestrationService(db, tables);
+    service.registerProvider(email());
+    service.registerProvider(sms());
+    const { execution, template } = await scheduledExecution();
+    answerWith({ status: 200, body: JSON.stringify({ id: 'e'.repeat(256) }) });
+
+    const longId = await service.sendCommunication(execution, template, customer);
+    answerWith({ status: 201, body: JSON.stringify({ sid: 'SM\u0000' }) });
+    const nulSid = await sms().send({ ...request, recipient: '+15550000002' });
+
+    expect(longId).toMatchObject({ code: 'payments.notification_provider_response_invalid' });
+    expect(nulSid).toMatchObject({ code: 'payments.notification_provider_response_invalid' });
+    expect(await communicationsOf(execution.id)).toEqual([expect.objectContaining({ status: 'failed' })]);
+  });
+
   it('a provider that cannot be reached is thrown as unavailable after the row is marked failed', async () => {
     const service = new CommunicationOrchestrationService(db, tables);
     service.registerProvider(
@@ -683,6 +765,44 @@ describe('CommunicationOrchestrationService.sendCommunication', () => {
     }
   });
 
+  // Executions own the resend: a failed send is sent again by exactly one job, never by both
+  it('retryFailedCommunications skips a send whose execution will be retried, and a send a later one replaced', async () => {
+    const service = new CommunicationOrchestrationService(db, tables);
+    service.registerProvider(email());
+    answerWith({ status: 422, body: JSON.stringify({ message: 'refused' }) });
+    const retried = await scheduledExecution();
+    const givenUp = await scheduledExecution();
+    // Two refused sends per execution: the second replaces the first
+    for (const { execution, template } of [retried, givenUp]) {
+      for (const attempt of [1, 2]) {
+        expect(await service.sendCommunication(execution, template, customer), `attempt ${attempt}`).toMatchObject({
+          code: 'payments.notification_provider_rejected',
+        });
+      }
+    }
+    // retryFailedExecutions will run the first execution again; no retry will run the second
+    await db
+      .update(tables.dunningExecutions)
+      .set({ status: 'failed', nextRetryAt: add(now(), { minutes: 30 }) })
+      .where(eq(tables.dunningExecutions.id, retried.execution.id));
+    await db
+      .update(tables.dunningExecutions)
+      .set({ status: 'failed', nextRetryAt: null })
+      .where(eq(tables.dunningExecutions.id, givenUp.execution.id));
+    answerWith({ status: 200, body: JSON.stringify({ id: 'email_resent' }) });
+
+    await service.retryFailedCommunications();
+
+    const statuses = async (executionId: DunningExecutionId) => {
+      const rows = await communicationsOf(executionId);
+      return rows
+        .toSorted((left, right) => toMillis(left.createdAt) - toMillis(right.createdAt))
+        .map(row => row.status);
+    };
+    expect(await statuses(retried.execution.id)).toEqual(['failed', 'failed']);
+    expect(await statuses(givenUp.execution.id)).toEqual(['failed', 'sent']);
+  });
+
   it('processPendingCommunications lists each communication it could not send', async () => {
     const service = new CommunicationOrchestrationService(db, tables);
     const { execution, template } = await scheduledExecution();
@@ -721,5 +841,104 @@ describe('CommunicationOrchestrationService.sendCommunication', () => {
 
     expect(NotificationProviderRejected.is(refused)).toBe(true);
     expect(refused).toMatchObject({ code: 'payments.notification_provider_rejected', data: { upstreamStatus: 500 } });
+  });
+});
+
+describe('CommunicationOrchestrationService.handleCommunicationWebhook', () => {
+  async function sentCommunication(providerMessageId: string) {
+    const [execution] = await db.select().from(tables.dunningExecutions).limit(1);
+    if (!execution?.templateId) throw new Error('no execution with a step to attach the communication to');
+    const [row] = await db
+      .insert(tables.dunningCommunications)
+      .values({
+        executionId: execution.id,
+        customerId,
+        templateId: execution.templateId,
+        channel: 'email',
+        recipient: 'buyer@example.com',
+        content: 'Please update your card',
+        status: 'sent',
+        providerMessageId,
+      })
+      .returning();
+    if (!row) throw new Error('the communication was not stored');
+
+    return row;
+  }
+
+  const service = () => new CommunicationOrchestrationService(db, tables);
+
+  it('a delivered callback records when it was delivered and returns the communication', async () => {
+    const sent = await sentCommunication('email_delivered');
+    const deliveredAt = now();
+
+    const updated = await service().handleCommunicationWebhook({
+      providerMessageId: 'email_delivered',
+      event: 'delivered',
+      timestamp: deliveredAt,
+    });
+
+    expect(updated).toMatchObject({ id: sent.id, status: 'sent', deliveredAt });
+  });
+
+  it('a provider message id no communication has returns payments.dunning_communication_not_found', async () => {
+    const answer = await service().handleCommunicationWebhook({
+      providerMessageId: 'email_unknown',
+      event: 'opened',
+      timestamp: now(),
+    });
+
+    expect(answer).toMatchObject({
+      code: 'payments.dunning_communication_not_found',
+      data: { providerMessageId: 'email_unknown' },
+    });
+  });
+
+  it('a payload Postgres cannot store returns schema.invalid_input and writes nothing', async () => {
+    const sent = await sentCommunication('email_nul_metadata');
+
+    const answers = [
+      await service().handleCommunicationWebhook({
+        providerMessageId: 'email\u0000',
+        event: 'opened',
+        timestamp: now(),
+      }),
+      await service().handleCommunicationWebhook({
+        providerMessageId: 'e'.repeat(256),
+        event: 'opened',
+        timestamp: now(),
+      }),
+      await service().handleCommunicationWebhook({
+        providerMessageId: 'email_nul_metadata',
+        event: 'opened',
+        timestamp: now(),
+        metadata: { note: 'x\u0000' },
+      }),
+    ];
+
+    for (const answer of answers) expect(answer).toMatchObject({ code: 'schema.invalid_input' });
+    const [row] = await db
+      .select()
+      .from(tables.dunningCommunications)
+      .where(eq(tables.dunningCommunications.id, sent.id));
+    expect(row).toMatchObject({ openedAt: null, trackingData: null });
+  });
+});
+
+describe('getDeliveryStatus of a slow provider', () => {
+  it('EmailProvider and SMSProvider return payments.notification_provider_timeout', async () => {
+    answerWith({ status: 200, body: '{}', delayMs: 500 });
+
+    const fromEmail = await email(50).getDeliveryStatus('email_123');
+    const fromSms = await sms(50).getDeliveryStatus('SM123');
+
+    expect(fromEmail).toMatchObject({
+      code: 'payments.notification_provider_timeout',
+      data: { provider: 'resend', timeoutMs: 50 },
+    });
+    expect(fromSms).toMatchObject({
+      code: 'payments.notification_provider_timeout',
+      data: { provider: 'twilio', timeoutMs: 50 },
+    });
   });
 });

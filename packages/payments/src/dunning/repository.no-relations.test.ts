@@ -15,6 +15,7 @@ import { instant } from '@arki/date';
 import { FAILURE_ERROR_CODES, FailureError, invariant, orThrow } from '@arki/failure';
 
 import { core, customerId, rejectionOf, schema, userId, users } from '../test-support.js';
+import type { UserId } from '../core/user-id.js';
 import type { CreateCustomerSegmentInput, CreateDunningCampaignInput } from './contracts.js';
 import { createDunningRepository } from './repository.js';
 import { createDunningTables } from './tables.js';
@@ -152,7 +153,7 @@ describe('reads on a database without relations', () => {
   });
 
   it('reads segments and risk profiles', async () => {
-    const input: CreateCustomerSegmentInput & { createdBy: string } = {
+    const input: CreateCustomerSegmentInput & { createdBy: UserId } = {
       name: 'High risk',
       type: 'behavior_based',
       criteria: {},
@@ -160,7 +161,7 @@ describe('reads on a database without relations', () => {
       updateFrequency: 1,
       createdBy: 'usr_test',
     };
-    const segment = await repositories.customerSegments.create(input);
+    const segment = orThrow(await repositories.customerSegments.create(input));
 
     expect(segment?.name).toBe('High risk');
     const matching = repositories.customerSegments.findMany({
@@ -188,7 +189,7 @@ describe('an insert that returns no row', () => {
     );
 
     try {
-      const input: CreateDunningCampaignInput & { createdBy: string } = {
+      const input: CreateDunningCampaignInput & { createdBy: UserId } = {
         name: 'Skipped',
         type: 'payment_failed',
         trigger: { type: 'payment_failure', conditions: {} },

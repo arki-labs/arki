@@ -4,6 +4,7 @@ import { instantSchema } from '@arki/date/zod';
 
 import type { SpendRange } from './types.js';
 import { nonNegativeMoneySchema } from '../core/money.js';
+import { INT4_MAX, pgJsonRecordSchema as jsonRecord, pgTextSchema as pgText, pgVarcharSchema } from '../core/pg-values.js';
 import { customerIdSchema } from '../core/primitives.js';
 import {
   communicationChannelValues,
@@ -18,30 +19,6 @@ import {
   executionStatusValues,
   riskCategoryValues,
 } from './primitives.js';
-
-/** Whether a key or a string anywhere in this JSON value holds U+0000. */
-function holdsNul(value: unknown): boolean {
-  let found = false;
-  JSON.stringify(value, (key: string, item: unknown) => {
-    if (key.includes('\u0000') || (typeof item === 'string' && item.includes('\u0000'))) found = true;
-    return item;
-  });
-  return found;
-}
-
-/**
- * Text Postgres can store. A `text`, `varchar` or `jsonb` value cannot hold U+0000: Postgres refuses
- * it (SQLSTATE 22021, or 22P05 in jsonb), so the contract refuses it first, as `schema.invalid_input`.
- */
-const pgText = z.string().refine(value => !value.includes('\u0000'), 'Text cannot contain the NUL character (U+0000)');
-
-/** A JSON object stored in a jsonb column: no key or string anywhere in it may hold U+0000. */
-const jsonRecord = z
-  .record(pgText, z.unknown())
-  .refine(value => !holdsNul(value), 'JSON cannot contain the NUL character (U+0000)');
-
-/** The largest value of a Postgres `integer` (int4) column, 2^31 - 1. A larger one is refused with SQLSTATE 22003. */
-const INT4_MAX = 2_147_483_647;
 
 // Base validation schemas for enums
 
@@ -74,16 +51,34 @@ export const customerSegmentTypeSchema = z.enum(customerSegmentTypeValues);
 
 export const riskCategorySchema = z.enum(riskCategoryValues);
 
+/** The user a dunning write is attributed to (`created_by`, `updated_by`): a `usr_` id Postgres can store. */
+export const dunningActorSchema = pgText.pipe(userIdSchema);
+
+/**
+ * The longest span a dunning setting may name, 100 years, in days and in hours. The services turn these
+ * spans into dates (a cutoff, a schedule); a longer span leaves the range of dates `@arki/date` and
+ * Postgres can hold, so the contract refuses it as `schema.invalid_input`.
+ */
+export const MAX_DUNNING_DAYS = 36_500;
+export const MAX_DUNNING_HOURS = MAX_DUNNING_DAYS * 24;
+const MAX_DUNNING_MONTHS = 1200;
+
+/** A span in days a dunning setting names: a whole number from `min` up to 100 years. */
+const daysSchema = (min: number) => z.number().int().min(min).max(MAX_DUNNING_DAYS);
+
+/** A step's delay in hours: a whole number up to 100 years. */
+const delayHoursSchema = z.number().int().min(0).max(MAX_DUNNING_HOURS);
+
 // Complex object schemas
 export const campaignTriggerSchema = z.object({
   type: z.enum(['payment_failure', 'subscription_status', 'time_based', 'manual']),
   conditions: z.object({
     paymentFailureCount: z.number().int().min(1).optional(),
     subscriptionStatus: z.array(pgText).optional(),
-    daysSinceLastPayment: z.number().int().min(0).optional(),
-    daysSinceFailure: z.number().int().min(0).optional(),
-    trialEndingDays: z.number().int().min(0).optional(),
-    renewalReminderDays: z.number().int().min(0).optional(),
+    daysSinceLastPayment: daysSchema(0).optional(),
+    daysSinceFailure: daysSchema(0).optional(),
+    trialEndingDays: daysSchema(0).optional(),
+    renewalReminderDays: daysSchema(0).optional(),
   }),
   filters: z
     .object({
@@ -103,7 +98,7 @@ export const campaignTriggerSchema = z.object({
 export const campaignSettingsSchema = z.object({
   enabled: z.boolean(),
   priority: z.number().int().min(1).max(10),
-  cooldownPeriod: z.number().int().min(0), // hours
+  cooldownPeriod: z.number().int().min(0).max(MAX_DUNNING_HOURS), // hours
   maxExecutionsPerCustomer: z.number().int().min(1),
   stopOnPaymentSuccess: z.boolean(),
   respectUnsubscribe: z.boolean(),
@@ -131,20 +126,20 @@ export const segmentCriteriaSchema = z.object({
   totalSpent: spendRangeSchema.optional(),
   subscriptionDuration: z
     .object({
-      min: z.number().int().min(0).optional(), // months
-      max: z.number().int().min(0).optional(),
+      min: z.number().int().min(0).max(MAX_DUNNING_MONTHS).optional(), // months
+      max: z.number().int().min(0).max(MAX_DUNNING_MONTHS).optional(),
     })
     .optional(),
   paymentFailureHistory: z
     .object({
-      count: z.number().int().min(0),
-      timeframe: z.number().int().min(1), // days
+      count: z.number().int().min(0).max(INT4_MAX),
+      timeframe: daysSchema(1), // days
     })
     .optional(),
   planTier: z.array(pgText).optional(),
   lastPaymentDate: z
     .object({
-      daysAgo: z.number().int().min(0),
+      daysAgo: daysSchema(0),
     })
     .optional(),
   lifetimeValue: z
@@ -180,16 +175,22 @@ export const riskScoreSchema = z.object({
 export const dunningCampaignTemplateInputSchema = z.object({
   name: pgText.min(1).max(255),
   stepNumber: z.number().int().min(1).max(INT4_MAX),
-  delayHours: z.number().int().min(0).max(INT4_MAX),
+  delayHours: delayHoursSchema,
   communication: communicationTemplateSchema,
 });
 
-/** The full set of steps of a campaign. Step numbers are unique: update matches steps by number. */
+/**
+ * The full set of steps of a campaign. Step numbers are unique: update matches steps by number. The
+ * steps run one after another, so their delays together stay within 100 years too.
+ */
 export const dunningCampaignTemplatesSchema = z
   .array(dunningCampaignTemplateInputSchema)
   .min(1)
   .refine(templates => new Set(templates.map(template => template.stepNumber)).size === templates.length, {
     message: 'Template step numbers must be unique',
+  })
+  .refine(templates => templates.reduce((total, template) => total + template.delayHours, 0) <= MAX_DUNNING_HOURS, {
+    message: `The step delays together cannot exceed ${MAX_DUNNING_HOURS} hours (100 years)`,
   });
 
 export const createDunningCampaignInputSchema = z.object({
@@ -219,7 +220,7 @@ export const createDunningTemplateInputSchema = z.object({
   name: pgText.min(1).max(255),
   description: pgText.max(1000).optional(),
   stepNumber: z.number().int().min(1).max(INT4_MAX),
-  delayHours: z.number().int().min(0).max(INT4_MAX),
+  delayHours: delayHoursSchema,
   communication: communicationTemplateSchema,
   abTestVariant: pgText.max(50).optional(),
 });
@@ -228,7 +229,7 @@ export const updateDunningTemplateInputSchema = z.object({
   name: pgText.min(1).max(255).optional(),
   description: pgText.max(1000).optional(),
   stepNumber: z.number().int().min(1).max(INT4_MAX).optional(),
-  delayHours: z.number().int().min(0).max(INT4_MAX).optional(),
+  delayHours: delayHoursSchema.optional(),
   communication: communicationTemplateSchema.optional(),
   isActive: z.boolean().optional(),
   abTestVariant: pgText.max(50).optional(),
@@ -306,16 +307,20 @@ export const updateCommunicationStatusInputSchema = z.object({
   openedAt: instantSchema().optional(),
   clickedAt: instantSchema().optional(),
   failureReason: pgText.optional(),
-  providerMessageId: pgText.optional(),
+  providerMessageId: pgVarcharSchema(255).optional(),
   providerResponse: jsonRecord.optional(),
   trackingData: jsonRecord.optional(),
 });
 
+/**
+ * A delivery callback from a channel provider, as `CommunicationOrchestrationService.handleCommunicationWebhook`
+ * reads it: the provider's message id, the event, when it happened, and the provider's extra data.
+ */
 export const communicationWebhookSchema = z.object({
-  communicationId: dunningCommunicationIdSchema,
-  event: z.enum(['sent', 'delivered', 'opened', 'clicked', 'bounced', 'complained']),
+  providerMessageId: pgVarcharSchema(255),
+  event: z.enum(['delivered', 'opened', 'clicked', 'bounced', 'complained']),
   timestamp: instantSchema(),
-  providerData: jsonRecord.optional(),
+  metadata: jsonRecord.optional(),
 });
 
 export const bulkExecuteCampaignInputSchema = z.object({

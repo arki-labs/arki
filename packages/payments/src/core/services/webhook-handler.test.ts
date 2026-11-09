@@ -16,12 +16,12 @@
  * stub: signature checks are covered in `webhook-security.test.ts`.
  */
 import type { PGlite } from '@electric-sql/pglite';
-import { asc, eq, isNotNull } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, lt } from 'drizzle-orm';
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RandomSourceUnavailable } from '@arki/contracts';
-import { add, fromUnix, now, sub } from '@arki/date';
-import { InvalidInput, isFailure, orThrow } from '@arki/failure';
+import { add, fromUnix, instant, now, sub } from '@arki/date';
+import { FAILURE_ERROR_CODES, InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { UnknownCurrency } from '@arki/money';
 import { CommandConflict, initJournal } from '@arki/journal';
 
@@ -46,6 +46,7 @@ import {
   userId,
 } from '../../test-support.js';
 import { createWebhookId } from '../primitives.js';
+import { PaymentRepository } from '../repository.js';
 import { claimWebhookEvent, reclaimWebhookEvent } from '../webhook-claims.js';
 import {
   isWebhookFailure,
@@ -98,11 +99,11 @@ function storeOn(database: AppDb): WebhookEventStore {
         .returning();
       return only(rows, 'mark processed');
     },
-    async findUnprocessedWebhookEvents(limit = 100) {
+    async findUnprocessedWebhookEvents(limit = 100, belowAttempts = Number.MAX_SAFE_INTEGER) {
       return database
         .select()
         .from(webhookEvents)
-        .where(eq(webhookEvents.processed, false))
+        .where(and(eq(webhookEvents.processed, false), lt(webhookEvents.attempts, belowAttempts)))
         .orderBy(asc(webhookEvents.createdAt))
         .limit(limit);
     },
@@ -737,6 +738,19 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
       expect(await refundRow(db, refund.id)).toMatchObject({ status: 'approved', providerRefundId: null });
     });
 
+    it('a signal the app refuses is returned as the event outcome, and the event stays unprocessed for a resend', async () => {
+      const { payment, refund } = await approvedRefund({ run: true });
+      const charge = chargeWithRefund(payment.providerPaymentId, { id: 're_refused', metadata: { refundId: refund.id } });
+      const eventId = freshEventId();
+      // The app's signal said no (its run is closed, say): Stripe must resend, so the route answers non-2xx
+      const refusing: WebhookRefunds = { signal: () => Promise.resolve(CommandConflict({ detail: 'the run is closed' })) };
+
+      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refusing), eventId)).toMatchObject({
+        code: 'journal.conflict',
+      });
+      expect(await rowFor(eventId)).toMatchObject({ processed: false, errorMessage: expect.stringContaining('journal.conflict') });
+    });
+
     it('a resent charge.refunded is a duplicate signal', async () => {
       const { payment, refund } = await approvedRefund({ run: true });
       const charge = chargeWithRefund(payment.providerPaymentId, {
@@ -1030,6 +1044,32 @@ describe('claimWebhookEvent', () => {
   });
 });
 
+describe('claimWebhookEvent and reclaimWebhookEvent at their own door', () => {
+  it('a claim the row cannot hold is schema.invalid_input before any query, never a raw Postgres error', async () => {
+    const base = { provider: 'stripe' as const, eventType: 'subscription.created' as const, processed: false, attempts: 1 };
+
+    for (const data of [
+      { ...base, id: orThrow(createWebhookId()), providerEventId: `evt_${'x'.repeat(255)}`, data: {} },
+      { ...base, id: orThrow(createWebhookId()), providerEventId: 'evt_claim_nul', data: { n: '\u0000' } },
+      { ...base, id: orThrow(createWebhookId()), providerEventId: 'evt_claim_ip', data: {}, sourceIp: 'x'.repeat(46) },
+    ]) {
+      expect(await claimWebhookEvent(db, webhookEvents, data)).toMatchObject({ code: 'schema.invalid_input' });
+    }
+    expect(await db.select().from(webhookEvents)).toHaveLength(0);
+  });
+
+  it('a fractional seen-attempts count or a cutoff before year 1 breaks the stated precondition', async () => {
+    const held = await seedRow('evt_reclaim_precondition', { lastAttemptAt: now() });
+
+    await expect(reclaimWebhookEvent(db, webhookEvents, held.id, 0.5, now())).rejects.toMatchObject({
+      code: FAILURE_ERROR_CODES.invariant,
+    });
+    await expect(
+      reclaimWebhookEvent(db, webhookEvents, held.id, held.attempts, instant('-000100-01-01T00:00:00Z')),
+    ).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+  });
+});
+
 describe('webhook ID failure', () => {
   it('returns the canonical refusal before claiming or processing a provider event', async () => {
     const { handler, counter } = countingHandler();
@@ -1045,5 +1085,98 @@ describe('webhook ID failure', () => {
       vi.unstubAllGlobals();
     }
     expect(await db.select().from(webhookEvents).where(eq(webhookEvents.providerEventId, 'evt_no_entropy'))).toEqual([]);
+  });
+});
+
+describe('WebhookHandler: what the webhook_events row cannot hold is refused before the claim', () => {
+  async function deliverBody(handler: WebhookHandler, body: string, sourceIp = '203.0.113.7') {
+    return handler.processWebhook('stripe', body, 't=0,v1=stub', '0', sourceIp, 'whsec_test');
+  }
+
+  it.each([
+    ['an event id past 255 characters', JSON.stringify({ id: `evt_${'x'.repeat(260)}`, type: 'customer.subscription.created' })],
+    ['an event id with U+0000', JSON.stringify({ id: 'evt_\u0000', type: 'customer.subscription.created' })],
+  ])('%s is a final payload failure and stores nothing', async (_what, body) => {
+    const { handler, counter } = countingHandler();
+
+    expect(await deliverBody(handler, body)).toMatchObject({ code: 'payments.webhook_payload_invalid', data: { retryable: false } });
+    expect(counter.runs).toBe(0);
+    expect(await db.select().from(webhookEvents)).toHaveLength(0);
+  });
+
+  it('a body holding U+0000 anywhere is a final payload failure: the jsonb column cannot store it', async () => {
+    const { handler, counter } = countingHandler({ result: { ...valid, data: { object: 'subscription', note: 'a\u0000b' } } });
+
+    expect(await deliver(handler, 'evt_nul_body')).toMatchObject({ code: 'payments.webhook_payload_invalid' });
+    expect(counter.runs).toBe(0);
+    expect(await db.select().from(webhookEvents)).toHaveLength(0);
+  });
+
+  it('a source address longer than the column (possible with skipIpValidation) is stored as null and the event runs', async () => {
+    const { handler, counter } = countingHandler({ skipIpValidation: true });
+
+    const result = await deliverBody(handler, JSON.stringify({ id: 'evt_long_ip', type: 'x' }), `2001:db8::${'1'.repeat(60)}`);
+
+    expect(result).toMatchObject(ran);
+    expect(counter.runs).toBe(1);
+    expect(await rowFor('evt_long_ip')).toMatchObject({ sourceIp: null, processed: true });
+  });
+
+  it('an error message with U+0000 is stored with U+FFFD in its place, so the attempt is still recorded for a resend', async () => {
+    const { handler } = countingHandler({}, () => Promise.reject(new Error('bad\u0000thing')));
+
+    await expect(deliver(handler, 'evt_nul_error')).rejects.toThrow('bad');
+
+    expect(await rowFor('evt_nul_error')).toMatchObject({ processed: false, errorMessage: 'bad\uFFFDthing' });
+  });
+
+  it('an event row deleted while it ran returns webhook_event_not_found instead of a success', async () => {
+    const { validator } = validatorReturning(valid);
+    const handler = new WebhookHandler(new PaymentRepository(db, core), validator, writesOn(db));
+    handler.registerEventHandler('subscription.created', async ({ webhookId }) => {
+      await db.delete(webhookEvents).where(eq(webhookEvents.id, webhookId));
+    });
+
+    expect(await deliver(handler, 'evt_deleted_meanwhile')).toMatchObject({ code: 'payments.webhook_event_not_found' });
+  });
+});
+
+describe('WebhookHandler.retryFailedWebhooks and events given up on', () => {
+  it('never re-reports an event given up on, and still retries a newer one behind a full page of them', async () => {
+    const givenUp = Array.from({ length: 100 }, (_, index) => ({
+      id: orThrow(createWebhookId()),
+      provider: 'stripe' as const,
+      eventType: 'subscription.created' as const,
+      providerEventId: `evt_given_up_${index}`,
+      data: {},
+      processed: false,
+      attempts: 3,
+      errorMessage: 'payments.webhook_rejected: earlier',
+      createdAt: sub(now(), { hours: 2 }),
+    }));
+    await db.insert(webhookEvents).values(givenUp);
+    await seedRow('evt_newer_failed', { lastAttemptAt: now(), errorMessage: 'downstream unavailable' });
+    const { handler, counter } = countingHandler({ maxRetries: 3 });
+    const failed: unknown[] = [];
+    handler.on('webhook:failed', report => failed.push(report));
+
+    await handler.retryFailedWebhooks();
+
+    expect(counter.runs).toBe(1);
+    expect(await rowFor('evt_newer_failed')).toMatchObject({ processed: true });
+    expect(failed).toEqual([]);
+  });
+
+  it('reports webhook:failed once, when the last attempt fails, keeping the error that attempt recorded', async () => {
+    await seedRow('evt_last_try', { lastAttemptAt: now(), errorMessage: 'downstream unavailable' });
+    const { handler } = countingHandler({ maxRetries: 2 }, () => Promise.reject(new Error('still down')));
+    const failed: unknown[] = [];
+    handler.on('webhook:failed', report => failed.push(report));
+
+    await handler.retryFailedWebhooks();
+    await handler.retryFailedWebhooks();
+
+    expect(failed).toMatchObject([{ error: 'still down' }]);
+    expect(await rowFor('evt_last_try')).toMatchObject({ attempts: 2, errorMessage: 'still down' });
   });
 });

@@ -118,7 +118,9 @@ export class PaymentRetryService {
     private readonly writes: CoreWrites,
     strategies: RetryStrategy[] = DEFAULT_RETRY_STRATEGIES,
   ) {
-    this.strategies = strategies;
+    // A copy: `addRetryStrategy` and `updateRetryStrategy` change this instance only, never the
+    // shared defaults or the caller's array
+    this.strategies = structuredClone(strategies);
   }
 
   /**

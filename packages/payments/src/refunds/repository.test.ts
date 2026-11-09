@@ -9,11 +9,12 @@ import { defineRelations } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { orThrow } from '@arki/failure';
+import { instant } from '@arki/date';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 
 import type { RefundWrites } from './journal.js';
 import { runnerOn, seedPayment } from '../service-test-support.js';
-import { adminId, openDb, refundsTables, typed, userId } from '../test-support.js';
+import { adminId, openDb, refundsTables, rejectionOf, typed, userId } from '../test-support.js';
 import { RefundRepository } from './repository.js';
 
 let client: PGlite;
@@ -53,5 +54,51 @@ describe('RefundRepository.findByProviderRefundId', () => {
 
     expect(await repo.findByProviderRefundId('re_lookup')).toMatchObject({ id: refund.id });
     expect(await repo.findByProviderRefundId('re_unknown')).toBeNull();
+  });
+});
+
+describe('RefundRepository.findByProviderRefundId with U+0000', () => {
+  // No row holds U+0000; Postgres used to refuse the parameter with a raw 22021
+  it('finds nothing', async () => {
+    expect(await repo.findByProviderRefundId('re_\u0000')).toBeNull();
+  });
+});
+
+describe('RefundRepository.getRefundMetrics', () => {
+  // The total was built by spreading every refund as call arguments, which overflows Node's stack past ~100k refunds;
+  // it is now folded one refund at a time. This checks the fold keeps one exact total per currency.
+  it('adds every refund up per currency, and counts them by status and reason', async () => {
+    const before = await repo.getRefundMetrics();
+    const usd = await seedPayment(coreWrites, null, '30');
+    const eur = await seedPayment(coreWrites, null, '30', 'EUR');
+    for (const [payment, amount, currency] of [
+      [usd, '10.10', 'USD'],
+      [eur, '2.20', 'EUR'],
+    ] as const) {
+      await orThrow(
+        writes.requestRefund({
+          paymentId: payment.id,
+          originalAmount: { amount: '30', currency },
+          refundAmount: { amount, currency },
+          reason: 'duplicate_charge',
+          requestedBy: userId,
+        }),
+      );
+    }
+
+    const after = await repo.getRefundMetrics();
+
+    expect(after.totalCount).toBe(before.totalCount + 2);
+    expect(after.totalAmount.get('USD').minus(before.totalAmount.get('USD')).toMoney().toString()).toBe('10.10 USD');
+    expect(after.totalAmount.get('EUR').minus(before.totalAmount.get('EUR')).toMoney().toString()).toBe('2.20 EUR');
+    expect(after.byReason.duplicate_charge).toBe((before.byReason.duplicate_charge ?? 0) + 2);
+  });
+
+  // Postgres refuses a time past the year 9999 as a parameter (raw 22009); a typed Instant there is the caller's bug
+  it('fails as an invariant for a bound past the year 9999, before the query', async () => {
+    const error = await rejectionOf(repo.getRefundMetrics(undefined, instant('+010000-01-01T00:00:00Z')));
+    expect(error).toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+    const searched = await rejectionOf(repo.searchRefunds({ startDate: instant('+010000-01-01T00:00:00Z') }));
+    expect(searched).toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
   });
 });

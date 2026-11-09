@@ -238,3 +238,18 @@ describe('getRetryAnalytics', () => {
     expect(analytics.revenueRecovered.currencies().map(currency => currency.code)).toEqual(['USD']);
   });
 });
+
+describe('retry strategies belong to one service', () => {
+  it('adding or changing a strategy on one service leaves the defaults of the next one alone', () => {
+    const first = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes);
+    const defaults = structuredClone(first.getRetryStrategies());
+    const [standard] = defaults;
+    if (!standard) throw new Error('the package ships default strategies');
+
+    first.addRetryStrategy({ ...oneRetryNow, name: 'only_this_instance' });
+    first.updateRetryStrategy(standard.name, { maxAttempts: 99 });
+
+    const second = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes);
+    expect(second.getRetryStrategies()).toEqual(defaults);
+  });
+});

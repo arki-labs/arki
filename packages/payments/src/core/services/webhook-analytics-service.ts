@@ -1,5 +1,5 @@
 import type { Instant } from '@arki/date';
-import { isSameOrAfter, isSameOrBefore, now, sub, toMillis } from '@arki/date';
+import { isSameOrAfter, now, sub, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
 
 import type { PaymentRepository } from '../repository.js';
@@ -76,7 +76,7 @@ export class WebhookAnalyticsService {
   ) {}
 
   /**
-   * Get comprehensive webhook metrics
+   * Get comprehensive webhook metrics. A time given falls in the years 1 to 9999 (a precondition: anything else throws an invariant failure).
    */
   async getWebhookMetrics(startDate?: Instant, endDate?: Instant): Promise<WebhookMetrics> {
     try {
@@ -147,7 +147,7 @@ export class WebhookAnalyticsService {
   }
 
   /**
-   * Assess webhook system health
+   * Assess webhook system health. A time given falls in the years 1 to 9999 (a precondition: anything else throws an invariant failure).
    */
   async getWebhookHealth(startDate?: Instant): Promise<WebhookHealth> {
     const metrics = await this.getWebhookMetrics(startDate);
@@ -221,7 +221,7 @@ export class WebhookAnalyticsService {
   }
 
   /**
-   * Get webhook performance metrics
+   * Get webhook performance metrics. A time given falls in the years 1 to 9999 (a precondition: anything else throws an invariant failure).
    */
   async getWebhookPerformance(startDate?: Instant, endDate?: Instant): Promise<WebhookPerformance> {
     const events = await this.getWebhookEventsInRange(startDate, endDate);
@@ -356,7 +356,7 @@ export class WebhookAnalyticsService {
   }
 
   /**
-   * Generate webhook monitoring report
+   * Generate webhook monitoring report. A time given falls in the years 1 to 9999 (a precondition: anything else throws an invariant failure).
    */
   async generateMonitoringReport(startDate?: Instant, endDate?: Instant): Promise<{
     period: { startDate: Instant; endDate: Instant };
@@ -405,24 +405,9 @@ export class WebhookAnalyticsService {
     };
   }
 
-  /**
-   * Helper method to get webhook events in date range
-   */
+  /** The newest 1000 webhook events, processed or not, created in the range (each end optional, both included). */
   private async getWebhookEventsInRange(startDate?: Instant, endDate?: Instant) {
-    // This would typically call a repository method to get filtered events
-    // For now, we'll simulate with a basic approach
-
-    // In a real implementation, you'd add date filtering to the repository
-    const allEvents = await this.paymentRepository.findUnprocessedWebhookEvents(1000); // Get recent events
-
-    if (!startDate && !endDate) {
-      return allEvents;
-    }
-
-    return allEvents.filter(event => {
-      const eventDate = event.createdAt;
-      return (!startDate || isSameOrAfter(eventDate, startDate)) && (!endDate || isSameOrBefore(eventDate, endDate));
-    });
+    return this.paymentRepository.findWebhookEventsCreatedBetween(startDate, endDate, 1000);
   }
 
   /**

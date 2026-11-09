@@ -25,6 +25,7 @@ import type {
   RootDb,
   TransactionSource,
 } from '@arki/journal';
+import type { FailureOf } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type {
@@ -55,7 +56,11 @@ import type { SubscriptionJournal } from './journal/subscription.js';
 import type { JournalWriteFailure } from './journal/support.js';
 import { createPaymentJournal } from './journal/payment.js';
 import { createSubscriptionJournal } from './journal/subscription.js';
+import type { ReferenceNotFound } from './providers/provider-error.js';
 import { writtenRow } from './journal/support.js';
+
+/** A row the write points at (user, customer, plan or subscription) does not exist. */
+type MissingReference = FailureOf<typeof ReferenceNotFound>;
 
 export {
   cancelPaymentInputSchema,
@@ -104,7 +109,8 @@ export type {
  * failure the command returned when a rule said no (nothing was written).
  */
 export type CoreWrites = {
-  initiatePayment: (input: InitiatePaymentInput) => Promise<Payment | JournalWriteFailure>;
+  /** `ReferenceNotFound` when the user, customer or subscription has no row. */
+  initiatePayment: (input: InitiatePaymentInput) => Promise<Payment | JournalWriteFailure | MissingReference>;
   completePayment: (input: CompletePaymentInput) => Promise<Payment | JournalWriteFailure | CommandNotFound>;
   failPayment: (input: FailPaymentInput) => Promise<Payment | JournalWriteFailure | CommandNotFound>;
   cancelPayment: (input: CancelPaymentInput) => Promise<Payment | JournalWriteFailure | CommandNotFound>;
@@ -118,19 +124,23 @@ export type CoreWrites = {
   ) => Promise<Payment | JournalWriteFailure | CommandNotFound | CommandInvalid>;
   /** The same dispute and status again writes nothing. */
   recordPaymentDispute: (input: RecordPaymentDisputeInput) => Promise<Payment | JournalWriteFailure | CommandNotFound>;
-  createSubscription: (input: CreateSubscriptionInput) => Promise<Subscription | JournalWriteFailure>;
-  /** Create or update by provider subscription id. An unchanged delivery writes no event. */
-  syncSubscription: (input: SyncSubscriptionInput) => Promise<Subscription | JournalWriteFailure>;
+  /** `ReferenceNotFound` when the user, plan or customer has no row; `CommandConflict` when the provider id is stored. */
+  createSubscription: (input: CreateSubscriptionInput) => Promise<Subscription | JournalWriteFailure | MissingReference>;
+  /**
+   * Create or update by provider subscription id. An unchanged delivery writes no event.
+   * `ReferenceNotFound` when the user, plan or customer has no row.
+   */
+  syncSubscription: (input: SyncSubscriptionInput) => Promise<Subscription | JournalWriteFailure | MissingReference>;
   cancelSubscription: (input: CancelSubscriptionInput) => Promise<Subscription | JournalWriteFailure | CommandNotFound>;
   reactivateSubscription: (
     input: ReactivateSubscriptionInput,
   ) => Promise<Subscription | JournalWriteFailure | CommandNotFound>;
   pauseSubscription: (input: PauseSubscriptionInput) => Promise<Subscription | JournalWriteFailure | CommandNotFound>;
   resumeSubscription: (input: ResumeSubscriptionInput) => Promise<Subscription | JournalWriteFailure | CommandNotFound>;
-  /** The same provider plan again writes nothing. */
+  /** The same provider plan again writes nothing. `ReferenceNotFound` when the plan has no row. */
   changeSubscriptionPlan: (
     input: ChangeSubscriptionPlanInput,
-  ) => Promise<Subscription | JournalWriteFailure | CommandNotFound>;
+  ) => Promise<Subscription | JournalWriteFailure | CommandNotFound | MissingReference>;
   /** Set or clear ends at period end without changing the status. */
   setSubscriptionCancelAtPeriodEnd: (
     input: SetSubscriptionCancelAtPeriodEndInput,

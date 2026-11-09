@@ -31,6 +31,8 @@ import type { SubscriptionBilling, projectStripeSubscription } from './subscript
 import * as subscriptionIds from '../core/primitives.js';
 import { createSubscriptionId } from '../core/primitives.js';
 import { StripeProvider } from '../core/providers/stripe-provider.js';
+import { createFakeStripeHttp } from '../core/providers/stripe-test-support.js';
+import { PaymentRepository } from '../core/repository.js';
 import { coreReads, runnerOn } from '../service-test-support.js';
 import {
   adminId,
@@ -42,6 +44,7 @@ import {
   planId,
   typed,
   userId,
+  users,
 } from '../test-support.js';
 import { InvalidWebhookSignature } from '../core/providers/provider-error.js';
 import {
@@ -391,6 +394,18 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
     expect(await countEvents(db)).toBe(before);
   });
 
+  it.each([
+    ['no items list', { items: undefined }],
+    ['an item with no price', { items: { data: [{ current_period_start: JAN_1, current_period_end: FEB_1 }] } }],
+    ['no customer', { customer: undefined }],
+    ['a customer id with U+0000', { customer: 'cus_\u0000' }],
+  ])('a signed subscription body with %s is schema.invalid_input, not a TypeError, and nothing is written', async (what, changes) => {
+    const id = `sub_malformed_${what.replaceAll(' ', '_')}`;
+    const failure = await expectRefused(deliver('customer.subscription.created', id, changes), id);
+
+    expect(failure).toMatchObject({ code: 'schema.invalid_input' });
+  });
+
   it('a user with no subscription rows is on the free tier', async () => {
     expect(await billing.getEntitlement(adminId)).toEqual({ tier: 'free' });
   });
@@ -407,6 +422,73 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
     } finally {
       findCustomer.mockRestore();
     }
+  });
+});
+
+describe('Stripe: createSubscriptionBilling().createCheckoutSession for a user with no customer yet', () => {
+  /** Billing on the test database, with Stripe answering every customer it is asked to create as `stripeCustomerId`. */
+  function billingWhereStripeCreates(stripeCustomerId: string) {
+    const http = createFakeStripeHttp(request =>
+      request.path === '/v1/customers'
+        ? { body: { id: stripeCustomerId, object: 'customer', created: 1_767_225_600 } }
+        : { body: { id: 'cs_test', object: 'checkout.session', url: 'https://checkout.stripe.test/cs_test' } },
+    );
+    const provider = new StripeProvider(
+      { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
+      { httpClient: http.client, maxNetworkRetries: 0 },
+    );
+    const billing = createSubscriptionBilling({
+      provider,
+      repo: new PaymentRepository(db, core),
+      writes,
+      prices: [{ priceId: 'price_pro_monthly', planId }],
+      urls: { success: 'https://app.test/ok', cancel: 'https://app.test/cancel' },
+    });
+    return { billing, requests: http.requests };
+  }
+
+  it('an email the customers row cannot hold is refused before Stripe makes a customer', async () => {
+    const owner = 'usr_checkout_long_email';
+    await db.insert(users).values({ id: owner });
+    const { billing, requests } = billingWhereStripeCreates('cus_never_made');
+
+    const failure = await billing.createCheckoutSession({
+      userId: owner,
+      email: `${'a'.repeat(250)}@example.com`,
+      priceId: 'price_pro_monthly',
+    });
+
+    expect(failure).toMatchObject({ code: 'schema.invalid_input' });
+    // No Stripe customer is left behind without a local row
+    expect(requests).toEqual([]);
+  });
+
+  it('a Stripe customer that belongs to another user is returned as customer_conflict', async () => {
+    const owner = 'usr_checkout_conflict';
+    await db.insert(users).values({ id: owner });
+    // `cus_test` is the provider customer of the fixture user
+    const { billing } = billingWhereStripeCreates('cus_test');
+
+    const failure = await billing.createCheckoutSession({ userId: owner, email: 'c@example.com', priceId: 'price_pro_monthly' });
+
+    expect(failure).toMatchObject({
+      code: 'payments.customer_conflict',
+      data: { userId: owner, providerCustomerId: 'cus_test', existingCustomerId: null },
+    });
+  });
+
+  it('a customer id that cannot be made is returned before Stripe is asked', async () => {
+    const owner = 'usr_checkout_no_entropy';
+    await db.insert(users).values({ id: owner });
+    const { billing, requests } = billingWhereStripeCreates('cus_no_entropy');
+    const refused = RandomSourceUnavailable();
+    const generate = vi.spyOn(subscriptionIds, 'createCustomerId').mockReturnValue(refused);
+    try {
+      expect(await billing.createCheckoutSession({ userId: owner, email: 'n@example.com', priceId: 'price_pro_monthly' })).toBe(refused);
+    } finally {
+      generate.mockRestore();
+    }
+    expect(requests).toEqual([]);
   });
 });
 

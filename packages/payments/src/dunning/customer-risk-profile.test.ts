@@ -217,6 +217,20 @@ describe('CustomerRiskProfileRepository writes', () => {
     expect(await profilesOf(unknown)).toEqual([]);
   });
 
+  it('a second create for the same customer returns payments.customer_risk_profile_exists and keeps the stored profile', async () => {
+    const repository = createCustomerRiskProfileRepository(db, dunning);
+    const buyer = await newCustomer('created-twice');
+    const base = profile();
+    const first = orThrow(await repository.create({ ...base, customerId: buyer }));
+
+    const second = await repository.create({ ...base, customerId: buyer, riskScore: { ...base.riskScore, overall: 99 } });
+
+    expect(second).toMatchObject({ code: 'payments.customer_risk_profile_exists', data: { customerId: buyer } });
+    const stored = await profilesOf(buyer);
+    expect(stored).toEqual([expect.objectContaining({ id: first.id })]);
+    expect(stored[0]?.riskScore.overall).toBe(first.riskScore.overall);
+  });
+
   it('a refused write inside a caller transaction leaves that transaction usable', async () => {
     const buyer = await newCustomer('in-transaction');
 

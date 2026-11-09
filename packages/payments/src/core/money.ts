@@ -92,8 +92,17 @@ export const priceSchema = anyMoneySchema()
   .refine(amount => !amount.isNegative(), 'Price must not be negative')
   .refine(fitsStripe, fitsStripeMessage);
 
-/** An amount already charged, as a command stores it: zero or more, with no upper cap. */
-export const nonNegativeMoneySchema = anyMoneySchema().refine(
-  amount => !amount.isNegative(),
-  'Amount must not be negative',
-);
+/** The most minor units an amount column holds exactly: 2^53 - 1, what `toMinorColumn` can return. */
+const MAX_COLUMN_MINOR_UNITS = BigInt(Number.MAX_SAFE_INTEGER);
+
+/**
+ * An amount already charged, as a command stores it: zero or more, and at most 2^53 - 1 minor units
+ * (what `toMinorColumn` and the bigint column hold exactly). No Stripe cap: a provider may report
+ * amounts past it.
+ */
+export const nonNegativeMoneySchema = anyMoneySchema()
+  .refine(amount => !amount.isNegative(), 'Amount must not be negative')
+  .refine(
+    amount => amount.toMinorBigInt() <= MAX_COLUMN_MINOR_UNITS,
+    'Amount is larger than 9,007,199,254,740,991 minor units',
+  );

@@ -9,6 +9,9 @@ import { orThrow } from '@arki/failure';
  * make a second campaign. The campaign and every template are written in one
  * transaction on PGlite, so a template that Postgres rejects leaves no campaign.
  */
+import { createServer } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { PGlite } from '@electric-sql/pglite';
 import { pushSchema } from 'drizzle-kit/api-postgres';
 import { count, defineRelations, eq, sql } from 'drizzle-orm';
@@ -27,6 +30,7 @@ import { createCustomerId, createPaymentId, createSubscriptionId } from '../core
 import { userIdFactory } from '../core/user-id.js';
 import { core, customerId, planId, schema, userId, users } from '../test-support.js';
 import { DunningCampaignService } from './services/campaign-service.js';
+import { CommunicationOrchestrationService, EmailProvider } from './services/communication-service.js';
 import { createDunningTables } from './tables.js';
 import {
   createDunningCampaignRepository,
@@ -64,7 +68,36 @@ let client: PGlite;
 let db: ReturnType<typeof drizzle<typeof relations>>;
 let service: DunningCampaignService;
 
+/**
+ * How the local stand-in for Resend answers the next sends: an accepted email, an error status, or a
+ * connection it drops before answering (the provider cannot be reached).
+ */
+type ResendAnswer = { status: number; body: string; delayMs?: number } | 'drop';
+let resendAnswer: ResendAnswer = { status: 200, body: '{"id":"email_sent"}' };
+let resend: Server;
+
+function answerResend(request: IncomingMessage, response: ServerResponse) {
+  request.resume();
+  request.on('end', () => {
+    if (resendAnswer === 'drop') {
+      request.socket.destroy();
+      return;
+    }
+    const reply = resendAnswer;
+    setTimeout(() => {
+      if (response.destroyed) return;
+      response.writeHead(reply.status, { 'content-type': 'application/json' });
+      response.end(reply.body);
+    }, reply.delayMs ?? 0);
+  });
+}
+
 beforeAll(async () => {
+  resend = createServer(answerResend);
+  await new Promise<void>(resolve => resend.listen(0, '127.0.0.1', resolve));
+  const address: AddressInfo | string | null = resend.address();
+  if (address === null || typeof address === 'string') throw new Error('the Resend stand-in has no port');
+
   client = new PGlite('memory://');
   await client.waitReady;
   db = drizzle({ client, relations });
@@ -88,12 +121,22 @@ beforeAll(async () => {
   await db
     .insert(core.customers)
     .values({ id: customerId, userId, providerCustomerId: 'cus_test', email: 'buyer@example.com' });
-  service = new DunningCampaignService(db, serviceTables, () => {
-    throw new Error('no communications in this test');
-  });
+  const communications = new CommunicationOrchestrationService(db, tables);
+  communications.registerProvider(
+    new EmailProvider({
+      apiKey: 're_test',
+      fromEmail: 'billing@example.com',
+      fromName: 'Billing',
+      timeoutMs: 300,
+      apiBaseUrl: `http://127.0.0.1:${address.port}`,
+    }),
+  );
+  service = new DunningCampaignService(db, serviceTables, () => communications);
 });
 
 afterAll(async () => {
+  resend.closeAllConnections();
+  await new Promise(resolve => resend.close(resolve));
   await client.close();
 });
 
@@ -134,7 +177,7 @@ describe('createCampaign', () => {
   it('writes the campaign and all its templates', async () => {
     const campaigns = await countOf(tables.dunningCampaigns);
 
-    const created = await service.createCampaign(campaignInput([0, 24]), 'usr_admin');
+    const created = orThrow(await service.createCampaign(campaignInput([0, 24]), 'usr_admin'));
 
     expect(created.templates.map(template => template.stepNumber)).toEqual([1, 2]);
     expect(await countOf(tables.dunningCampaigns)).toBe(campaigns + 1);
@@ -157,7 +200,7 @@ describe('createCampaign', () => {
 
 describe('updateCampaign templates', () => {
   it('replaces the steps: updates a matching step in place, adds a new one, deletes the one that is gone', async () => {
-    const created = await service.createCampaign(campaignInput([0, 24]), 'usr_admin');
+    const created = orThrow(await service.createCampaign(campaignInput([0, 24]), 'usr_admin'));
     const [first, second] = created.templates;
 
     const updated = orThrow(
@@ -182,7 +225,7 @@ describe('updateCampaign templates', () => {
   });
 
   it('leaves the steps alone when templates is omitted', async () => {
-    const created = await service.createCampaign(campaignInput([0, 24]), 'usr_admin');
+    const created = orThrow(await service.createCampaign(campaignInput([0, 24]), 'usr_admin'));
 
     const updated = orThrow(await service.updateCampaign(created.id, { name: 'Renamed' }, 'usr_admin'));
 
@@ -191,7 +234,7 @@ describe('updateCampaign templates', () => {
   });
 
   it('refuses to drop a step that already sent a communication, and changes nothing', async () => {
-    const created = await service.createCampaign({ ...campaignInput([0, 24]), name: 'Before' }, 'usr_admin');
+    const created = orThrow(await service.createCampaign({ ...campaignInput([0, 24]), name: 'Before' }, 'usr_admin'));
     const [first, second] = created.templates;
     if (!first || !second) throw new Error('campaign needs two steps');
     const sent = await execution(created.id, 'completed');
@@ -232,7 +275,7 @@ describe('updateCampaign templates', () => {
 
 describe('deleteCampaign', () => {
   it('deletes a campaign that never sent anything, with its steps', async () => {
-    const created = await service.createCampaign({ ...campaignInput([0, 24]), name: 'Never ran' }, 'usr_admin');
+    const created = orThrow(await service.createCampaign({ ...campaignInput([0, 24]), name: 'Never ran' }, 'usr_admin'));
 
     expect(await service.deleteCampaign(created.id)).toBeUndefined();
 
@@ -246,7 +289,7 @@ describe('deleteCampaign', () => {
 
   // An admin deletes a campaign that already ran: the sent message keeps its step, so the route needs a 409 to answer with
   it('refuses a campaign whose step already sent a communication with payments.dunning_template_in_use, and deletes nothing', async () => {
-    const created = await service.createCampaign({ ...campaignInput([0, 24]), name: 'Already ran' }, 'usr_admin');
+    const created = orThrow(await service.createCampaign({ ...campaignInput([0, 24]), name: 'Already ran' }, 'usr_admin'));
     const [first, second] = created.templates;
     if (!first || !second) throw new Error('campaign needs two steps');
     const sent = await execution(created.id, 'completed');
@@ -277,7 +320,7 @@ describe('deleteCampaign', () => {
 describe('the dunning repositories answer a missing or referenced row with a failure', () => {
   // An admin tool deletes through the repository: a campaign that already ran must answer 409, not a raw foreign key error
   it('DunningCampaignRepository.delete refuses a campaign whose step sent a communication with payments.dunning_template_in_use', async () => {
-    const created = await service.createCampaign({ ...campaignInput([0, 24]), name: 'Repository delete' }, 'usr_admin');
+    const created = orThrow(await service.createCampaign({ ...campaignInput([0, 24]), name: 'Repository delete' }, 'usr_admin'));
     const [first, second] = created.templates;
     if (!first || !second) throw new Error('campaign needs two steps');
     const sent = await execution(created.id, 'completed');
@@ -319,7 +362,7 @@ describe('the dunning repositories answer a missing or referenced row with a fai
   });
 
   it('DunningTemplateRepository.delete refuses a step that sent a communication with payments.dunning_template_in_use', async () => {
-    const created = await service.createCampaign({ ...campaignInput([0, 24]), name: 'Step delete' }, 'usr_admin');
+    const created = orThrow(await service.createCampaign({ ...campaignInput([0, 24]), name: 'Step delete' }, 'usr_admin'));
     const [first, second] = created.templates;
     if (!first || !second) throw new Error('campaign needs two steps');
     const sent = await execution(created.id, 'completed');
@@ -347,7 +390,7 @@ describe('the dunning repositories answer a missing or referenced row with a fai
   });
 
   it('DunningExecutionRepository.create names the missing campaign, step or customer with its not-found code', async () => {
-    const created = await service.createCampaign({ ...campaignInput([0]), name: 'Execution refs' }, 'usr_admin');
+    const created = orThrow(await service.createCampaign({ ...campaignInput([0]), name: 'Execution refs' }, 'usr_admin'));
     const [step] = created.templates;
     if (!step) throw new Error('campaign needs a step');
     const executions = createDunningExecutionRepository(db, tables);
@@ -380,7 +423,7 @@ describe('the dunning repositories answer a missing or referenced row with a fai
   });
 
   it('DunningCommunicationRepository.create names a missing execution or step with its not-found code', async () => {
-    const created = await service.createCampaign({ ...campaignInput([0]), name: 'Communication refs' }, 'usr_admin');
+    const created = orThrow(await service.createCampaign({ ...campaignInput([0]), name: 'Communication refs' }, 'usr_admin'));
     const [step] = created.templates;
     if (!step) throw new Error('campaign needs a step');
     const ran = await execution(created.id, 'completed');
@@ -405,6 +448,11 @@ describe('the dunning repositories answer a missing or referenced row with a fai
       code: 'payments.dunning_template_not_found',
       data: { templateId: unknownStep },
     });
+    const unknownCustomer = orThrow(createCustomerId());
+    expect(await communications.create({ ...valid, customerId: unknownCustomer })).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'customer', id: unknownCustomer, missing: 'row' },
+    });
     const rows = await db
       .select()
       .from(tables.dunningCommunications)
@@ -415,7 +463,7 @@ describe('the dunning repositories answer a missing or referenced row with a fai
   // PGlite has one connection, so the race itself cannot run here. A message written between the check and
   // the delete must wait on a row lock; the lock has to be taken before the check reads the communications.
   it('updateCampaign locks the steps before it checks them for sent communications', async () => {
-    const created = await service.createCampaign({ ...campaignInput([0, 24]), name: 'Locked update' }, 'usr_admin');
+    const created = orThrow(await service.createCampaign({ ...campaignInput([0, 24]), name: 'Locked update' }, 'usr_admin'));
     const queries: string[] = [];
     const logged = drizzle({ client, relations, logger: { logQuery: query => queries.push(query) } });
     const watched = new DunningCampaignService(logged, serviceTables, () => {
@@ -438,7 +486,7 @@ async function createdCampaign(
   status: 'active' | 'draft' = 'active',
   trigger?: CreateDunningCampaignInput['trigger'],
 ): Promise<DunningCampaignId> {
-  const created = await service.createCampaign({ ...campaignInput([0], trigger), name }, 'usr_admin');
+  const created = orThrow(await service.createCampaign({ ...campaignInput([0], trigger), name }, 'usr_admin'));
   orThrow(await service.updateCampaign(created.id, { status }, 'usr_admin'));
 
   return created.id;
@@ -783,11 +831,12 @@ describe('a scheduled execution in a named schema', () => {
 
     await service.processScheduledExecutions(1000);
 
-    const [row] = await db
+    // The sent message counts in the default-currency row; the recovered payment in its own currency's row
+    const rows = await db
       .select()
       .from(tables.dunningCampaignAnalytics)
       .where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
-    expect(row).toMatchObject({ paymentsRecovered: 1, currency: 'EUR', revenueRecoveredMinor: 1999 });
+    expect(rows.find(row => row.currency === 'EUR')).toMatchObject({ paymentsRecovered: 1, revenueRecoveredMinor: 1999 });
   });
 });
 
@@ -999,15 +1048,244 @@ describe('channel opt-outs', () => {
         scheduledAt: sub(now(), { minutes: 1 }),
       });
     }
-    // A send reaches the communication service factory, which throws here: the error lands in the result
     await service.processScheduledExecutions(1000);
-    const rows = await db
-      .select()
-      .from(tables.dunningExecutions)
+    const sent = await db
+      .select({ customerId: tables.dunningCommunications.customerId, status: tables.dunningCommunications.status })
+      .from(tables.dunningCommunications)
+      .innerJoin(tables.dunningExecutions, eq(tables.dunningExecutions.id, tables.dunningCommunications.executionId))
       .where(eq(tables.dunningExecutions.campaignId, campaignId));
 
-    const byCustomer = Object.fromEntries(rows.map(row => [row.customerId, JSON.stringify(row.result)]));
-    expect(byCustomer[optedOut.id]).not.toContain('no communications in this test');
-    expect(byCustomer[otherChannel.id]).toContain('no communications in this test');
+    expect(sent).toEqual([{ customerId: otherChannel.id, status: 'sent' }]);
+  });
+});
+
+describe('a message that did not go out fails the execution and is reported', () => {
+  /** One execution of a fresh customer, due now. */
+  async function dueExecution(label: string) {
+    const buyer = await newCustomer(label);
+    const campaignId = await createdCampaign(`Send: ${label}`);
+    const campaign = await service.getCampaign(campaignId);
+    const [row] = await db
+      .insert(tables.dunningExecutions)
+      .values({
+        campaignId,
+        templateId: campaign?.templates[0]?.id,
+        customerId: buyer.id,
+        triggerType: 'manual',
+        triggerData: {},
+        status: 'scheduled',
+        scheduledAt: sub(now(), { minutes: 1 }),
+      })
+      .returning();
+    if (!row) throw new Error('execution not inserted');
+
+    return { id: row.id, campaignId };
+  }
+
+  /** Runs one scheduled tick while the Resend stand-in answers `answer`. */
+  async function tickWhileResend(answer: ResendAnswer) {
+    resendAnswer = answer;
+    try {
+      return await service.processScheduledExecutions(1000);
+    } finally {
+      resendAnswer = { status: 200, body: '{"id":"email_sent"}' };
+    }
+  }
+
+  async function storedExecution(id: (typeof tables.dunningExecutions.$inferSelect)['id']) {
+    const [row] = await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.id, id));
+    if (!row) throw new Error('execution not found');
+
+    return row;
+  }
+
+  async function communicationsOf(id: (typeof tables.dunningExecutions.$inferSelect)['id']) {
+    return db
+      .select({ status: tables.dunningCommunications.status })
+      .from(tables.dunningCommunications)
+      .where(eq(tables.dunningCommunications.executionId, id));
+  }
+
+  /** Whole minutes from now until the stored next retry, or null when there is none. */
+  function minutesUntil(nextRetryAt: ReturnType<typeof now> | null) {
+    return nextRetryAt ? Math.round((toMillis(nextRetryAt) - Date.now()) / 60_000) : null;
+  }
+
+  it('a provider that cannot be reached is listed, and the execution is failed with a retry in 30 minutes', async () => {
+    const { id } = await dueExecution('send-unreachable');
+
+    const report = await tickWhileResend('drop');
+
+    expect(report.failed.find(fault => fault.id === id)).toMatchObject({ code: null });
+    const stored = await storedExecution(id);
+    expect(stored.status).toBe('failed');
+    expect(minutesUntil(stored.nextRetryAt)).toBe(30);
+    expect(await communicationsOf(id)).toEqual([{ status: 'failed' }]);
+  });
+
+  it('a 5xx refusal is listed with its code, retried later, and counts as no message sent', async () => {
+    const { id, campaignId } = await dueExecution('send-5xx');
+
+    const report = await tickWhileResend({ status: 503, body: '{"message":"try later"}' });
+
+    expect(report.failed.find(fault => fault.id === id)?.code).toBe('payments.notification_provider_rejected');
+    const stored = await storedExecution(id);
+    expect(stored).toMatchObject({ status: 'failed', errorMessage: 'resend refused the notification with status 503: try later' });
+    expect(minutesUntil(stored.nextRetryAt)).toBe(30);
+    const analyticsRows = await db
+      .select()
+      .from(tables.dunningCampaignAnalytics)
+      .where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
+    expect(analyticsRows.every(row => row.communicationsSent === 0)).toBe(true);
+  });
+
+  // The message may have gone out: a retry could send it twice, so a timeout fails the execution for good
+  it('a provider timeout is listed with its code and never retried', async () => {
+    const { id } = await dueExecution('send-timeout');
+
+    const report = await tickWhileResend({ status: 200, body: '{"id":"email_late"}', delayMs: 600 });
+
+    expect(report.failed.find(fault => fault.id === id)?.code).toBe('payments.notification_provider_timeout');
+    expect(await storedExecution(id)).toMatchObject({ status: 'failed', nextRetryAt: null });
+    expect(await communicationsOf(id)).toEqual([{ status: 'failed' }]);
+  });
+
+  it('a 4xx refusal is listed with its code and never retried: the request itself is wrong', async () => {
+    const { id } = await dueExecution('send-4xx');
+
+    const report = await tickWhileResend({ status: 422, body: '{"message":"invalid recipient"}' });
+
+    expect(report.failed.find(fault => fault.id === id)?.code).toBe('payments.notification_provider_rejected');
+    expect(await storedExecution(id)).toMatchObject({ status: 'failed', nextRetryAt: null });
+  });
+
+  it('a sent message completes the execution and counts once in the analytics', async () => {
+    const { id, campaignId } = await dueExecution('send-ok');
+
+    const report = await service.processScheduledExecutions(1000);
+
+    expect(report.failed.map(fault => fault.id)).not.toContain(id);
+    expect(await storedExecution(id)).toMatchObject({ status: 'completed' });
+    expect(await communicationsOf(id)).toEqual([{ status: 'sent' }]);
+    const [row] = await db
+      .select()
+      .from(tables.dunningCampaignAnalytics)
+      .where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
+    expect(row).toMatchObject({ communicationsSent: 1, customersReached: 1 });
+  });
+});
+
+// A repository is a public door too: a value its column refuses must come back as schema.invalid_input,
+// never as a raw SQLSTATE error (22021 for U+0000, 22001 for a varchar overflow)
+describe('the dunning repositories refuse what their columns refuse', () => {
+  const NUL = '\u0000';
+
+  it('campaign writes refuse an actor id Postgres cannot store and write nothing', async () => {
+    const campaigns = createDunningCampaignRepository(db, tables);
+    const before = await countOf(tables.dunningCampaigns);
+
+    const created = await campaigns.create({ ...campaignInput([0]), name: 'Bad actor', createdBy: `usr_${NUL}` });
+    const campaignId = await createdCampaign('Actor updates');
+    const updated = await campaigns.update(campaignId, { name: 'Renamed', updatedBy: `usr_${NUL}` });
+    const statusChanged = await campaigns.updateStatus(campaignId, 'paused', `usr_${NUL}`);
+
+    for (const refused of [created, updated, statusChanged]) expect(refused).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await countOf(tables.dunningCampaigns)).toBe(before + 1);
+    expect(await service.getCampaign(campaignId)).toMatchObject({ name: 'Actor updates', status: 'active' });
+  });
+
+  it('execution writes refuse text and JSON their columns cannot store; a failure is still recorded', async () => {
+    const campaignId = await createdCampaign('Execution columns');
+    const campaign = await service.getCampaign(campaignId);
+    const executions = createDunningExecutionRepository(db, tables);
+    const valid = {
+      campaignId,
+      templateId: campaign?.templates[0]?.id,
+      customerId,
+      triggerType: 'manual',
+      triggerData: {},
+      scheduledAt: add(now(), { hours: 24 }),
+    };
+
+    expect(await executions.create({ ...valid, triggerType: 't'.repeat(101) })).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await executions.create({ ...valid, triggerData: { note: NUL } })).toMatchObject({ code: 'schema.invalid_input' });
+    const stored = orThrow(await executions.create(valid));
+    expect(await executions.updateStatus(stored.id, 'failed', undefined, `bad${NUL}`)).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await executions.recordFailure(stored.id, `bad${NUL}`, null)).toMatchObject({
+      status: 'failed',
+      errorMessage: 'The error message cannot be stored',
+    });
+    const rows = await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.campaignId, campaignId));
+    expect(rows).toHaveLength(1);
+  });
+
+  it('communication writes refuse a recipient, id or JSON their columns cannot store', async () => {
+    const campaignId = await createdCampaign('Communication columns');
+    const campaign = await service.getCampaign(campaignId);
+    const ran = await execution(campaignId, 'completed');
+    const communications = createDunningCommunicationRepository(db, tables);
+    const valid = {
+      executionId: ran.id,
+      customerId,
+      templateId: campaign?.templates[0]?.id ?? orThrow(createDunningTemplateId()),
+      channel: 'email' as const,
+      recipient: 'buyer@example.com',
+      content: 'Please update your card',
+      status: 'pending' as const,
+    };
+
+    expect(await communications.create({ ...valid, recipient: 'r'.repeat(256) })).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await communications.create({ ...valid, subject: 's'.repeat(501) })).toMatchObject({ code: 'schema.invalid_input' });
+    const stored = orThrow(await communications.create(valid));
+    expect(await communications.updateStatus(stored.id, 'sent', { providerMessageId: 'm'.repeat(256) })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await communications.updateStatus(stored.id, 'failed', { failureReason: `bad${NUL}` })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await communications.updateStatus(stored.id, 'sent', { trackingData: { [`k${NUL}`]: 1 } })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await communications.findByProviderMessageId(`m${NUL}`)).toBeUndefined();
+    expect(await communications.findByProviderMessageId('m'.repeat(256))).toBeUndefined();
+    const rows = await db.select().from(tables.dunningCommunications).where(eq(tables.dunningCommunications.executionId, ran.id));
+    expect(rows).toEqual([expect.objectContaining({ status: 'pending', providerMessageId: null })]);
+  });
+});
+
+describe('executeCampaign passes on the failure of a row deleted while it schedules', () => {
+  it('a step deleted after the first customer was scheduled returns payments.dunning_template_not_found', async () => {
+    const first = await newCustomer('deleted-step-1');
+    const second = await newCustomer('deleted-step-2');
+    for (const buyer of [first, second]) await newPayment(buyer, 'failed', now());
+    const campaignId = await createdCampaign('Deleted step');
+    const campaign = await service.getCampaign(campaignId);
+    const step = campaign?.templates[0];
+    if (!step) throw new Error('campaign needs a step');
+    // The step goes away as soon as the first execution is written, before the second customer's is
+    await db.execute(
+      sql.raw(
+        [
+          'CREATE FUNCTION delete_step_after_first() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN',
+          'DELETE FROM pay.dunning_templates WHERE id = NEW.template_id; RETURN NULL; END $$',
+        ].join(' '),
+      ),
+    );
+    await db.execute(
+      sql`CREATE TRIGGER delete_step_after_first AFTER INSERT ON ${tables.dunningExecutions} FOR EACH ROW EXECUTE FUNCTION delete_step_after_first()`,
+    );
+
+    try {
+      const answer = await service.executeCampaign(
+        { campaignId, dryRun: false, customFilters: { customerIds: [first.id, second.id], testMode: false } },
+        'usr_admin',
+      );
+
+      expect(answer).toMatchObject({ code: 'payments.dunning_template_not_found', data: { templateId: step.id } });
+    } finally {
+      await db.execute(sql`DROP TRIGGER delete_step_after_first ON ${tables.dunningExecutions}`);
+    }
   });
 });

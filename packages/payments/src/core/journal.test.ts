@@ -43,6 +43,7 @@ import {
   userId,
 } from '../test-support.js';
 import { createCoreJournal } from './journal.js';
+import { ReferenceNotFound } from './providers/provider-error.js';
 import { createPaymentId, createSubscriptionId, paymentIdFactory, subscriptionIdFactory } from './primitives.js';
 
 const { payments } = core;
@@ -249,6 +250,58 @@ describe('money with its currency', () => {
       data: { issues: [{ message: 'Amount must not be negative', path: ['amount'] }] },
     });
     expect(await rowOf(paymentId)).toBeUndefined();
+  });
+});
+
+describe('what the caller sends that the payments table cannot hold is a typed failure, never a raw Postgres error', () => {
+  it('initiatePayment returns reference_not_found for a customer, subscription or user with no row, and writes nothing', async () => {
+    const before = await countEvents(db);
+    const customer = orThrow(paymentIds.createCustomerId());
+    const subscription = orThrow(createSubscriptionId());
+
+    expect(await journal.run(db, commands.initiatePayment, { ...intent(), customerId: customer }, meta)).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'customer', id: customer, missing: 'row' },
+    });
+    expect(await journal.run(db, commands.initiatePayment, { ...intent(), subscriptionId: subscription }, meta)).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'subscription', id: subscription },
+    });
+    expect(await journal.run(db, commands.initiatePayment, { ...intent(), userId: 'usr_nobody' }, meta)).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'user', id: 'usr_nobody' },
+    });
+    expect(await countEvents(db)).toBe(before);
+  });
+
+  it.each([
+    ['U+0000 in the description', { description: 'a\u0000b' }],
+    ['U+0000 in metadata', { metadata: { note: 'a\u0000b' } }],
+    ['a bigint in metadata', { metadata: { count: 1n } }],
+    ['an amount past 2^53 minor units', { amount: { amount: '100000000000000', currency: 'USD' } }],
+  ] as const)('initiatePayment refuses %s as schema.invalid_input', async (_what, overrides) => {
+    const before = await countEvents(db);
+
+    expect(await journal.run(db, commands.initiatePayment, { ...intent(), ...overrides }, meta)).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await countEvents(db)).toBe(before);
+  });
+
+  it('failPayment, recordPaymentDispute and recordPaymentRefund refuse what the row cannot hold as schema.invalid_input', async () => {
+    const paymentId = await seed();
+    const before = await countEvents(db);
+
+    expect(await journal.run(db, commands.failPayment, { paymentId, failureReason: 'a\u0000b' }, meta)).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(
+      await journal.run(db, commands.recordPaymentDispute, { paymentId, disputeId: 'dp_1', status: 'open', reason: 'a\u0000b' }, meta),
+    ).toMatchObject({ code: 'schema.invalid_input' });
+    expect(
+      await journal.run(db, commands.recordPaymentRefund, { paymentId, refundedAmount: { amount: '100000000000000', currency: 'USD' } }, meta),
+    ).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await countEvents(db)).toBe(before);
   });
 });
 
@@ -533,7 +586,9 @@ describe('ID generation failure', () => {
 
 describe('types', () => {
   it('exposes owned command failures so callers cannot treat a refused sync as a stored subscription', () => {
-    expectTypeOf<FailureOf<CoreWrites['syncSubscription']>>().toEqualTypeOf<CommandFailure | IdGenerationFailure>();
+    expectTypeOf<FailureOf<CoreWrites['syncSubscription']>>().toEqualTypeOf<
+      CommandFailure | IdGenerationFailure | FailureOf<typeof ReferenceNotFound>
+    >();
     expectTypeOf<FailureOf<CoreWrites['initiatePayment']>>().extract<CommandFailure>().toEqualTypeOf<CommandFailure>();
   });
 

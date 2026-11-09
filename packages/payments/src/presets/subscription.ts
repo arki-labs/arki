@@ -10,13 +10,13 @@ import type { Instant } from '@arki/date';
 import { fromUnix } from '@arki/date';
 
 import type { CoreWrites } from '../core/journal.js';
-import type { JournalWriteFailure } from '../core/journal/support.js';
 import type { CustomerConflict } from '../core/failures.js';
-import type { InvalidWebhookSignature } from '../core/providers/provider-error.js';
+import type { InvalidWebhookSignature, ReferenceNotFound } from '../core/providers/provider-error.js';
 import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { PaymentRepository } from '../core/repository.js';
 import type { PlanId, SubscriptionStatus } from '../core/types.js';
 import { subscriptionStatusSchema } from '../core/contracts.js';
+import { pgTextSchema, pgVarcharSchema } from '../core/pg-values.js';
 import {
   PriceNotConfigured,
   SubscriptionWithoutItems,
@@ -33,7 +33,39 @@ type ProjectionFailure =
   | FailureOf<typeof SubscriptionWithoutItems>
   | FailureOf<typeof UnknownSubscriptionStatus>
   | SchemaFailure
-  | JournalWriteFailure;
+  | FailureOf<SubscriptionSync['syncSubscription']>;
+
+/** A Stripe id the `subscriptions` and `customers` columns can hold: 1 to 255 characters, no U+0000. */
+const stripeIdSchema = pgVarcharSchema(255).min(1);
+
+/**
+ * The fields of a Stripe Subscription the presets read. A webhook body is outside data even when its
+ * signature checks out (A-39), so a body missing one of them is `schema.invalid_input`, not a `TypeError`.
+ * Times are read by `subscriptionTimesSchema` below.
+ */
+const stripeSubscriptionSchema = z.object({
+  id: stripeIdSchema,
+  customer: z.union([stripeIdSchema, z.object({ id: stripeIdSchema })]),
+  status: z.string(),
+  items: z.object({
+    data: z.array(
+      z.object({
+        price: z.object({ id: z.string() }),
+        current_period_start: z.unknown(),
+        current_period_end: z.unknown(),
+      }),
+    ),
+  }),
+  trial_start: z.unknown(),
+  trial_end: z.unknown(),
+  canceled_at: z.unknown(),
+  cancel_at_period_end: z.boolean(),
+  metadata: z.record(pgTextSchema, pgTextSchema),
+});
+type StripeSubscriptionFields = z.output<typeof stripeSubscriptionSchema>;
+
+/** What the checkout stores for a new customer: the `customers.email` column holds 255 characters. */
+const checkoutEmailSchema = pgVarcharSchema(255).pipe(z.email());
 
 /**
  * A Stripe time in Unix seconds, up to the last second of year 9999, read as an `Instant`. The
@@ -74,7 +106,9 @@ const subscriptionTimesSchema = z.object({
  * `UnknownProviderCustomer` (no local customer row, such as a subscription made in the Stripe
  * dashboard: never invent an owner), `SubscriptionWithoutItems` (no billing period to read),
  * `UnknownSubscriptionStatus` (a status Stripe added later: never guessed) and `InvalidInput`
- * (`schema.invalid_input`: a period, trial or cancel time that is not whole Unix seconds up to year 9999).
+ * (`schema.invalid_input`: a subscription body missing a field the projection reads, an id that
+ * does not fit its column, or a period, trial or cancel time that is not whole Unix seconds up to
+ * year 9999). The sync's own failures come back unchanged, `ReferenceNotFound` for a plan with no row among them.
  */
 export async function projectStripeSubscription(params: {
   repo: Pick<PaymentRepository, 'findCustomerByProviderCustomerId'>;
@@ -84,8 +118,17 @@ export async function projectStripeSubscription(params: {
   /** Our plan-row id for the price this subscription is on (resolved from the preset config). */
   planId: PlanId;
 }): Promise<undefined | ProjectionFailure> {
-  const { repo, writes, subscription: sub, planId } = params;
+  const sub = parse(stripeSubscriptionSchema, params.subscription);
+  if (isFailure(sub)) return sub;
+  return projectSubscription(params.repo, params.writes, sub, params.planId);
+}
 
+async function projectSubscription(
+  repo: Pick<PaymentRepository, 'findCustomerByProviderCustomerId'>,
+  writes: SubscriptionSync,
+  sub: StripeSubscriptionFields,
+  planId: PlanId,
+): Promise<undefined | ProjectionFailure> {
   const stripeCustomerId = typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
   const customer = await repo.findCustomerByProviderCustomerId(stripeCustomerId, 'stripe');
   // The local customer row is created at checkout time
@@ -223,7 +266,9 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
   return {
     /**
      * Start a hosted Checkout subscribe flow; returns the URL to redirect the browser to.
-     * A price that is not in `prices` returns `PriceNotConfigured` before any provider request.
+     * A price that is not in `prices` returns `PriceNotConfigured`, and an email the customer row
+     * cannot hold (not an address, or over 255 characters) returns `InvalidInput`, both before any
+     * provider request, so no Stripe customer is left without a local row.
      */
     async createCheckoutSession({
       userId,
@@ -238,6 +283,8 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
       | IdGenerationFailure
       | FailureOf<typeof PriceNotConfigured>
       | FailureOf<typeof CustomerConflict>
+      | FailureOf<typeof ReferenceNotFound>
+      | SchemaFailure
     > {
       if (!planByPrice.has(priceId)) return PriceNotConfigured({ priceId });
 
@@ -245,7 +292,9 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
       // user. `provider.createCustomer` also creates the Stripe-side customer.
       let customer = await repo.findCustomerByUserId(userId);
       if (!customer) {
-        const created = await provider.createCustomer({ userId, email });
+        const checkedEmail = parse(checkoutEmailSchema, email);
+        if (isFailure(checkedEmail)) return checkedEmail;
+        const created = await provider.createCustomer({ userId, email: checkedEmail });
         if (isFailure(created)) return created;
         const stored = await repo.createCustomer(created);
         if (isFailure(stored)) return stored;
@@ -288,14 +337,14 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
         event.type === 'customer.subscription.updated' ||
         event.type === 'customer.subscription.deleted'
       ) {
-        // Narrowed by Stripe's discriminated `Event` union — `data.object` is a
-        // `Stripe.Subscription` here with no cast.
-        const subscription = event.data.object;
+        // The signature proves Stripe sent it, not that it has the shape Stripe's types promise
+        const subscription = parse(stripeSubscriptionSchema, event.data.object);
+        if (isFailure(subscription)) return subscription;
         const item = subscription.items.data[0];
         if (!item) return SubscriptionWithoutItems({ providerSubscriptionId: subscription.id });
         const planId = planByPrice.get(item.price.id);
         if (!planId) return PriceNotConfigured({ priceId: item.price.id });
-        const result = await projectStripeSubscription({ repo, writes, subscription, planId });
+        const result = await projectSubscription(repo, writes, subscription, planId);
         if (isFailure(result)) return result;
         return { handled: true, type: event.type };
       }

@@ -11,19 +11,20 @@
  * manager refuses, or a sync that brings nothing new, writes no event.
  */
 import type { PGlite } from '@electric-sql/pglite';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 import { Money } from '@arki/money';
 
 import type { AppDb } from '../../test-support.js';
 import type { CoreWrites } from '../journal.js';
 import type { Subscription, SubscriptionId } from '../types.js';
 import { coreReads, runnerOn, seedSubscription, subscriptionRow, unexpectedCall } from '../../service-test-support.js';
-import { adminId, core, countEvents, eventTypesOf, openDb, planId, rejectionOf, typed } from '../../test-support.js';
+import { adminId, core, countEvents, eventTypesOf, openDb, planId, rejectionOf, typed, users } from '../../test-support.js';
 import { PlanInactive, SubscriptionAlreadyActive, SubscriptionInvalidState } from '../failures.js';
-import { createPlanId, createSubscriptionId } from '../primitives.js';
+import { createCustomerId, createPlanId, createSubscriptionId } from '../primitives.js';
 import { CardDeclined, IdempotencyConflict, ReferenceNotFound } from '../providers/provider-error.js';
 import { SubscriptionManager } from './subscription-manager.js';
 
@@ -384,6 +385,118 @@ describe('a failure the provider returns is handed back, and nothing is written'
 });
 
 /** A refusal the manager decides itself is returned with its code before the provider is asked. */
+describe('a journal refusal after the provider answered is handed back unchanged', () => {
+  /**
+   * A manager whose provider answers with what we hold, after `race` changed the row under it: a
+   * webhook that landed while the provider call ran. The manager's own write then meets the new row.
+   */
+  function racingManager(race: (id: SubscriptionId) => Promise<unknown>, report = (current: Subscription) => current) {
+    const answer = async (id: SubscriptionId) => {
+      const current = await reads.findSubscriptionById(id);
+      if (!current) throw new Error(`the provider does not know ${id}`);
+      await race(id);
+      return report(current);
+    };
+    return new SubscriptionManager(
+      {
+        ...providerReporting(report),
+        updateSubscription: answer,
+        cancelSubscription: answer,
+        reactivateSubscription: answer,
+        pauseSubscription: answer,
+        resumeSubscription: answer,
+      },
+      reads,
+      writes,
+    );
+  }
+  const canceledMeanwhile = (id: SubscriptionId) => writes.cancelSubscription({ subscriptionId: id });
+
+  it.each([
+    ['cancelSubscription', 'active', (manager: SubscriptionManager, id: SubscriptionId) => manager.cancelSubscription(id)],
+    ['setCancelAtPeriodEnd', 'active', (manager: SubscriptionManager, id: SubscriptionId) => manager.setCancelAtPeriodEnd(id, true)],
+    ['pauseSubscription', 'active', (manager: SubscriptionManager, id: SubscriptionId) => manager.pauseSubscription(id)],
+    ['resumeSubscription', 'paused', (manager: SubscriptionManager, id: SubscriptionId) => manager.resumeSubscription(id)],
+  ] as const)('%s returns journal.conflict when the subscription was canceled meanwhile', async (_name, status, call) => {
+    const { id } = await seedSubscription(writes, status);
+
+    const result = await call(racingManager(canceledMeanwhile), id);
+
+    expect(result).toMatchObject({ code: 'journal.conflict' });
+    expect(await subscriptionRow(db, id)).toMatchObject({ status: 'canceled' });
+  });
+
+  it('reactivateSubscription returns journal.conflict when the subscription was reactivated meanwhile', async () => {
+    const { id } = await seedSubscription(writes, 'canceled');
+    const manager = racingManager(subscriptionId => writes.reactivateSubscription({ subscriptionId }));
+
+    expect(await manager.reactivateSubscription(id)).toMatchObject({ code: 'journal.conflict' });
+  });
+
+  it('updateSubscription returns reference_not_found when the new plan was deleted meanwhile', async () => {
+    const { id } = await seedSubscription(writes, 'active');
+    const doomed = orThrow(createPlanId());
+    await db.insert(core.plans).values({ id: doomed, name: 'Doomed', priceMinor: 3000 });
+    const manager = racingManager(
+      () => db.delete(core.plans).where(eq(core.plans.id, doomed)),
+      current => ({ ...current, planId: doomed }),
+    );
+
+    const result = await manager.updateSubscription(id, doomed);
+
+    expect(result).toMatchObject({ code: 'payments.reference_not_found', data: { kind: 'plan', id: doomed } });
+    expect(await subscriptionRow(db, id)).toMatchObject({ planId });
+  });
+
+  it('syncSubscriptionWithProvider returns the journal schema refusal for provider metadata no column can hold', async () => {
+    const { id } = await seedSubscription(writes, 'active');
+    const eventsBefore = await countEvents(db);
+    const manager = managerWith(current => ({ ...current, metadata: { note: 'a\u0000b' } }));
+
+    const result = await manager.syncSubscriptionWithProvider(id);
+
+    expect(result).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+});
+
+describe('reads that must see trialing subscribers', () => {
+  it('handleTrialEndingSoon finds a trial that ends in the asked day, and validateSubscriptionAccess grants it', async () => {
+    const owner = 'usr_trialing' as const;
+    await db.insert(users).values({ id: owner });
+    const ownerCustomer = orThrow(createCustomerId());
+    await db.insert(core.customers).values({ id: ownerCustomer, userId: owner, providerCustomerId: 'cus_trialing', email: 'trial@example.com' });
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + 3);
+    trialEnd.setHours(0, 0, 0, 0);
+    const trial = orThrow(
+      await writes.createSubscription({
+        userId: owner,
+        planId,
+        customerId: ownerCustomer,
+        providerSubscriptionId: 'psub_trialing',
+        status: 'trialing',
+        currentPeriodStart: instant(new Date()),
+        currentPeriodEnd: instant(trialEnd),
+      }),
+    );
+    const manager = managerWith(current => current);
+
+    const endingSoon = await manager.handleTrialEndingSoon(3);
+    expect(endingSoon.map(found => found.id)).toContain(trial.id);
+    // `getEntitlement` grants a trial on purpose; the access check must agree
+    expect(await manager.validateSubscriptionAccess(owner)).toMatchObject({ hasAccess: true, subscription: { id: trial.id } });
+  });
+
+  it('handleTrialEndingSoon refuses a day count that is not a whole number from 0 to 365', async () => {
+    const manager = managerWith(current => current);
+
+    for (const days of [Number.NaN, 1.5, -1, 1e9]) {
+      await expect(manager.handleTrialEndingSoon(days)).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+    }
+  });
+});
+
 describe('the manager returns its own refusals as failures', () => {
   it('updateSubscription refuses a subscription that is not active, and a plan that is not offered', async () => {
     const paused = await seedSubscription(writes, 'paused');

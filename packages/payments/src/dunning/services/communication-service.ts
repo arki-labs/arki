@@ -1,12 +1,15 @@
+import { and, desc, eq, gt, isNull, ne, notExists, or } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
+
 import type { Instant } from '@arki/date';
 import type { SchemaFailure } from '@arki/failure';
 import { z } from '@arki/contracts';
 import { fromDate, now, toDate } from '@arki/date';
-import { isFailure, unreachable, UnexpectedFailure } from '@arki/failure';
+import { isFailure, orThrow, unreachable, UnexpectedFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { parse } from '@arki/schema';
 
-import type { ListCommunicationsQuery, UpdateCommunicationStatusInput } from '../contracts.js';
+import type { CommunicationWebhookInput, ListCommunicationsQuery, UpdateCommunicationStatusInput } from '../contracts.js';
 import type { DunningTickReport, NotificationProviderFailure } from '../failures.js';
 import type {
   CommunicationStatus as CommStatus,
@@ -25,9 +28,12 @@ import type {
   DunningTemplate,
 } from '../types.js';
 import { PaymentsConfigurationInvalid } from '../../core/failures.js';
+import { pgTextSchema, pgVarcharSchema } from '../../core/pg-values.js';
+import { communicationWebhookSchema } from '../contracts.js';
 import { PaymentProviderError } from '../../core/providers/provider-error.js';
 import { observePayments } from '../../core/telemetry.js';
 import {
+  DunningCommunicationNotFound,
   NotificationChannelUnavailable,
   NotificationProviderRejected,
   NotificationProviderResponseInvalid,
@@ -122,7 +128,11 @@ const jsonTextSchema = z.string().transform((text, context) => {
 });
 
 /** The error body Resend and Twilio both send: a `message`, among other fields. */
-const providerErrorBodySchema = jsonTextSchema.pipe(z.looseObject({ message: z.string() }));
+// The text is stored as the communication's failure reason, so it must be text Postgres can store
+const providerErrorBodySchema = jsonTextSchema.pipe(z.looseObject({ message: pgTextSchema }));
+
+/** A provider's id for a sent message: stored in `provider_message_id`, a varchar(255). */
+const sentMessageIdSchema = pgVarcharSchema(255);
 
 /**
  * A provider message id as the caller passes it. It goes into a URL path, so text with a lone UTF-16
@@ -190,7 +200,7 @@ function applyPersonalizations(template: string, personalizations: Record<string
 }
 
 /** The Resend send answer: the email id. */
-const resendSentSchema = jsonTextSchema.pipe(z.looseObject({ id: z.string() }));
+const resendSentSchema = jsonTextSchema.pipe(z.looseObject({ id: sentMessageIdSchema }));
 
 /** The Resend email record `getDeliveryStatus` reads. */
 const resendEmailSchema = jsonTextSchema.pipe(
@@ -317,8 +327,9 @@ export class EmailProvider implements CommunicationProvider {
 /** The Twilio message answer: its sid, and status and uri when Twilio sends them. */
 const twilioMessageSchema = jsonTextSchema.pipe(
   z.looseObject({
-    sid: z.string(),
-    status: z.string().nullish(),
+    sid: sentMessageIdSchema,
+    // Stored in the communication's provider response (jsonb)
+    status: pgTextSchema.nullish(),
     uri: z.string().nullish(),
     date_created: providerDateSchema.nullish(),
     date_updated: providerDateSchema.nullish(),
@@ -667,7 +678,10 @@ export class CommunicationOrchestrationService {
   private providers = new Map<CommunicationChannel, CommunicationProvider>();
   private communicationRepo;
 
-  constructor(db: DunningDatabase, tables: Pick<DunningTables, 'dunningCommunications'>) {
+  constructor(
+    private readonly db: DunningDatabase,
+    private readonly tables: Pick<DunningTables, 'dunningCommunications' | 'dunningExecutions'>,
+  ) {
     this.communicationRepo = createDunningCommunicationRepository(db, tables);
   }
 
@@ -682,8 +696,10 @@ export class CommunicationOrchestrationService {
    * Send communication for a dunning execution. Returns the communication row marked `sent`, or the
    * provider's failure (refused, timed out, unreadable answer, invalid recipient) after the row is
    * marked `failed` with that failure's message. A channel with no provider registered returns
-   * `NotificationChannelUnavailable`, and an execution, step or customer with no row returns its
-   * not-found failure (`CommunicationReferenceMissing`); both write nothing. A provider that cannot be reached throws
+   * `NotificationChannelUnavailable`, a recipient from customer data the `recipient` column cannot
+   * store (over 255 characters, or holding U+0000) returns `schema.invalid_input`, and an execution,
+   * step or customer with no row returns its not-found failure (`CommunicationReferenceMissing`); each
+   * writes nothing and sends nothing. A provider that cannot be reached throws
    * (`PaymentProviderError('unavailable')`) after the row is marked `failed`; when marking the row
    * fails too, an `AggregateError` holds both errors, the send error first.
    */
@@ -698,7 +714,7 @@ export class CommunicationOrchestrationService {
       return NotificationChannelUnavailable({ channel: template.communication.channel });
     }
 
-    // Determine recipient based on channel
+    // Determine recipient based on channel. It comes from customer data: the insert checks it fits its column
     const recipient = this.getRecipient(customer, template.communication.channel);
 
     // Create communication record
@@ -734,7 +750,7 @@ export class CommunicationOrchestrationService {
       });
 
       if (isFailure(result)) {
-        await this.communicationRepo.updateStatus(communication.id, 'failed', { failureReason: result.message });
+        orThrow(await this.communicationRepo.updateStatus(communication.id, 'failed', { failureReason: result.message }));
         return result;
       }
 
@@ -747,9 +763,11 @@ export class CommunicationOrchestrationService {
     } catch (error) {
       // Update communication status on error; a failing status write never hides the send error
       try {
-        await this.communicationRepo.updateStatus(communication.id, 'failed', {
-          failureReason: error instanceof Error ? error.message : 'Unknown error',
-        });
+        orThrow(
+          await this.communicationRepo.updateStatus(communication.id, 'failed', {
+            failureReason: error instanceof Error ? error.message : 'Unknown error',
+          }),
+        );
       } catch (statusError) {
         throw new AggregateError(
           [error, statusError],
@@ -839,13 +857,13 @@ export class CommunicationOrchestrationService {
             code: result.code,
           });
           report.failed.push(tickFault(communication.id, result));
-          await this.communicationRepo.updateStatus(communication.id, 'failed', { failureReason: result.message });
+          orThrow(await this.communicationRepo.updateStatus(communication.id, 'failed', { failureReason: result.message }));
         } else {
-          await this.communicationRepo.updateStatus(communication.id, 'sent', {
+          orThrow(await this.communicationRepo.updateStatus(communication.id, 'sent', {
             sentAt: now(),
             providerMessageId: result.messageId,
             providerResponse: result.providerResponse,
-          });
+          }));
         }
       } catch (error) {
         logger.error('Failed to process communication', {
@@ -853,28 +871,26 @@ export class CommunicationOrchestrationService {
           error: error instanceof Error ? error.message : String(error),
         });
         report.failed.push(tickFault(communication.id, error));
-        await this.communicationRepo.updateStatus(communication.id, 'failed', {
+        orThrow(await this.communicationRepo.updateStatus(communication.id, 'failed', {
           failureReason: error instanceof Error ? error.message : 'Unknown error',
-        });
+        }));
       }
     }
     return report;
   }
 
   /**
-   * Handle communication status webhooks
+   * Record a delivery callback from a channel provider. The payload is outside input and is parsed with
+   * `communicationWebhookSchema`: a payload it refuses returns `schema.invalid_input`, and a provider
+   * message id no communication has returns `DunningCommunicationNotFound`; both write nothing.
+   * Returns the communication as it is now.
    */
-  async handleCommunicationWebhook(data: {
-    providerMessageId: string;
-    event: 'delivered' | 'opened' | 'clicked' | 'bounced' | 'complained';
-    timestamp: Instant;
-    metadata?: Record<string, unknown>;
-  }): Promise<void> {
+  async handleCommunicationWebhook(payload: CommunicationWebhookInput) {
+    const data = parse(communicationWebhookSchema, payload);
+    if (isFailure(data)) return data;
+
     const communication = await this.communicationRepo.findByProviderMessageId(data.providerMessageId);
-    if (!communication) {
-      logger.warn('Communication not found for provider message ID', { providerMessageId: data.providerMessageId });
-      return;
-    }
+    if (!communication) return DunningCommunicationNotFound({ providerMessageId: data.providerMessageId });
 
     const updates: Partial<CommunicationUpdateData> = {
       trackingData: {
@@ -904,11 +920,12 @@ export class CommunicationOrchestrationService {
       }
     }
 
-    await this.communicationRepo.updateStatus(
+    const updated = await this.communicationRepo.updateStatus(
       communication.id,
       data.event === 'bounced' ? 'bounced' : communication.status,
       updates,
     );
+    return updated ?? communication;
   }
 
   /**
@@ -928,7 +945,7 @@ export class CommunicationOrchestrationService {
   /**
    * Update communication status manually
    */
-  async updateCommunicationStatus(input: UpdateCommunicationStatusInput): Promise<DunningCommunication | null> {
+  async updateCommunicationStatus(input: UpdateCommunicationStatusInput) {
     const updates: Partial<CommunicationUpdateData> = { updatedAt: now() };
 
     if (input.sentAt) updates.sentAt = input.sentAt;
@@ -991,21 +1008,41 @@ export class CommunicationOrchestrationService {
     return provider.getDeliveryStatus(communication.providerMessageId);
   }
 
-  /** Put the failed communications back to pending and send them again: the report of that send. */
+  /**
+   * Put the failed communications back to pending and send them again: the report of that send.
+   * Executions own the resend of their message, so only one job ever sends it again: a communication
+   * whose execution is `failed` with a `nextRetryAt` (`retryFailedExecutions` will send it again), or
+   * that a later communication of the same execution replaced, is skipped. What is left is the latest
+   * failed send of an execution no retry will run (refused with a 4xx, timed out, retries used up).
+   */
   async retryFailedCommunications(limit = 50): Promise<DunningTickReport> {
-    const failedCommunications = await this.communicationRepo.findMany({
-      limit,
-      offset: 0,
-      status: 'failed',
-      sortBy: 'createdAt',
-      sortOrder: 'desc',
-    });
+    const { dunningCommunications: communications, dunningExecutions: executions } = this.tables;
+    const later = alias(communications, 'later_communication');
+    const failedCommunications = await this.db
+      .select({ id: communications.id })
+      .from(communications)
+      .innerJoin(executions, eq(executions.id, communications.executionId))
+      .where(
+        and(
+          eq(communications.status, 'failed'),
+          // Not an execution retryFailedExecutions will run again
+          or(ne(executions.status, 'failed'), isNull(executions.nextRetryAt)),
+          notExists(
+            this.db
+              .select({ id: later.id })
+              .from(later)
+              .where(and(eq(later.executionId, communications.executionId), gt(later.createdAt, communications.createdAt))),
+          ),
+        ),
+      )
+      .orderBy(desc(communications.createdAt))
+      .limit(limit);
 
     const resetFaults: DunningTickReport['failed'] = [];
     for (const communication of failedCommunications) {
       try {
         // Reset status to pending for retry
-        await this.communicationRepo.updateStatus(communication.id, 'pending');
+        orThrow(await this.communicationRepo.updateStatus(communication.id, 'pending'));
       } catch (error) {
         logger.error('Failed to retry communication', {
           communicationId: communication.id,
@@ -1066,7 +1103,7 @@ function metadataText(value: unknown): string {
  */
 export function createCommunicationOrchestrationService(
   db: DunningDatabase,
-  tables: Pick<DunningTables, 'dunningCommunications'>,
+  tables: Pick<DunningTables, 'dunningCommunications' | 'dunningExecutions'>,
   config: CommunicationOrchestrationConfig = {},
 ) {
   const service = new CommunicationOrchestrationService(db, tables);

@@ -4,15 +4,16 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { Instant } from '@arki/date';
 import { now, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
-import type { FailureOf } from '@arki/failure';
+import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
 import { Money } from '@arki/money';
 
 import type { CoreTables } from '../../core/tables.js';
 import type { Customer, CustomerId } from '../../core/types.js';
+import type { UserId } from '../../core/user-id.js';
 import type { CreateCustomerSegmentInput, ListCustomerSegmentsQuery, UpdateCustomerSegmentInput } from '../contracts.js';
-import type { CustomerSegmentId } from '../primitives.js';
+import type { CustomerSegmentId, RiskCategory } from '../primitives.js';
 import type { DunningDatabase } from '../repository.js';
 import type { DunningTables } from '../tables.js';
 import type {
@@ -74,13 +75,14 @@ export class CustomerSegmentationService {
 
   /**
    * Create a new customer segment. The criteria are checked first: a spend range that is not valid money
-   * returns its `MoneyFailure` and nothing is written. After a good write, the count can only fail with a
+   * returns its `MoneyFailure` and an actor id Postgres cannot store `schema.invalid_input`; nothing is
+   * written then. After a good write, the count can only fail with a
    * database error, which throws (this service holds no transaction, so the saved row stays).
    */
   async createSegment(
     input: CreateCustomerSegmentInput,
-    createdBy: string,
-  ): Promise<CustomerSegment | MoneyFailure | FailureOf<typeof CustomerSegmentNotFound>> {
+    createdBy: UserId,
+  ): Promise<CustomerSegment | MoneyFailure | FailureOf<typeof CustomerSegmentNotFound> | SchemaFailure> {
     const valid = this.buildSegmentConditions(input.criteria);
     if (isFailure(valid)) return valid;
 
@@ -90,6 +92,7 @@ export class CustomerSegmentationService {
     });
 
     invariant(dbSegment, 'the segment insert returned no row');
+    if (isFailure(dbSegment)) return dbSegment;
 
     const segment = dbSegment;
 
@@ -109,7 +112,7 @@ export class CustomerSegmentationService {
   async updateSegment(
     segmentId: CustomerSegmentId,
     input: UpdateCustomerSegmentInput,
-  ): Promise<CustomerSegment | null | MoneyFailure | FailureOf<typeof CustomerSegmentNotFound>> {
+  ): Promise<CustomerSegment | null | MoneyFailure | FailureOf<typeof CustomerSegmentNotFound> | SchemaFailure> {
     if (input.criteria) {
       const valid = this.buildSegmentConditions(input.criteria);
       if (isFailure(valid)) return valid;
@@ -168,7 +171,9 @@ export class CustomerSegmentationService {
     const segment = dbSegment;
     const customerCount = await this.calculateSegmentCustomerCount(segment.criteria);
     if (isFailure(customerCount)) return customerCount;
-    await this.segmentRepo.updateCustomerCount(segmentId, customerCount);
+    // A count `customer_count` (int4) cannot hold returns `schema.invalid_input`
+    const stored = await this.segmentRepo.updateCustomerCount(segmentId, customerCount);
+    if (isFailure(stored)) return stored;
     return customerCount;
   }
 
@@ -1101,7 +1106,7 @@ export class CustomerSegmentationService {
   /**
    * Get customers by risk category
    */
-  async getCustomersByRiskCategory(category: string, limit = 100): Promise<CustomerRiskProfile[]> {
+  async getCustomersByRiskCategory(category: RiskCategory, limit = 100): Promise<CustomerRiskProfile[]> {
     const dbProfiles = await this.riskProfileRepo.findByRiskCategory(category, limit);
     return dbProfiles;
   }

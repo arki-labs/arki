@@ -131,12 +131,14 @@ describe('reads on a database without relations', () => {
   });
 
   it('reads webhook events', async () => {
-    const created = await repo.createWebhookEvent({
-      provider: 'stripe',
-      eventType: 'customer.created',
-      providerEventId: 'evt_no_relations',
-      data: {},
-    });
+    const created = orThrow(
+      await repo.createWebhookEvent({
+        provider: 'stripe',
+        eventType: 'customer.created',
+        providerEventId: 'evt_no_relations',
+        data: {},
+      }),
+    );
 
     expect((await valueOf(repo.findWebhookEventById(created.id), 'providerEventId'))).toBe('evt_no_relations');
     expect((await valueOf(repo.findWebhookEventByProviderEventId('evt_no_relations', 'stripe'), 'id'))).toBe(created.id);

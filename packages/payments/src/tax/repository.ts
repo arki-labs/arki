@@ -7,6 +7,7 @@ import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
+import { z } from '@arki/contracts';
 import { is, parse } from '@arki/schema';
 
 import type { TaxConfigId, TaxExemptionId, TaxJurisdictionId, TaxRecordType } from './primitives.js';
@@ -23,10 +24,38 @@ import type {
   TaxJurisdiction,
   TaxRecord,
 } from './types.js';
-import { exemptionPeriodSchema, exemptionTargetSchema, getExpiringExemptionsInputSchema } from './contracts.js';
-import { TaxReferenceNotFound } from './failures.js';
+import { isPgInstant, pgTextSchema } from '../core/pg-values.js';
+import {
+  exemptionPeriodSchema,
+  exemptionTargetSchema,
+  getExpiringExemptionsInputSchema,
+  taxAuditRowSchema,
+  taxConfigurationRowSchema,
+  taxExemptionRowSchema,
+  taxJurisdictionRowSchema,
+  taxRecordRowSchema,
+} from './contracts.js';
+import { TaxJurisdictionInUse, TaxReferenceNotFound, TaxRowExists } from './failures.js';
 
 type NotFound = FailureOf<typeof TaxReferenceNotFound>;
+type Exists = FailureOf<typeof TaxRowExists>;
+
+/**
+ * False when a text holds U+0000. No stored row can hold one, so a read for it finds nothing, and
+ * Postgres would refuse it as a parameter (SQLSTATE 22021).
+ */
+function findable(...texts: (string | undefined)[]): boolean {
+  return texts.every(text => text === undefined || is(text, pgTextSchema));
+}
+
+/**
+ * A time a read compares with an `instant` column must fall in the years 1 to 9999 (`isPgInstant`):
+ * Postgres refuses any other as a parameter. A typed `Instant` outside them is a bug in the caller,
+ * and throws `FailureError` (`invariant`) before the query.
+ */
+function requirePgInstants(method: string, ...instants: Instant[]): void {
+  invariant(instants.every(instant => isPgInstant(instant)), () => `${method} needs times in the years 1 to 9999 (UTC)`);
+}
 
 /**
  * Structural database type for the tax repositories. The tax repositories
@@ -75,10 +104,22 @@ export class TaxConfigurationRepository {
     this.taxConfigurations = tables.taxConfigurations;
   }
 
-  async createConfiguration(data: NewTaxConfig): Promise<TaxConfig> {
-    const [created] = await this.db.insert(this.taxConfigurations).values(data).returning();
-    invariant(created, 'the tax configuration insert returned no row');
-    return created;
+  /**
+   * The new row. A value a column cannot store returns `InvalidInput` (`taxConfigurationRowSchema`),
+   * and an `id` another configuration has returns `TaxRowExists`; nothing is written then.
+   */
+  async createConfiguration(data: NewTaxConfig): Promise<TaxConfig | SchemaFailure | Exists> {
+    const row = parse(taxConfigurationRowSchema, data);
+    if (isFailure(row)) return row;
+
+    const [created] = await this.db
+      .insert(this.taxConfigurations)
+      .values(data)
+      .onConflictDoNothing({ target: this.taxConfigurations.id })
+      .returning();
+    if (created) return created;
+    invariant(data.id !== undefined, 'the tax configuration insert returned no row');
+    return TaxRowExists({ kind: 'configuration', id: data.id });
   }
 
   async findConfigurationById(id: TaxConfigId): Promise<TaxConfig | null> {
@@ -109,8 +150,17 @@ export class TaxConfigurationRepository {
       .orderBy(desc(this.taxConfigurations.isDefault), this.taxConfigurations.name);
   }
 
-  /** The updated row, or `TaxReferenceNotFound` when no configuration has `id`. */
-  async updateConfiguration(id: TaxConfigId, data: UpdateTaxConfiguration): Promise<TaxConfig | NotFound> {
+  /**
+   * The updated row, or `TaxReferenceNotFound` when no configuration has `id`. A value a column cannot
+   * store returns `InvalidInput` (`taxConfigurationRowSchema`) and nothing is written.
+   */
+  async updateConfiguration(
+    id: TaxConfigId,
+    data: UpdateTaxConfiguration,
+  ): Promise<TaxConfig | NotFound | SchemaFailure> {
+    const row = parse(taxConfigurationRowSchema.partial(), data);
+    if (isFailure(row)) return row;
+
     const [updated] = await this.db
       .update(this.taxConfigurations)
       .set({ ...data, updatedAt: now() })
@@ -153,24 +203,37 @@ export class TaxConfigurationRepository {
 export class TaxJurisdictionRepository {
   private readonly db: TaxDatabase;
   private readonly taxJurisdictions: TaxTables['taxJurisdictions'];
+  private readonly taxExemptions: TaxTables['taxExemptions'];
 
-  constructor(db: TaxDatabase, tables: Pick<TaxTables, 'taxJurisdictions'>) {
+  /** `taxExemptions` is read by `deleteJurisdiction`: a jurisdiction an exemption names is kept. */
+  constructor(db: TaxDatabase, tables: Pick<TaxTables, 'taxJurisdictions' | 'taxExemptions'>) {
     this.db = db;
     this.taxJurisdictions = tables.taxJurisdictions;
+    this.taxExemptions = tables.taxExemptions;
   }
 
   /**
    * The new row, or `TaxReferenceNotFound` (kind `jurisdiction`) when `parentId` names no
-   * jurisdiction. The parent is locked until the insert, so it cannot be deleted in between.
+   * jurisdiction. The parent is locked until the insert, so it cannot be deleted in between. A value
+   * a column cannot store returns `InvalidInput` (`taxJurisdictionRowSchema`), and an `id` another
+   * jurisdiction has returns `TaxRowExists`; nothing is written then.
    */
-  async createJurisdiction(data: NewTaxJurisdiction): Promise<TaxJurisdiction | NotFound> {
+  async createJurisdiction(data: NewTaxJurisdiction): Promise<TaxJurisdiction | NotFound | SchemaFailure | Exists> {
+    const row = parse(taxJurisdictionRowSchema, data);
+    if (isFailure(row)) return row;
+
     return this.db.transaction(async tx => {
       const missing = await lockJurisdiction(tx, this.taxJurisdictions, data.parentId);
       if (missing) return missing;
 
-      const [created] = await tx.insert(this.taxJurisdictions).values(data).returning();
-      invariant(created, 'the tax jurisdiction insert returned no row');
-      return created;
+      const [created] = await tx
+        .insert(this.taxJurisdictions)
+        .values(data)
+        .onConflictDoNothing({ target: this.taxJurisdictions.id })
+        .returning();
+      if (created) return created;
+      invariant(data.id !== undefined, 'the tax jurisdiction insert returned no row');
+      return TaxRowExists({ kind: 'jurisdiction', id: data.id });
     });
   }
 
@@ -184,6 +247,7 @@ export class TaxJurisdictionRepository {
   }
 
   async findJurisdictionByCode(code: string, countryCode: string): Promise<TaxJurisdiction | null> {
+    if (!findable(code, countryCode)) return null;
     const results = await this.db
       .select()
       .from(this.taxJurisdictions)
@@ -198,6 +262,7 @@ export class TaxJurisdictionRepository {
   }
 
   async findJurisdictionsByCountry(countryCode: string): Promise<TaxJurisdiction[]> {
+    if (!findable(countryCode)) return [];
     return this.db
       .select()
       .from(this.taxJurisdictions)
@@ -246,9 +311,16 @@ export class TaxJurisdictionRepository {
 
   /**
    * The updated row, or `TaxReferenceNotFound` (kind `jurisdiction`) when no jurisdiction has `id`,
-   * or when the new `parentId` names none. The new parent is locked until the update.
+   * or when the new `parentId` names none. The new parent is locked until the update. A value a
+   * column cannot store returns `InvalidInput` (`taxJurisdictionRowSchema`) and nothing is written.
    */
-  async updateJurisdiction(id: TaxJurisdictionId, data: UpdateTaxJurisdiction): Promise<TaxJurisdiction | NotFound> {
+  async updateJurisdiction(
+    id: TaxJurisdictionId,
+    data: UpdateTaxJurisdiction,
+  ): Promise<TaxJurisdiction | NotFound | SchemaFailure> {
+    const row = parse(taxJurisdictionRowSchema.partial(), data);
+    if (isFailure(row)) return row;
+
     return this.db.transaction(async tx => {
       const missing = await lockJurisdiction(tx, this.taxJurisdictions, data.parentId);
       if (missing) return missing;
@@ -262,8 +334,38 @@ export class TaxJurisdictionRepository {
     });
   }
 
-  async deleteJurisdiction(id: TaxJurisdictionId): Promise<void> {
-    await this.db.delete(this.taxJurisdictions).where(eq(this.taxJurisdictions.id, id));
+  /**
+   * Deletes the jurisdiction. One that a child jurisdiction or an exemption still names returns
+   * `TaxJurisdictionInUse` and is kept. The row is locked first, so a write that would point at it
+   * waits, and then finds it gone (`TaxReferenceNotFound`). An unknown id deletes nothing.
+   */
+  async deleteJurisdiction(id: TaxJurisdictionId): Promise<FailureOf<typeof TaxJurisdictionInUse> | undefined> {
+    return this.db.transaction(async tx => {
+      const [found] = await tx
+        .select({ id: this.taxJurisdictions.id })
+        .from(this.taxJurisdictions)
+        .where(eq(this.taxJurisdictions.id, id))
+        .for('update');
+      if (!found) return;
+
+      // A row whose parent is itself (an update can store that) does not keep itself
+      const [child] = await tx
+        .select({ id: this.taxJurisdictions.id })
+        .from(this.taxJurisdictions)
+        .where(and(eq(this.taxJurisdictions.parentId, id), ne(this.taxJurisdictions.id, id)))
+        .limit(1);
+      if (child) return TaxJurisdictionInUse({ id, usedBy: 'jurisdiction', usedById: child.id });
+
+      const [exemption] = await tx
+        .select({ id: this.taxExemptions.id })
+        .from(this.taxExemptions)
+        .where(eq(this.taxExemptions.jurisdictionId, id))
+        .limit(1);
+      if (exemption) return TaxJurisdictionInUse({ id, usedBy: 'exemption', usedById: exemption.id });
+
+      await tx.delete(this.taxJurisdictions).where(eq(this.taxJurisdictions.id, id));
+      return;
+    });
   }
 }
 
@@ -287,9 +389,13 @@ export class TaxExemptionRepository {
    * `exemptionTargetSchema` refuses it with `InvalidInput`, and nothing is written. So does
    * `exemptionPeriodSchema` for one whose `validTo` is before its `validFrom`. A `jurisdictionId`
    * that names no jurisdiction returns `TaxReferenceNotFound` (kind `jurisdiction`); the
-   * jurisdiction is locked until the insert, so it cannot be deleted in between.
+   * jurisdiction is locked until the insert, so it cannot be deleted in between. A value a column
+   * cannot store returns `InvalidInput` (`taxExemptionRowSchema`), and an `id` another exemption has
+   * returns `TaxRowExists`; nothing is written then.
    */
-  async createExemption(data: NewTaxExemption): Promise<TaxExemption | NotFound | SchemaFailure> {
+  async createExemption(data: NewTaxExemption): Promise<TaxExemption | NotFound | SchemaFailure | Exists> {
+    const row = parse(taxExemptionRowSchema, data);
+    if (isFailure(row)) return row;
     const target = parse(exemptionTargetSchema, data);
     if (isFailure(target)) return target;
     const period = parse(exemptionPeriodSchema, data);
@@ -299,9 +405,14 @@ export class TaxExemptionRepository {
       const missing = await lockJurisdiction(tx, this.taxJurisdictions, data.jurisdictionId);
       if (missing) return missing;
 
-      const [created] = await tx.insert(this.taxExemptions).values(data).returning();
-      invariant(created, 'the tax exemption insert returned no row');
-      return created;
+      const [created] = await tx
+        .insert(this.taxExemptions)
+        .values(data)
+        .onConflictDoNothing({ target: this.taxExemptions.id })
+        .returning();
+      if (created) return created;
+      invariant(data.id !== undefined, 'the tax exemption insert returned no row');
+      return TaxRowExists({ kind: 'exemption', id: data.id });
     });
   }
 
@@ -315,6 +426,7 @@ export class TaxExemptionRepository {
   }
 
   async findCustomerExemptions(customerId: string): Promise<TaxExemption[]> {
+    if (!findable(customerId)) return [];
     return this.db
       .select()
       .from(this.taxExemptions)
@@ -332,9 +444,12 @@ export class TaxExemptionRepository {
 
   /**
    * The customer's exemptions that were in force at some point between `start` and `end`,
-   * both inclusive. Pending and revoked exemptions never applied, so they are left out.
+   * both inclusive. Pending and revoked exemptions never applied, so they are left out. The times
+   * fall in the years 1 to 9999, or it throws `FailureError` (`invariant`).
    */
   async findCustomerExemptionsInRange(customerId: string, start: Instant, end: Instant): Promise<TaxExemption[]> {
+    requirePgInstants('findCustomerExemptionsInRange', start, end);
+    if (!findable(customerId)) return [];
     return this.db
       .select()
       .from(this.taxExemptions)
@@ -353,9 +468,12 @@ export class TaxExemptionRepository {
    * The exemptions that can keep tax off a sale to `customerId` at `at`: active, in force, and
    * either the customer's own or open to every customer (no `customerId`). Pending, revoked and
    * expired ones never apply. `threshold` exemptions are left out: nothing stores a threshold
-   * amount to test a sale against. The caller narrows by product and jurisdiction.
+   * amount to test a sale against. The caller narrows by product and jurisdiction. `at` falls in the
+   * years 1 to 9999, or it throws `FailureError` (`invariant`).
    */
   async findApplicableExemptions(customerId: string, at: Instant = now()): Promise<TaxExemption[]> {
+    requirePgInstants('findApplicableExemptions', at);
+    if (!findable(customerId)) return [];
     return this.db
       .select()
       .from(this.taxExemptions)
@@ -371,8 +489,13 @@ export class TaxExemptionRepository {
       .orderBy(this.taxExemptions.validFrom, this.taxExemptions.id);
   }
 
-  /** Every customer's exemptions that were in force at some point between `start` and `end`, both inclusive. Pending and revoked ones never applied. */
+  /**
+   * Every customer's exemptions that were in force at some point between `start` and `end`, both
+   * inclusive. Pending and revoked ones never applied. The times fall in the years 1 to 9999, or it
+   * throws `FailureError` (`invariant`).
+   */
   async findExemptionsInRange(start: Instant, end: Instant): Promise<TaxExemption[]> {
+    requirePgInstants('findExemptionsInRange', start, end);
     return this.db
       .select()
       .from(this.taxExemptions)
@@ -387,6 +510,7 @@ export class TaxExemptionRepository {
   }
 
   async findProductExemptions(productCode: string): Promise<TaxExemption[]> {
+    if (!findable(productCode)) return [];
     return this.db
       .select()
       .from(this.taxExemptions)
@@ -448,13 +572,17 @@ export class TaxExemptionRepository {
    * The updated row, or `TaxReferenceNotFound` when no exemption has `id` (kind `exemption`) or the
    * new `jurisdictionId` names no jurisdiction (kind `jurisdiction`). The row as the update
    * leaves it must still name a customer, a product code or a jurisdiction (`exemptionTargetSchema`)
-   * and must not end before it starts (`exemptionPeriodSchema`): otherwise it returns `InvalidInput`
-   * and nothing is written. A field left `undefined` keeps its stored value; `null` clears it.
+   * and must not end before it starts (`exemptionPeriodSchema`), and every value must fit its column
+   * (`taxExemptionRowSchema`): otherwise it returns `InvalidInput` and nothing is written. A field left
+   * `undefined` keeps its stored value; `null` clears it.
    */
   async updateExemption(
     id: TaxExemptionId,
     data: UpdateTaxExemption,
   ): Promise<TaxExemption | NotFound | SchemaFailure> {
+    const row = parse(taxExemptionRowSchema.partial(), data);
+    if (isFailure(row)) return row;
+
     return this.db.transaction(async tx => {
       // Lock the row, so the check and the write see the same stored values
       const [current] = await tx
@@ -488,8 +616,14 @@ export class TaxExemptionRepository {
     });
   }
 
-  /** The approved row, or `TaxReferenceNotFound` when no exemption has `id`. */
-  async approveExemption(id: TaxExemptionId, approvedBy: string): Promise<TaxExemption | NotFound> {
+  /**
+   * The approved row, or `TaxReferenceNotFound` when no exemption has `id`. An `approvedBy` the column
+   * cannot store returns `InvalidInput` and nothing is written.
+   */
+  async approveExemption(id: TaxExemptionId, approvedBy: string): Promise<TaxExemption | NotFound | SchemaFailure> {
+    const approver = parse(taxExemptionRowSchema.shape.approvedBy, approvedBy);
+    if (isFailure(approver)) return approver;
+
     const [approved] = await this.db
       .update(this.taxExemptions)
       .set({
@@ -583,15 +717,27 @@ export class TaxAuditRepository {
     this.taxAuditEntries = tables.taxAuditEntries;
   }
 
-  async record(entry: NewTaxAuditRow): Promise<TaxAuditRow> {
-    const [row] = await this.db.insert(this.taxAuditEntries).values(entry).returning();
-    invariant(row, 'the tax audit insert returned no row');
+  /**
+   * The stored entry. An `entityId` or `details` the columns cannot store returns `InvalidInput`
+   * (`taxAuditRowSchema`), and an `id` another entry has returns `TaxRowExists`; nothing is written then.
+   */
+  async record(entry: NewTaxAuditRow): Promise<TaxAuditRow | SchemaFailure | Exists> {
+    const checked = parse(taxAuditRowSchema, entry);
+    if (isFailure(checked)) return checked;
 
-    return row;
+    const [row] = await this.db
+      .insert(this.taxAuditEntries)
+      .values(entry)
+      .onConflictDoNothing({ target: this.taxAuditEntries.id })
+      .returning();
+    if (row) return row;
+    invariant(entry.id !== undefined, 'the tax audit insert returned no row');
+    return TaxRowExists({ kind: 'audit_entry', id: entry.id });
   }
 
   /** The entries about one entity, oldest first. */
   async findByEntity(entity: TaxAuditRow['entity'], entityId: string): Promise<TaxAuditRow[]> {
+    if (!findable(entityId)) return [];
     return this.db
       .select()
       .from(this.taxAuditEntries)
@@ -625,13 +771,21 @@ export class TaxRecordRepository {
     this.taxRecords = tables.taxRecords;
   }
 
-  /** Write the rows. A row already recorded (same type, reference, jurisdiction and rate) is left as it was. */
-  async recordMany(rows: NewTaxRecord[]): Promise<void> {
-    if (rows.length === 0) return;
+  /**
+   * Write the rows. A row already recorded (same type, reference, jurisdiction and rate) is left as it
+   * was. A row with a value its column cannot store returns `InvalidInput` (`taxRecordRowSchema`), and
+   * no row is written.
+   */
+  async recordMany(rows: NewTaxRecord[]): Promise<SchemaFailure | undefined> {
+    const checked = parse(z.array(taxRecordRowSchema), rows);
+    if (isFailure(checked)) return checked;
+    if (rows.length === 0) return undefined;
     await this.db.insert(this.taxRecords).values(rows).onConflictDoNothing();
+    return undefined;
   }
 
   async findByReference(type: TaxRecordType, reference: string): Promise<TaxRecord[]> {
+    if (!findable(reference)) return [];
     return this.db
       .select()
       .from(this.taxRecords)
@@ -639,8 +793,13 @@ export class TaxRecordRepository {
       .orderBy(this.taxRecords.jurisdiction, this.taxRecords.rate);
   }
 
-  /** How many distinct sales carried tax between `start` and `end`, both inclusive (a sale taxed in two jurisdictions counts once). */
+  /**
+   * How many distinct sales carried tax between `start` and `end`, both inclusive (a sale taxed in two
+   * jurisdictions counts once). The times fall in the years 1 to 9999, or it throws `FailureError` (`invariant`).
+   */
   async countSaleTransactions(period: { start: Instant; end: Instant; customerId?: string; jurisdiction?: string }): Promise<number> {
+    requirePgInstants('countSaleTransactions', period.start, period.end);
+    if (!findable(period.customerId, period.jurisdiction)) return 0;
     const [row] = await this.db
       .select({ count: sql<number>`count(distinct ${this.taxRecords.reference})`.mapWith(Number) })
       .from(this.taxRecords)
@@ -662,8 +821,11 @@ export class TaxRecordRepository {
   /**
    * The tax each payment carried, for the records that happened between `start` and `end`, both
    * inclusive. Records with no payment id are left out. `jurisdiction` limits it to one (any case).
+   * The times fall in the years 1 to 9999, or it throws `FailureError` (`invariant`).
    */
   async totalsByPayment(period: { start: Instant; end: Instant; jurisdiction?: string }): Promise<TaxRecordPaymentTotal[]> {
+    requirePgInstants('totalsByPayment', period.start, period.end);
+    if (!findable(period.jurisdiction)) return [];
     const { type, taxAmountMinor } = this.taxRecords;
 
     return this.db
@@ -690,8 +852,11 @@ export class TaxRecordRepository {
   /**
    * Tax per jurisdiction and currency for the records that happened between `start` and `end`,
    * both inclusive, ordered by jurisdiction then currency. `customerId` limits it to one customer.
+   * The times fall in the years 1 to 9999, or it throws `FailureError` (`invariant`).
    */
   async totalsByJurisdiction(period: { start: Instant; end: Instant; customerId?: string; jurisdiction?: string }): Promise<TaxRecordTotal[]> {
+    requirePgInstants('totalsByJurisdiction', period.start, period.end);
+    if (!findable(period.customerId, period.jurisdiction)) return [];
     const { type, taxAmountMinor, reference } = this.taxRecords;
 
     return this.db
@@ -739,7 +904,10 @@ export type TaxRepositoryTables = Pick<
 export function createTaxRepositories(db: TaxDatabase, tables: TaxRepositoryTables) {
   return {
     configurations: new TaxConfigurationRepository(db, { taxConfigurations: tables.taxConfigurations }),
-    jurisdictions: new TaxJurisdictionRepository(db, { taxJurisdictions: tables.taxJurisdictions }),
+    jurisdictions: new TaxJurisdictionRepository(db, {
+      taxJurisdictions: tables.taxJurisdictions,
+      taxExemptions: tables.taxExemptions,
+    }),
     exemptions: new TaxExemptionRepository(db, {
       taxExemptions: tables.taxExemptions,
       taxJurisdictions: tables.taxJurisdictions,

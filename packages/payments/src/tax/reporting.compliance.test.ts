@@ -13,13 +13,13 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, InvalidInput, orThrow } from '@arki/failure';
 
 import type { PaymentId } from '../core/types.js';
 import { createCustomerId } from '../core/primitives.js';
 import { PaymentRepository } from '../core/repository.js';
 import { runnerOn } from '../service-test-support.js';
-import { adminId, core, customerId, openDb, schema, typed, userId } from '../test-support.js';
+import { adminId, core, customerId, openDb, rejectionOf, schema, typed, userId } from '../test-support.js';
 import { createTaxReportingService } from './reporting.js';
 import { createTaxRepositories } from './repository.js';
 import { createTaxTables } from './tables.js';
@@ -109,9 +109,9 @@ describe('compliance report and export from stored data', () => {
     taxed = await payment({ customer: customerId, amount: '119', description: 'He said "hi", ok\nsecond line' });
     await payment({ customer: otherCustomerId, amount: '50', description: '=HYPERLINK("http://evil")' });
     await payment({ customer: customerId, amount: '10', description: 'Fish & <chips>\u0007' });
-    await repos.records.recordMany([
+    orThrow(await repos.records.recordMany([
       { reference: 'o1', type: 'sale', jurisdiction: 'Germany', rate: '19', taxAmountMinor: 1900, currency: 'EUR', customerId, paymentId: taxed },
-    ]);
+    ]));
     orThrow(await repos.exemptions.createExemption({
       type: 'customer',
       status: 'active',
@@ -123,7 +123,7 @@ describe('compliance report and export from stored data', () => {
   });
 
   it('adds up real payments and tax: sales, tax collected, exempt sales, counts and categories', async () => {
-    const report = await reporting.generateComplianceReport({ reportType: 'vat', period: thisYearPeriod() });
+    const report = orThrow(await reporting.generateComplianceReport({ reportType: 'vat', period: thisYearPeriod() }));
 
     expect(report.totalSales.map(t => t.toJSON())).toEqual([{ amount: '179.00', currency: 'EUR' }]);
     expect(report.totalTaxCollected.map(t => t.toJSON())).toEqual([{ amount: '19.00', currency: 'EUR' }]);
@@ -139,7 +139,7 @@ describe('compliance report and export from stored data', () => {
   });
 
   it('limits the report to one jurisdiction, in any case', async () => {
-    const report = await reporting.generateComplianceReport({ reportType: 'vat', period: thisYearPeriod(), jurisdiction: 'germany' });
+    const report = orThrow(await reporting.generateComplianceReport({ reportType: 'vat', period: thisYearPeriod(), jurisdiction: 'germany' }));
 
     expect(report.transactions).toBe(1);
     expect(report.totalSales.map(t => t.toDecimalString())).toEqual(['119.00']);
@@ -147,7 +147,7 @@ describe('compliance report and export from stored data', () => {
   });
 
   it('is empty for a period without sales, not a made-up 50,000', async () => {
-    const report = await reporting.generateComplianceReport({ reportType: 'vat', period });
+    const report = orThrow(await reporting.generateComplianceReport({ reportType: 'vat', period }));
 
     expect(report.transactions).toBe(0);
     expect(report.totalSales).toEqual([]);
@@ -155,7 +155,7 @@ describe('compliance report and export from stored data', () => {
   });
 
   it('exports CSV that a parser reads back: quotes, commas and line breaks quoted, formulas defused', async () => {
-    const { data, filename } = await reporting.exportTaxData({ format: 'csv', period: thisYearPeriod(), includeExemptions: true });
+    const { data, filename } = orThrow(await reporting.exportTaxData({ format: 'csv', period: thisYearPeriod(), includeExemptions: true }));
 
     expect(filename).toBe(`tax_export_${thisYearPeriod().year}.csv`);
     expect(data).not.toContain('2024-01-15');
@@ -169,7 +169,7 @@ describe('compliance report and export from stored data', () => {
   });
 
   it('exports XML with text escaped and characters XML cannot hold dropped', async () => {
-    const { data } = await reporting.exportTaxData({ format: 'xml', period: thisYearPeriod() });
+    const { data } = orThrow(await reporting.exportTaxData({ format: 'xml', period: thisYearPeriod() }));
 
     expect(data).toContain('<description>Fish &amp; &lt;chips&gt;</description>');
     expect(data).not.toContain('\u0007');
@@ -179,7 +179,7 @@ describe('compliance report and export from stored data', () => {
   });
 
   it('exports JSON with the same rows', async () => {
-    const { data } = await reporting.exportTaxData({ format: 'json', period: thisYearPeriod() });
+    const { data } = orThrow(await reporting.exportTaxData({ format: 'json', period: thisYearPeriod() }));
     const parsed: { transactions: { amount: { amount: string }; tax: { amount: string } }[] } = JSON.parse(data);
 
     expect(parsed.transactions.map(t => [t.amount.amount, t.tax.amount]).toSorted()).toEqual([
@@ -192,13 +192,13 @@ describe('compliance report and export from stored data', () => {
 
 describe('audit trail', () => {
   it('stores the entry, and reads it back with the id and time the database gave', async () => {
-    const created = await reporting.createAuditEntry({
+    const created = orThrow(await reporting.createAuditEntry({
       action: 'exempt',
       entity: 'exemption',
       entityId: 'txe_1',
       details: { reason: 'certificate checked', userId: 'usr_admin', metadata: { certificate: 'CERT-1' } },
-    });
-    await reporting.createAuditEntry({ action: 'report', entity: 'customer', entityId: 'cust_x', details: {} });
+    }));
+    orThrow(await reporting.createAuditEntry({ action: 'report', entity: 'customer', entityId: 'cust_x', details: {} }));
 
     const trail = await reporting.getAuditTrail('exemption', 'txe_1');
 
@@ -209,8 +209,8 @@ describe('audit trail', () => {
 });
 
 describe('compliance status and deadlines', () => {
-  const config = (registrations: { country: string; type: string; number: string; status: 'active' | 'inactive' | 'pending' }[]) =>
-    repos.configurations.createConfiguration({
+  const config = async (registrations: { country: string; type: string; number: string; status: 'active' | 'inactive' | 'pending' }[]) =>
+    orThrow(await repos.configurations.createConfiguration({
       name: `config ${registrations.length}`,
       status: 'active',
       isDefault: true,
@@ -219,7 +219,7 @@ describe('compliance status and deadlines', () => {
         address: { line1: 'x', city: 'x', state: 'x', country: 'US', postalCode: '1' },
         registrations,
       },
-    });
+    }));
 
   it('is compliant when nothing requires registration', async () => {
     expect(await reporting.validateComplianceStatus()).toEqual({ status: 'compliant', issues: [] });
@@ -280,4 +280,73 @@ describe('compliance status and deadlines', () => {
     const deadlines = await reporting.getUpcomingDeadlines(instant('2033-10-14T00:00:00Z'));
     expect(deadlines.map(deadline => deadline.jurisdiction)).toEqual(['Germany']);
   }, 10_000);
+});
+
+describe('audit entries the table cannot store', () => {
+  // An entityId over 255, U+0000 or a bigint in details used to reach Postgres (22001, 22P05) or throw from the driver
+  it('return schema.invalid_input and store nothing; an id already used returns payments.tax_row_exists', async () => {
+    const entry = { action: 'report' as const, entity: 'customer' as const, entityId: 'cust_audit', details: {} };
+
+    expect(await reporting.createAuditEntry({ ...entry, entityId: 'x'.repeat(256) })).toMatchObject({ code: InvalidInput.code });
+    expect(await reporting.createAuditEntry({ ...entry, details: { reason: 'a\u0000b' } })).toMatchObject({ code: InvalidInput.code });
+    expect(await reporting.createAuditEntry({ ...entry, details: { metadata: { count: 1n } } })).toMatchObject({ code: InvalidInput.code });
+    expect(await reporting.getAuditTrail('customer', 'cust_audit')).toEqual([]);
+
+    const stored = orThrow(await repos.audit.record(entry));
+    expect(await repos.audit.record({ ...entry, id: stored.id })).toMatchObject({
+      code: 'payments.tax_row_exists',
+      data: { kind: 'audit_entry', id: stored.id },
+    });
+    expect(await reporting.getAuditTrail('customer', 'a\u0000b')).toEqual([]);
+  });
+});
+
+describe('deadlines near the last date a Date holds', () => {
+  // Date.UTC is NaN past +275760-09-13, so no candidate reached asOf and the loop never ended
+  it('leaves out a deadline no date can hold, and returns', async () => {
+    expect(await reporting.getUpcomingDeadlines(instant('+275760-09-01T00:00:00Z'))).toEqual([]);
+  }, 10_000);
+});
+
+describe('getCustomerTaxSummary for a year the contract would refuse', () => {
+  it('fails as an invariant before anything is read', async () => {
+    const error = await rejectionOf(reporting.getCustomerTaxSummary(customerId, Number.NaN));
+
+    expect(error).toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+  });
+});
+
+describe('the average tax rate', () => {
+  // tax / (amount - tax) divided by zero for a payment whose tax was all of its amount, so the mean was Infinity
+  it('leaves out a payment whose tax equals its amount, and averages the others', async () => {
+    const allTax = await payment({ amount: '10' });
+    const tenth = await payment({ amount: '11' });
+    orThrow(await repos.records.recordMany([
+      { reference: 'o_all', type: 'sale', jurisdiction: 'Taxonly', rate: '100', taxAmountMinor: 1000, currency: 'EUR', customerId, paymentId: allTax },
+      { reference: 'o_tenth', type: 'sale', jurisdiction: 'Taxonly', rate: '10', taxAmountMinor: 100, currency: 'EUR', customerId, paymentId: tenth },
+    ]));
+
+    const report = orThrow(await reporting.generateComplianceReport({ reportType: 'vat', period: thisYearPeriod(), jurisdiction: 'taxonly' }));
+
+    expect(report.summary.taxableTransactions).toBe(2);
+    expect(report.summary.averageTaxRate).toBeCloseTo(0.1, 10);
+  });
+});
+
+// Last: the record below would change every report of the year
+describe('a tax record in another currency than its payment', () => {
+  // createTaxTransaction does not know the payment's currency, so the public API can store one; the sum used to throw CurrencyMismatchError
+  it('is refused as payments.stored_tax_invalid by the report and the export, never a wrong total', async () => {
+    const eurPayment = await payment({ amount: '20' });
+    orThrow(await repos.records.recordMany([
+      { reference: 'o_usd', type: 'sale', jurisdiction: 'Germany', rate: '19', taxAmountMinor: 380, currency: 'USD', customerId, paymentId: eurPayment },
+    ]));
+    const otherCurrency = {
+      code: 'payments.stored_tax_invalid',
+      data: { paymentId: eurPayment, problem: 'other_currency', paymentCurrency: 'EUR', taxCurrency: 'USD' },
+    };
+
+    expect(await reporting.generateComplianceReport({ reportType: 'vat', period: thisYearPeriod() })).toMatchObject(otherCurrency);
+    expect(await reporting.exportTaxData({ format: 'json', period: thisYearPeriod() })).toMatchObject(otherCurrency);
+  });
 });

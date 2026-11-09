@@ -192,17 +192,35 @@ describe('the callers of calculateProration hand its failure back', () => {
     ).toBe(true);
   });
 
-  it('previewMultiplePlanChanges leaves out a plan it cannot preview and keeps the others', async () => {
+  it('previewMultiplePlanChanges previews the plans it can and hands back why each other plan was refused', async () => {
     const service = new ProrationService(coreReads(db));
     const subscription = await seedSubscription(writes, 'active');
     const euroPlan = await planAt('10', 'EUR');
     const dollarPlan = await planAt('20', 'USD');
 
-    const previews = await service.previewMultiplePlanChanges(subscription.id, [euroPlan, dollarPlan], {
+    const result = orThrow(
+      await service.previewMultiplePlanChanges(subscription.id, [euroPlan, dollarPlan], {
+        prorationBehavior: 'create_prorations',
+        effectiveDate,
+      }),
+    );
+
+    expect(Object.keys(result.previews)).toEqual([dollarPlan]);
+    // The refusal is the caller's to show ("this plan is in another currency"), not a log line
+    expect(result.refused).toMatchObject([{ planId: euroPlan, failure: { code: 'payments.plan_currency_mismatch' } }]);
+  });
+
+  it('previewMultiplePlanChanges returns reference_not_found for an unknown subscription, not an empty comparison', async () => {
+    const service = new ProrationService(coreReads(db));
+    const missing = orThrow(createSubscriptionId());
+
+    const result = await service.previewMultiplePlanChanges(missing, [planId], {
       prorationBehavior: 'create_prorations',
-      effectiveDate,
     });
 
-    expect(Object.keys(previews)).toEqual([dollarPlan]);
+    expect(result).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'subscription', id: missing, missing: 'row' },
+    });
   });
 });

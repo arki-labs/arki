@@ -1,5 +1,6 @@
 // Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
-import { orThrow } from '@arki/failure';
+import { instant } from '@arki/date';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 
 /**
  * Customers: one per user, one per provider customer
@@ -16,7 +17,9 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { AppDb } from '../test-support.js';
-import { adminId, core, openDb, rejectionOf, userId, users } from '../test-support.js';
+import type { NewPlan } from './types.js';
+import { runnerOn } from '../service-test-support.js';
+import { adminId, core, meta, openDb, plain, rejectionOf, typed, userId, users } from '../test-support.js';
 import { CustomerConflict, WebhookEventNotFound } from './failures.js';
 import { createCustomerId, createPlanId, createWebhookId } from './primitives.js';
 import { ReferenceNotFound } from './providers/provider-error.js';
@@ -170,6 +173,152 @@ describe('PaymentRepository writes to an unknown id', () => {
       expect(WebhookEventNotFound.is(result)).toBe(true);
       expect(result).toMatchObject({ code: 'payments.webhook_event_not_found', data: { webhookId } });
     }
+  });
+});
+
+describe('PaymentRepository writes refuse what the columns cannot hold, as typed failures', () => {
+  const plan = (overrides: Partial<NewPlan> = {}): NewPlan => ({ id: orThrow(createPlanId()), name: 'Team', priceMinor: 1500, ...overrides });
+
+  const refusedPlans: [string, Partial<NewPlan>][] = [
+    ['a negative price', { priceMinor: -1 }],
+    ['a fractional price', { priceMinor: 1.5 }],
+    ['a currency outside ISO 4217', { currency: 'ZZZ' }],
+    ['a name past 255 characters', { name: 'n'.repeat(256) }],
+    ['U+0000 in the name', { name: 'Te\u0000am' }],
+    ['U+0000 in a feature', { features: ['ok', 'b\u0000d'] }],
+    ['an interval count past the integer range', { intervalCount: 2 ** 31 }],
+  ];
+
+  it.each(refusedPlans)('createPlan refuses %s as schema.invalid_input and stores nothing', async (_what, overrides) => {
+    const data = plan(overrides);
+
+    expect(await repo.createPlan(data)).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await repo.findPlanById(data.id ?? orThrow(createPlanId()))).toBeNull();
+  });
+
+  it('createPlan returns plan_already_exists for a stored id, and updatePlan refuses U+0000', async () => {
+    const stored = orThrow(await repo.createPlan(plan()));
+
+    expect(await repo.createPlan(plan({ id: stored.id }))).toMatchObject({
+      code: 'payments.plan_already_exists',
+      data: { planId: stored.id },
+    });
+    expect(await repo.updatePlan(stored.id, { description: 'x\u0000' })).toMatchObject({ code: 'schema.invalid_input' });
+  });
+
+  it('createCustomer and updateCustomer return reference_not_found for a user with no row', async () => {
+    expect(
+      await repo.createCustomer({ userId: 'usr_ghost', providerCustomerId: 'cus_ghost', email: 'ghost@example.com' }),
+    ).toMatchObject({ code: 'payments.reference_not_found', data: { kind: 'user', id: 'usr_ghost', missing: 'row' } });
+
+    const [owned] = await db.select().from(core.customers).where(eq(core.customers.userId, userId));
+    if (!owned) throw new Error('the fixture user has a customer');
+    expect(await repo.updateCustomer(owned.id, { userId: 'usr_ghost' })).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'user', id: 'usr_ghost' },
+    });
+  });
+
+  it('createCustomer refuses an email past 255 characters and U+0000 in the name', async () => {
+    const owner = 'usr_long_email';
+    await db.insert(users).values({ id: owner });
+
+    expect(
+      await repo.createCustomer({ userId: owner, providerCustomerId: 'cus_long', email: `${'a'.repeat(250)}@example.com` }),
+    ).toMatchObject({ code: 'schema.invalid_input' });
+    expect(
+      await repo.createCustomer({ userId: owner, providerCustomerId: 'cus_nul', email: 'nul@example.com', name: 'N\u0000' }),
+    ).toMatchObject({ code: 'schema.invalid_input' });
+  });
+
+  it('updateCustomer returns customer_conflict for a user or provider customer another customer holds', async () => {
+    const first = 'usr_conflict_a';
+    const second = 'usr_conflict_b';
+    await db.insert(users).values([{ id: first }, { id: second }]);
+    const a = orThrow(await repo.createCustomer({ userId: first, providerCustomerId: 'cus_conflict_a', email: 'a@example.com' }));
+    const b = orThrow(await repo.createCustomer({ userId: second, providerCustomerId: 'cus_conflict_b', email: 'b@example.com' }));
+
+    expect(await repo.updateCustomer(b.id, { userId: first })).toMatchObject({
+      code: 'payments.customer_conflict',
+      data: { userId: first, existingCustomerId: a.id },
+    });
+    expect(await repo.updateCustomer(b.id, { providerCustomerId: 'cus_conflict_a' })).toMatchObject({
+      code: 'payments.customer_conflict',
+      data: { providerCustomerId: 'cus_conflict_a', existingCustomerId: null },
+    });
+    expect(await repo.findCustomerById(b.id)).toMatchObject({ userId: second, providerCustomerId: 'cus_conflict_b' });
+  });
+
+  it('deleteCustomer returns customer_in_use while a refund points at one of its payments, and deletes nothing', async () => {
+    const owner = 'usr_refunded';
+    await db.insert(users).values({ id: owner });
+    const customer = orThrow(await repo.createCustomer({ userId: owner, providerCustomerId: 'cus_refunded', email: 'r@example.com' }));
+    const writes = typed.core.writes(runnerOn(db));
+    const payment = orThrow(
+      await writes.initiatePayment({ userId: owner, customerId: customer.id, providerPaymentId: 'pi_refunded', amount: { amount: '20', currency: 'USD' } }),
+    );
+    orThrow(await writes.completePayment({ paymentId: payment.id }));
+    orThrow(
+      await plain.journal.run(
+        db,
+        plain.refunds.commands.requestRefund,
+        {
+          paymentId: payment.id,
+          originalAmount: { amount: '20', currency: 'USD' },
+          refundAmount: { amount: '5', currency: 'USD' },
+          reason: 'customer_request',
+          requestedBy: owner,
+        },
+        meta,
+      ),
+    );
+
+    expect(await repo.deleteCustomer(customer.id)).toMatchObject({
+      code: 'payments.customer_in_use',
+      data: { customerId: customer.id },
+    });
+    expect(await repo.findCustomerById(customer.id)).not.toBeNull();
+  });
+
+  it('webhook event writes refuse a taken provider event id and U+0000 in text', async () => {
+    const first = orThrow(await repo.createWebhookEvent({ provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_taken', data: {} }));
+    const other = orThrow(await repo.createWebhookEvent({ provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_other', data: {} }));
+
+    expect(
+      await repo.createWebhookEvent({ provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_taken', data: {} }),
+    ).toMatchObject({ code: 'payments.webhook_event_exists', data: { providerEventId: 'evt_taken' } });
+    expect(await repo.updateWebhookEvent(other.id, { providerEventId: 'evt_taken' })).toMatchObject({
+      code: 'payments.webhook_event_exists',
+    });
+    expect(await repo.updateWebhookEvent(first.id, { errorMessage: 'x\u0000' })).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await repo.incrementWebhookEventAttempts(first.id, 'x\u0000')).toMatchObject({ code: 'schema.invalid_input' });
+    expect(
+      await repo.createWebhookEvent({ provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_nul', data: { n: '\u0000' } }),
+    ).toMatchObject({ code: 'schema.invalid_input' });
+  });
+});
+
+describe('PaymentRepository reads with values no row can hold', () => {
+  it('a lookup by a provider id with U+0000 or past 255 characters finds nothing', async () => {
+    for (const id of ['cus_\u0000', 'x'.repeat(256)]) {
+      expect(await repo.findCustomerByProviderCustomerId(id, 'stripe')).toBeNull();
+      expect(await repo.findSubscriptionByProviderSubscriptionId(id)).toBeNull();
+      expect(await repo.findPaymentByProviderPaymentId(id)).toBeNull();
+      expect(await repo.findWebhookEventByProviderEventId(id, 'stripe')).toBeNull();
+    }
+  });
+
+  it('a time outside the years 1 to 9999 or a fractional count breaks a stated precondition', async () => {
+    const ancient = instant('-000100-01-01T00:00:00Z');
+    const invariantBroken = { code: FAILURE_ERROR_CODES.invariant };
+
+    await expect(repo.countPaymentsCreatedBetween(ancient, instant('2026-01-01T00:00:00Z'))).rejects.toMatchObject(invariantBroken);
+    await expect(repo.getPaymentStats(ancient)).rejects.toMatchObject(invariantBroken);
+    await expect(repo.getSubscriptionStats(undefined, ancient)).rejects.toMatchObject(invariantBroken);
+    await expect(repo.findSubscriptionsEndingInRange(ancient, ancient)).rejects.toMatchObject(invariantBroken);
+    await expect(repo.findPaymentsByUserId(userId, 1.5)).rejects.toMatchObject(invariantBroken);
+    await expect(repo.findUnprocessedWebhookEvents(0.5)).rejects.toMatchObject(invariantBroken);
+    await expect(repo.reclaimWebhookEvent(orThrow(createWebhookId()), 0.5, instant('2026-01-01T00:00:00Z'))).rejects.toMatchObject(invariantBroken);
   });
 });
 

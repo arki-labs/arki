@@ -237,12 +237,13 @@ export class SlackNotificationService implements NotificationService {
             body: JSON.stringify(message),
             signal: AbortSignal.timeout(this.config.timeoutMs ?? 10_000),
           });
+          // Free the connection; Slack answers a short `ok` we do not need. A body that already
+          // errored (a reset, or the timeout firing after the headers) rejects here: the same failure.
+          await response.body?.cancel();
         } catch (error) {
           // Unreachable host, refused connection or the timeout: the message did not go out
           return NotificationFailed({ channel: 'slack', notification }, { cause: error });
         }
-        // Free the connection; Slack answers a short `ok` we do not need
-        await response.body?.cancel();
         if (!response.ok) return NotificationFailed({ channel: 'slack', notification, status: response.status });
         return;
       },

@@ -29,6 +29,8 @@ import { CommandConflict, CommandInvalid, CommandNotFound } from '@arki/journal'
 import { Money } from '@arki/money';
 
 import type { CoreTables } from '../tables.js';
+import { pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from '../pg-values.js';
+import { ReferenceNotFound } from '../providers/provider-error.js';
 import { fromStoredNumber, moneyJsonSchema, nonNegativeMoneySchema, toMinorColumn } from '../money.js';
 import {
   createPaymentId,
@@ -37,12 +39,12 @@ import {
   paymentMethodTypeValues,
   subscriptionIdSchema,
 } from '../primitives.js';
-import { storedReal } from './support.js';
+import { lockReferences, storedReal } from './support.js';
 
 type PaymentRow = CoreTables['payments']['$inferSelect'];
 
 const paymentMethodSchema = z.enum(paymentMethodTypeValues);
-const metadataSchema = z.record(z.string(), z.unknown());
+const metadataSchema = pgJsonRecordSchema;
 
 export const initiatePaymentInputSchema = z.object({
   /** Left out: the command makes a new id */
@@ -50,19 +52,19 @@ export const initiatePaymentInputSchema = z.object({
   subscriptionId: subscriptionIdSchema.nullable().optional(),
   userId: userIdSchema,
   customerId: customerIdSchema,
-  providerPaymentId: z.string().min(1).max(255),
+  providerPaymentId: pgVarcharSchema(255).min(1),
   amount: nonNegativeMoneySchema,
   paymentMethod: paymentMethodSchema.default('card'),
-  description: z.string().nullable().optional(),
+  description: pgTextSchema.nullable().optional(),
   metadata: metadataSchema.nullable().optional(),
 });
 
 export const completePaymentInputSchema = z.object({
   paymentId: paymentIdSchema,
-  receiptUrl: z.string().nullable().optional(),
+  receiptUrl: pgTextSchema.nullable().optional(),
 });
 
-export const failPaymentInputSchema = z.object({ paymentId: paymentIdSchema, failureReason: z.string() });
+export const failPaymentInputSchema = z.object({ paymentId: paymentIdSchema, failureReason: pgTextSchema });
 
 export const cancelPaymentInputSchema = z.object({ paymentId: paymentIdSchema });
 
@@ -76,9 +78,9 @@ export const recordPaymentRefundInputSchema = z.object({
 
 export const recordPaymentDisputeInputSchema = z.object({
   paymentId: paymentIdSchema,
-  disputeId: z.string().min(1).max(255),
-  status: z.string().min(1).max(64),
-  reason: z.string().nullable().optional(),
+  disputeId: pgVarcharSchema(255).min(1),
+  status: pgVarcharSchema(64).min(1),
+  reason: pgTextSchema.nullable().optional(),
 });
 
 export type InitiatePaymentInput = z.input<typeof initiatePaymentInputSchema>;
@@ -146,6 +148,11 @@ export interface PaymentDisputeRecordedEvent extends EventDef<
   'PaymentDisputeRecorded',
   typeof paymentDisputeRecordedSchema
 > {}
+
+/** The row a new payment points at does not exist. */
+function notFound(kind: 'user' | 'customer' | 'subscription', id: string) {
+  return ReferenceNotFound({ kind, id, missing: 'row' });
+}
 
 function requirePayment(row: PaymentRow | null, paymentId: string): PaymentRow | CommandNotFound {
   if (!row) {
@@ -249,13 +256,28 @@ export function createPaymentJournal<
       updatedAt: fromDate(e.recordedAt),
     }));
 
+  /**
+   * The user, customer and subscription the payment points at are looked up and locked first: one
+   * with no row returns `ReferenceNotFound` (kind `user`, `customer` or `subscription`) and nothing is written.
+   */
   const initiatePayment = j.command(
     'initiatePayment',
     initiatePaymentInputSchema,
     { writes: [PaymentInitiatedV2] },
-    (input, { write }) => {
+    async (input, { tx, write }) => {
       const paymentId = input.paymentId ?? createPaymentId();
       if (isFailure(paymentId)) return paymentId;
+
+      const missing = await lockReferences(tx, payments, [
+        { column: payments.userId, value: input.userId, missing: () => notFound('user', input.userId) },
+        { column: payments.customerId, value: input.customerId, missing: () => notFound('customer', input.customerId) },
+        {
+          column: payments.subscriptionId,
+          value: input.subscriptionId,
+          missing: () => notFound('subscription', String(input.subscriptionId)),
+        },
+      ]);
+      if (missing) return missing;
 
       return write(payment, paymentId, row => {
         if (row) {

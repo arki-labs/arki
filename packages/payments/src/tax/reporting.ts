@@ -1,7 +1,9 @@
 import type { Instant } from '@arki/date';
 import { compareAsc, fromDate, now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
-import { isFailure, unreachable } from '@arki/failure';
+import type { FailureOf } from '@arki/failure';
+import { invariant, isFailure, unreachable } from '@arki/failure';
+import { is } from '@arki/schema';
 import { Money, sum } from '@arki/money';
 
 import type { PaymentRepository } from '../core/repository.js';
@@ -15,6 +17,7 @@ import type {
   TaxRecordRepository,
 } from './repository.js';
 import type { ExportTaxDataInput } from './contracts.js';
+import { getCustomerAnnualSummaryInputSchema } from './contracts.js';
 import type { TaxExemption } from './types.js';
 import { moneyJsonSchema } from '../core/money.js';
 import { StoredTaxInvalid } from './failures.js';
@@ -106,6 +109,8 @@ export type TaxReportReads = {
 
 const logger = getLogger('arki:payments:tax-reporting');
 
+type StoredTaxFailure = FailureOf<typeof StoredTaxInvalid>;
+
 /**
  * Tax audit trail entry
  */
@@ -186,13 +191,17 @@ export class TaxReportingService {
    * payments, the tax records and the exemptions. Stripe Tax has no report endpoint, so nothing is
    * fetched from it. `reportType` names the report; the records do not tell VAT from sales tax.
    * `jurisdiction` (any case) limits the tax, and the payments to those it taxed.
+   *
+   * A tax record stored under a payment's id in another currency than the payment cannot be added to
+   * it: `StoredTaxInvalid` (`problem: 'other_currency'`) is returned, never a wrong total.
    */
   async generateComplianceReport(params: {
     reportType: 'sales_and_use_tax' | 'vat' | 'gst';
     period: ReportingPeriod;
     jurisdiction?: string;
-  }): Promise<TaxComplianceReport> {
+  }): Promise<TaxComplianceReport | StoredTaxFailure> {
     const aggregate = await this.aggregateLocalTransactions(params.period, params.jurisdiction);
+    if (isFailure(aggregate)) return aggregate;
 
     return {
       id: `${params.reportType}:${params.jurisdiction ?? 'all'}:${params.period.startDate.toString()}`,
@@ -216,8 +225,16 @@ export class TaxReportingService {
   /**
    * Get customer tax summary for a specific year (UTC): the customer's succeeded payments with the
    * tax recorded on each, and the exemptions in force during the year.
+   *
+   * `year` is from 2000 to 2100, as `getCustomerAnnualSummaryInputSchema` reads it from a request:
+   * anything else (NaN, a year outside that range) is a bug in the caller, and throws `FailureError`
+   * (`invariant`) before anything is read.
    */
   async getCustomerTaxSummary(customerId: CustomerId, year: number) {
+    invariant(
+      is(year, getCustomerAnnualSummaryInputSchema.shape.year),
+      () => `getCustomerTaxSummary needs a year from 2000 to 2100, received ${String(year)}`,
+    );
     const startDate = fromDate(new Date(Date.UTC(year, 0, 1)));
     const endDate = sub(fromDate(new Date(Date.UTC(year + 1, 0, 1))), { nanoseconds: 1 });
 
@@ -271,16 +288,20 @@ export class TaxReportingService {
 
   /**
    * Create audit trail entry for tax-related actions. The entry is stored; `id` and `timestamp` are the stored ones.
+   * An `entityId` over 255 characters, or `details` the jsonb column cannot store (U+0000, a bigint),
+   * returns `InvalidInput` and nothing is stored.
    */
-  async createAuditEntry(entry: Omit<TaxAuditEntry, 'id' | 'timestamp'>): Promise<TaxAuditEntry> {
+  async createAuditEntry(entry: Omit<TaxAuditEntry, 'id' | 'timestamp'>) {
     const row = await this.reads.audit.record({
       action: entry.action,
       entity: entry.entity,
       entityId: entry.entityId,
       details: entry.details,
     });
+    if (isFailure(row)) return row;
 
-    return { id: row.id, timestamp: row.occurredAt, action: row.action, entity: row.entity, entityId: row.entityId, details: row.details };
+    const stored: TaxAuditEntry = { id: row.id, timestamp: row.occurredAt, action: row.action, entity: row.entity, entityId: row.entityId, details: row.details };
+    return stored;
   }
 
   /** The audit entries about one entity, oldest first. */
@@ -302,7 +323,8 @@ export class TaxReportingService {
    * when it requires registration, has a monthly, quarterly or annual `filingFrequency`, and the
    * default tax configuration holds an active registration for its country. The deadline is the
    * end (UTC) of the month after the filing period closes: the jurisdiction row stores no due day,
-   * so this is the common rule, not a statute. Nearest first.
+   * so this is the common rule, not a statute. Nearest first. A deadline after the last date a
+   * JavaScript `Date` holds (`+275760-09-13`) cannot be written, so that jurisdiction is left out.
    */
   async getUpcomingDeadlines(asOf: Instant = now()): Promise<{
     jurisdiction: string;
@@ -349,10 +371,19 @@ export class TaxReportingService {
         if ((periodEnd + 1) % length.months !== 0) continue;
         const nextMonth = periodEnd + 1;
         const candidate = Date.UTC(Math.floor(nextMonth / 12), (nextMonth % 12) + 1, 1) - 1;
+        // `Date.UTC` is NaN past the last date a `Date` holds: no later candidate can be written either
+        if (Number.isNaN(candidate)) {
+          deadlineMillis = Number.NaN;
+          break;
+        }
         if (candidate >= asOfMillis) {
           deadlineMillis = candidate;
           break;
         }
+      }
+      if (Number.isNaN(deadlineMillis)) {
+        logger.debug('Jurisdiction {code} has no filing deadline a date can hold', { code: jurisdiction.code });
+        continue;
       }
 
       const daysLeft = (deadlineMillis - asOfMillis) / dayMillis;
@@ -440,12 +471,16 @@ export class TaxReportingService {
     format: ExportTaxDataInput['format'];
     period: ReportingPeriod;
     includeExemptions?: boolean;
-  }): Promise<{
-    format: string;
-    data: string;
-    filename: string;
-  }> {
+  }): Promise<
+    | {
+        format: string;
+        data: string;
+        filename: string;
+      }
+    | StoredTaxFailure
+  > {
     const aggregate = await this.aggregateLocalTransactions(params.period);
+    if (isFailure(aggregate)) return aggregate;
     const exemptions = params.includeExemptions
       ? await this.reads.exemptions.findExemptionsInRange(params.period.startDate, params.period.endDate)
       : [];
@@ -499,14 +534,17 @@ export class TaxReportingService {
   /**
    * The succeeded payments of the period with their tax. Tax per payment is what the tax records
    * hold under its payment id (sales less refunds); a payment with none carried none. Collected
-   * tax is every record of the period, so it includes tax recorded without a payment id.
+   * tax is every record of the period, so it includes tax recorded without a payment id. A record
+   * in another currency than its payment returns `StoredTaxInvalid`.
    */
   private async aggregateLocalTransactions(period: ReportingPeriod, jurisdiction?: string) {
     const { startDate: start, endDate: end } = period;
-    const taxByPayment = new Map<string, Money>();
+    // One total per currency the payment's records use; only the payment's own currency may be there
+    const taxByPayment = new Map<string, Money[]>();
     const paymentTotals = await this.reads.records.totalsByPayment({ start, end, jurisdiction });
     for (const row of paymentTotals) {
-      taxByPayment.set(row.paymentId, Money.fromMinor(row.saleTaxMinor - row.refundTaxMinor, row.currency));
+      const tax = Money.fromMinor(row.saleTaxMinor - row.refundTaxMinor, row.currency);
+      taxByPayment.set(row.paymentId, [...(taxByPayment.get(row.paymentId) ?? []), tax]);
     }
 
     const exemptionsByCustomer = new Map<string, TaxExemption[]>();
@@ -542,7 +580,16 @@ export class TaxReportingService {
         const taxed = taxByPayment.get(payment.id);
         if (jurisdiction !== undefined && taxed === undefined) continue;
         const amount = Money.fromMinor(payment.amountMinor, payment.currency.toUpperCase());
-        const tax = taxed ?? Money.zero(amount.currency.code);
+        const stranger = taxed?.find(total => total.currency.code !== amount.currency.code);
+        if (stranger) {
+          return StoredTaxInvalid({
+            paymentId: payment.id,
+            problem: 'other_currency',
+            paymentCurrency: amount.currency.code,
+            taxCurrency: stranger.currency.code,
+          });
+        }
+        const tax = taxed?.[0] ?? Money.zero(amount.currency.code);
         rows.push({
           id: payment.id,
           date: payment.createdAt,
@@ -578,12 +625,9 @@ export class TaxReportingService {
       exemptSales: totalsByCurrency(rows.filter(row => row.exempt).map(row => row.amount)),
       taxableCount: taxable.length,
       exemptCount: rows.filter(row => row.exempt).length,
-      // A ratio of two amounts in one currency, so it is the same in any currency
-      averageTaxRate:
-        taxable.length === 0
-          ? 0
-          : taxable.reduce((total, row) => total + row.tax.toMinorNumber() / (row.amount.toMinorNumber() - row.tax.toMinorNumber()), 0) /
-            taxable.length,
+      // A ratio of two amounts in one currency, so it is the same in any currency. A payment whose tax is
+      // all of its amount (or more) has no taxable base, so no rate: it is left out of the average
+      averageTaxRate: averageRate(taxable),
       categories: [...categories.values()]
         .toSorted((a, b) => a.category.localeCompare(b.category) || a.currency.localeCompare(b.currency))
         .map(entry => ({
@@ -593,6 +637,19 @@ export class TaxReportingService {
         })),
     };
   }
+}
+
+/**
+ * The mean of tax / (amount - tax) over the payments that have a taxable base (amount above tax).
+ * A payment whose tax equals its amount would divide by zero, so it is left out; with none left the
+ * mean is 0.
+ */
+function averageRate(taxable: readonly TaxExportRow[]): number {
+  const rates = taxable
+    .map(row => ({ tax: row.tax.toMinorNumber(), base: row.amount.toMinorNumber() - row.tax.toMinorNumber() }))
+    .filter(({ base }) => base > 0)
+    .map(({ tax, base }) => tax / base);
+  return rates.length === 0 ? 0 : rates.reduce((total, rate) => total + rate, 0) / rates.length;
 }
 
 /** One export row about an exemption. */

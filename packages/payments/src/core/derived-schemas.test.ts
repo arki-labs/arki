@@ -30,12 +30,15 @@ const {
   paymentResponseSchema,
   planSelectSchema,
   planInsertSchema,
+  planUpdateSchema,
   customerSelectSchema,
+  customerInsertSchema,
   subscriptionSelectSchema,
   subscriptionInsertSchema,
   paymentSelectSchema,
   paymentInsertSchema,
   webhookEventSelectSchema,
+  webhookEventInsertSchema,
 } = createCoreDerivedSchemas(core);
 
 const at = instant('2026-01-10T00:00:00.000Z');
@@ -177,5 +180,28 @@ describe('canonical table validators', () => {
     expect(parsed).toEqual({ subscriptionId: null });
     expect(webhookEventSelectSchema.shape.processedAt.parse(null)).toBeNull();
     expect(webhookEventSelectSchema.shape.lastAttemptAt.parse(at.toString())?.equals(at)).toBe(true);
+  });
+});
+
+describe('insert schemas refuse what the columns refuse', () => {
+  const planBase = { name: 'Pro', priceMinor: 1000 };
+
+  it.each([
+    ['U+0000 in the plan name', planInsertSchema, { ...planBase, name: 'P\u0000ro' }],
+    ['U+0000 in a plan feature', planInsertSchema, { ...planBase, features: ['a\u0000'] }],
+    ['a fractional interval count', planInsertSchema, { ...planBase, intervalCount: 1.5 }],
+    ['fractional trial days', planInsertSchema, { ...planBase, trialPeriodDays: 1.5 }],
+    ['a currency outside ISO 4217', planInsertSchema, { ...planBase, currency: 'ZZZ' }],
+    ['U+0000 in the customer name', customerInsertSchema, { userId, providerCustomerId: 'cus_1', email: 'a@example.com', name: 'N\u0000' }],
+    ['webhook attempts past the integer range', webhookEventInsertSchema, { provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_1', data: {}, attempts: 2_147_483_648 }],
+    ['U+0000 in webhook data', webhookEventInsertSchema, { provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_1', data: { a: '\u0000' } }],
+  ] as const)('%s', (_what, schema, value) => {
+    expect(schema.safeParse(value).success).toBe(false);
+  });
+
+  it('a free plan costs zero, and the update schema leaves out what the caller did not send', () => {
+    expect(planInsertSchema.safeParse({ ...planBase, priceMinor: 0 }).success).toBe(true);
+    // A `.default` here would reset the stored features on every update
+    expect(planUpdateSchema.parse({ name: 'Renamed' })).toEqual({ name: 'Renamed' });
   });
 });

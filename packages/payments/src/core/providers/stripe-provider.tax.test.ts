@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import { now } from '@arki/date';
 import { orThrow } from '@arki/failure';
-import { money, UnknownCurrency } from '@arki/money';
+import { Currency, money, UnknownCurrency, UnknownCurrencyError } from '@arki/money';
 
 import type { Customer } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
@@ -217,6 +217,45 @@ describe('createTaxTransaction', () => {
     expect(requests).toHaveLength(0);
   });
 
+  it('returns money.provider_amount for a sale or a partial refund in a currency outside ISO 4217, before calling Stripe', async () => {
+    // Stripe has no rule for a custom currency: the stripeAmountOf contract, not an UnknownCurrencyError throw
+    const points = Currency.custom({ code: 'PTS', scale: 0 });
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const sale = await stripe.createTaxTransaction({
+      reference: 'order_points',
+      type: 'sale',
+      currency: 'PTS',
+      lineItems: [{ amount: money('5', points), reference: 'plan' }],
+    });
+    const refund = await stripe.createTaxTransaction({
+      reference: 'refund_points',
+      type: 'refund',
+      currency: 'PTS',
+      originalTransactionId: 'tax_txn_1',
+      lineItems: [{ amount: money('5', points), reference: 'plan' }],
+    });
+
+    expect(sale).toMatchObject({ code: 'money.provider_amount' });
+    expect(refund).toMatchObject({ code: 'money.provider_amount' });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('returns payments.reference_not_found for a sale with an unknown customerId, before calling Stripe', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const sale = await stripe.createTaxTransaction({
+      reference: 'order_ghost',
+      type: 'sale',
+      currency: 'USD',
+      customerId: orThrow(createCustomerId()),
+      lineItems: [{ amount: money('6.00', 'USD'), reference: 'plan' }],
+    });
+
+    expect(sale).toMatchObject({ code: 'payments.reference_not_found' });
+    expect(requests).toHaveLength(0);
+  });
+
   it('refuses a refund that does not say which sale it reverses, before calling Stripe', async () => {
     const { stripe, requests } = provider(() => ({ body: {} }));
 
@@ -269,6 +308,39 @@ describe('calculateTax', () => {
     });
 
     expect(quote).toMatchObject({ code: 'money.provider_amount' });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('returns money.provider_amount for a custom currency or a code outside ISO 4217, before calling Stripe', async () => {
+    const points = Currency.custom({ code: 'PTS', scale: 0 });
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const custom = await stripe.calculateTax({
+      customerId: customer.id,
+      currency: 'PTS',
+      lineItems: [{ amount: money('5', points), reference: 'plan' }],
+    });
+    const typo = await stripe.calculateTax({
+      customerId: customer.id,
+      currency: 'us',
+      lineItems: [{ amount: money('5.00', 'USD'), reference: 'plan' }],
+    });
+
+    expect(custom).toMatchObject({ code: 'money.provider_amount' });
+    expect(typo).toMatchObject({ code: 'money.provider_amount', cause: expect.any(UnknownCurrencyError) });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('returns money.out_of_range for a line amount past 2^53 of Stripe units, before calling Stripe', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const quote = await stripe.calculateTax({
+      customerId: customer.id,
+      currency: 'USD',
+      lineItems: [{ amount: money('100000000000000000', 'USD'), reference: 'plan' }],
+    });
+
+    expect(quote).toMatchObject({ code: 'money.out_of_range' });
     expect(requests).toHaveLength(0);
   });
 });

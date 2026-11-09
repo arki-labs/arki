@@ -1,0 +1,5 @@
+---
+"@arki/payments": minor
+---
+
+Dunning never loses a failed send or a failed campaign run, and its doors refuse what Postgres refuses as typed failures. A scheduled message that does not go out fails its execution, is listed in the tick report and is retried only after an unreachable provider or a 5xx refusal (never a timeout). Executions own the resend: `retryFailedCommunications` skips a send its execution will retry, and the communication service now takes `dunningExecutions`. The event handlers throw a campaign run that threw instead of acknowledging it, and return `ReferenceNotFound` for an unknown payment or subscription. The contracts bound day, month and hour spans at 100 years; the repositories check actor ids, text, JSON and counts before writing. New failures: `payments.customer_risk_profile_exists` (409) and `payments.dunning_communication_not_found` (404). `communicationWebhookSchema` now matches `handleCommunicationWebhook`. Breaking: actor ids are `UserId`, several results gain `schema.invalid_input`. See `docs/upgrades/0.5.0-to-0.6.0.md`.

@@ -18,6 +18,7 @@ import { orThrow } from '@arki/failure';
 import type { PaymentQuery, PlanQuery, SubscriptionQuery } from './contracts.js';
 import { runnerOn, seedPayment, seedSubscription } from '../service-test-support.js';
 import { adminId, core, openDb, planId, typed } from '../test-support.js';
+import { paymentQuerySchema, planQuerySchema, subscriptionQuerySchema, webhookEventQuerySchema } from './contracts.js';
 import { createCustomerId, createPlanId } from './primitives.js';
 import { PaymentRepository } from './repository.js';
 
@@ -184,4 +185,19 @@ describe('getPaymentStats', () => {
     const row = stats.find(stat => stat.id === payment.id);
     expect(row?.subscription?.plan?.id).toBe(subscription.planId);
   });
+});
+
+describe('the query contracts refuse what Postgres refuses in a query', () => {
+  it.each([
+    ['a fractional limit', planQuerySchema, { limit: 1.5 }],
+    ['a fractional offset', paymentQuerySchema, { offset: 0.5 }],
+    ['a fractional subscription page', subscriptionQuerySchema, { limit: 2.5 }],
+    ['a start before year 1', paymentQuerySchema, { startDate: '-100000-01-01T00:00:00Z' }],
+    ['an end after year 9999', webhookEventQuerySchema, { endDate: '+010000-01-01T00:00:00Z' }],
+  ] as const)(
+    '%s is schema.invalid_input, so it never reaches a LIMIT, OFFSET or timestamp comparison',
+    (_what, schema, value) => {
+      expect(schema.safeParse(value).success).toBe(false);
+    },
+  );
 });

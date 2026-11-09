@@ -21,11 +21,12 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import { userIdSchema } from '../user-id.js';
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
-import { instantSchema } from '@arki/date/zod';
 import { isFailure } from '@arki/failure';
 import { CommandConflict, CommandNotFound } from '@arki/journal';
 
 import type { CoreTables } from '../tables.js';
+import { pgInstantSchema, pgJsonRecordSchema, pgVarcharSchema } from '../pg-values.js';
+import { ReferenceNotFound } from '../providers/provider-error.js';
 import {
   createSubscriptionId,
   customerIdSchema,
@@ -33,13 +34,13 @@ import {
   subscriptionIdSchema,
   subscriptionStatusValues,
 } from '../primitives.js';
-import { sameJson, toInstant, toIso, toNullableInstant } from './support.js';
+import { lockReferences, sameJson, toInstant, toIso, toNullableInstant } from './support.js';
 
 type SubscriptionRow = CoreTables['subscriptions']['$inferSelect'];
 
 const statusSchema = z.enum(subscriptionStatusValues);
 const isoSchema = z.iso.datetime();
-const metadataSchema = z.record(z.string(), z.unknown());
+const metadataSchema = pgJsonRecordSchema;
 
 /** What the provider says about a subscription, plus who owns it and which plan it is on. */
 const snapshotShape = {
@@ -130,14 +131,14 @@ export const syncSubscriptionInputSchema = z.object({
   userId: userIdSchema,
   planId: planIdSchema,
   customerId: customerIdSchema,
-  providerSubscriptionId: z.string().min(1).max(255),
+  providerSubscriptionId: pgVarcharSchema(255).min(1),
   /** The status the provider reports */
   status: statusSchema,
-  currentPeriodStart: instantSchema(),
-  currentPeriodEnd: instantSchema(),
-  trialStart: instantSchema().nullable().optional(),
-  trialEnd: instantSchema().nullable().optional(),
-  canceledAt: instantSchema().nullable().optional(),
+  currentPeriodStart: pgInstantSchema(),
+  currentPeriodEnd: pgInstantSchema(),
+  trialStart: pgInstantSchema().nullable().optional(),
+  trialEnd: pgInstantSchema().nullable().optional(),
+  canceledAt: pgInstantSchema().nullable().optional(),
   cancelAtPeriodEnd: z.boolean().optional(),
   metadata: metadataSchema.nullable().optional(),
 });
@@ -151,7 +152,7 @@ export const cancelSubscriptionInputSchema = z.object({
   subscriptionId: subscriptionIdSchema,
   /** The status the provider reports. A cancel at the end of the period keeps the subscription `active`. */
   status: statusSchema.default('canceled'),
-  canceledAt: instantSchema().nullable().optional(),
+  canceledAt: pgInstantSchema().nullable().optional(),
   cancelAtPeriodEnd: z.boolean().optional(),
 });
 
@@ -246,6 +247,11 @@ function snapshotOfDelivery(
   };
 }
 
+/** The row a subscription points at does not exist. */
+function notFound(kind: 'user' | 'plan' | 'customer', id: string) {
+  return ReferenceNotFound({ kind, id, missing: 'row' });
+}
+
 function requireSubscription(row: SubscriptionRow | null, subscriptionId: string): SubscriptionRow | CommandNotFound {
   if (!row) {
     return CommandNotFound({ detail: `Subscription ${subscriptionId} not found` });
@@ -336,14 +342,39 @@ export function createSubscriptionJournal<
     }))
     .on(SubscriptionPastDue, (_row, e) => ({ status: 'past_due', updatedAt: fromDate(e.recordedAt) }));
 
-  /** Stores a subscription the provider just created, with the status the provider reported. */
+  /** The user, plan and customer a subscription points at, locked; the first with no row is `ReferenceNotFound`. */
+  const lockOwners = (tx: Parameters<typeof lockReferences>[0], input: z.output<typeof syncSubscriptionInputSchema>) =>
+    lockReferences(tx, subscriptions, [
+      { column: subscriptions.userId, value: input.userId, missing: () => notFound('user', input.userId) },
+      { column: subscriptions.planId, value: input.planId, missing: () => notFound('plan', input.planId) },
+      { column: subscriptions.customerId, value: input.customerId, missing: () => notFound('customer', input.customerId) },
+    ]);
+
+  /**
+   * Stores a subscription the provider just created, with the status the provider reported. A user,
+   * plan or customer with no row returns `ReferenceNotFound`, and a provider subscription id that is
+   * already stored returns `CommandConflict`; nothing is written then.
+   */
   const createSubscription = j.command(
     'createSubscription',
     createSubscriptionInputSchema,
     { writes: [SubscriptionCreated] },
-    (input, { write }) => {
+    async (input, { tx, write }) => {
       const subscriptionId = input.subscriptionId ?? createSubscriptionId();
       if (isFailure(subscriptionId)) return subscriptionId;
+
+      const missing = await lockOwners(tx, input);
+      if (missing) return missing;
+      const [stored] = await tx
+        .select({ id: subscriptions.id })
+        .from(subscriptions)
+        .where(eq(subscriptions.providerSubscriptionId, input.providerSubscriptionId))
+        .limit(1);
+      if (stored) {
+        return CommandConflict({
+          detail: `Provider subscription ${input.providerSubscriptionId} is already stored as ${stored.id}`,
+        });
+      }
 
       return write(subscription, subscriptionId, row => {
         if (row) {
@@ -364,13 +395,15 @@ export function createSubscriptionJournal<
    * Brings the row in line with what the provider says. The row is found by the
    * provider's subscription id, inside this command's transaction. No row: the
    * subscription is created. A delivery that changes nothing writes no event, so
-   * a repeated webhook is safe.
+   * a repeated webhook is safe. A user, plan or customer with no row returns `ReferenceNotFound`.
    */
   const syncSubscription = j.command(
     'syncSubscription',
     syncSubscriptionInputSchema,
     { writes: [SubscriptionCreated, SubscriptionSynced] },
     async (input, { tx, write }) => {
+      const missing = await lockOwners(tx, input);
+      if (missing) return missing;
       const [existing] = await tx
         .select({ id: subscriptions.id })
         .from(subscriptions)
@@ -467,18 +500,27 @@ export function createSubscriptionJournal<
       }),
   );
 
-  /** Stores the plan the provider moved the subscription to. The same plan again writes nothing. */
+  /**
+   * Stores the plan the provider moved the subscription to. The same plan again writes nothing. A
+   * plan with no row returns `ReferenceNotFound` (kind `plan`).
+   */
   const changeSubscriptionPlan = j.command(
     'changeSubscriptionPlan',
     changeSubscriptionPlanInputSchema,
     { writes: [SubscriptionPlanChanged] },
-    (input, { write }) =>
-      write(subscription, input.subscriptionId, row => {
+    async (input, { tx, write }) => {
+      const missing = await lockReferences(tx, subscriptions, [
+        { column: subscriptions.planId, value: input.planId, missing: () => notFound('plan', input.planId) },
+      ]);
+      if (missing) return missing;
+
+      return write(subscription, input.subscriptionId, row => {
         const current = requireSubscription(row, input.subscriptionId);
         if (isFailure(current)) return current;
 
         return current.planId === input.planId ? [] : [SubscriptionPlanChanged({ planId: input.planId })];
-      }),
+      });
+    },
   );
 
   /** Stores the flag the provider reports. A subscription that is already canceled has no period end to wait for. */
@@ -501,7 +543,7 @@ export function createSubscriptionJournal<
       }),
   );
 
-  /** A payment failed (dunning started, or every retry was used up). Already past due: nothing to write. */
+  /** A payment failed (dunning started, or every retry was used up). Already past due: nothing to write. Canceled: refused (`CommandConflict`). */
   const markSubscriptionPastDue = j.command(
     'markSubscriptionPastDue',
     markSubscriptionPastDueInputSchema,
@@ -510,6 +552,11 @@ export function createSubscriptionJournal<
       write(subscription, input.subscriptionId, row => {
         const current = requireSubscription(row, input.subscriptionId);
         if (isFailure(current)) return current;
+
+        // A canceled subscription has no payment to chase: it stays canceled, as `activateSubscription` keeps it
+        if (current.status === 'canceled') {
+          return CommandConflict({ detail: `Subscription ${input.subscriptionId} is canceled, so it cannot be past due` });
+        }
 
         return current.status === 'past_due' ? [] : [SubscriptionPastDue({})];
       }),

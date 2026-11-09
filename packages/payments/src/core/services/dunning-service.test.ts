@@ -185,6 +185,19 @@ describe('handlePaymentFailure', () => {
   });
 });
 
+describe('handlePaymentFailure on a subscription the journal will not mark past due', () => {
+  it('returns the journal refusal and schedules no step, so nothing later retries or cancels a canceled subscription', async () => {
+    const service = dunningWith(ruleDoing('cancel_subscription'));
+    const subscription = await seedSubscription(writes, 'canceled');
+    const payment = await seedPayment(writes, subscription.id);
+
+    const result = await service.handlePaymentFailure(payment.id, subscription.id, 'card_declined');
+
+    expect(result).toMatchObject({ code: 'journal.conflict' });
+    expect(service.getPendingEventsForSubscription(subscription.id)).toEqual([]);
+  });
+});
+
 describe('processDunningEvents', () => {
   it('a retry that succeeds makes the subscription active again and clears the remaining steps', async () => {
     const service = dunningWith(ruleDoing('retry_payment'), 'succeeded');
@@ -281,6 +294,52 @@ describe('processDunningEvents', () => {
   });
 });
 
+describe('a refused dunning step is reported to the caller, not only logged', () => {
+  it('a pause the provider refuses comes back as refused with its failure, and the row stays past due', async () => {
+    const unknownToProvider = ReferenceNotFound({ kind: 'subscription', id: 'sub_gone', missing: 'provider_id' });
+    const service = new DunningService(
+      { ...providerWhereRetryEnds('succeeded'), pauseSubscription: () => Promise.resolve(unknownToProvider) },
+      reads,
+      writes,
+      { rules: [ruleDoing('pause_subscription')] },
+    );
+    const id = await failedPaymentOn(service);
+
+    const reports = await service.processDunningEvents();
+
+    // The app must learn that the subscription is still past due with no next step
+    expect(reports).toMatchObject([{ status: 'refused', failure: { code: 'payments.reference_not_found' } }]);
+    expect(await subscriptionRow(db, id)).toMatchObject({ status: 'past_due' });
+  });
+
+  it('a retry the card declines and a recovered payment on a canceled subscription are both reported', async () => {
+    const declined = new DunningService(
+      { ...providerWhereRetryEnds('succeeded'), confirmPayment: () => Promise.resolve(CardDeclined({})) },
+      reads,
+      writes,
+      { rules: [ruleDoing('retry_payment')] },
+    );
+    await failedPaymentOn(declined);
+    expect(await declined.processDunningEvents()).toMatchObject([
+      { status: 'refused', failure: { code: 'payments.card_declined' } },
+    ]);
+
+    const recovered = dunningWith(ruleDoing('retry_payment'));
+    const id = await failedPaymentOn(recovered);
+    await orThrow(writes.cancelSubscription({ subscriptionId: id }));
+    expect(await recovered.processDunningEvents()).toMatchObject([
+      { status: 'refused', failure: { code: 'journal.conflict' } },
+    ]);
+  });
+
+  it('a step that ran is reported done', async () => {
+    const service = dunningWith(ruleDoing('pause_subscription'));
+    await failedPaymentOn(service);
+
+    expect(await service.processDunningEvents()).toMatchObject([{ status: 'done' }]);
+  });
+});
+
 describe('a dunning step that throws', () => {
   it('stays scheduled for the next run instead of counting as done', async () => {
     const outage = new Error('provider is down');
@@ -337,6 +396,14 @@ describe('handleSubscriptionRecovery', () => {
     await orThrow(service.handleSubscriptionRecovery(id));
 
     expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('an unknown subscription returns the journal not-found refusal', async () => {
+    const service = dunningWith(ruleDoing('email'));
+
+    const refused = await service.handleSubscriptionRecovery(orThrow(createSubscriptionId()));
+
+    expect(refused).toMatchObject({ code: 'journal.not_found' });
   });
 
   it('a canceled subscription is not brought back by a late payment: the command refuses and the row stays canceled', async () => {

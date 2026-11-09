@@ -1,10 +1,12 @@
 import { z } from '@arki/contracts';
 import { isBefore } from '@arki/date';
 import { instantSchema } from '@arki/date/zod';
+import { currencyCodeSchema } from '@arki/money/zod';
 
 import type { TaxComplianceReport } from './reporting.js';
 import type { TaxCalculationResult, TaxService } from './service.js';
 import { moneyJsonSchema, positiveMoneySchema } from '../core/money.js';
+import { pgInstantSchema, pgJsonSchema, pgTextSchema as pgText, pgVarcharSchema as pgVarchar } from '../core/pg-values.js';
 import {
   exemptionStatusValues,
   exemptionTypeValues,
@@ -27,12 +29,12 @@ export const exemptionStatusSchema = z.enum(exemptionStatusValues);
 
 // Tax configuration
 export const createTaxConfigSchema = z.object({
-  name: z.string().min(1).max(255),
-  description: z.string().optional(),
+  name: pgVarchar(255).min(1),
+  description: pgText.optional(),
   calculationMode: taxCalculationModeSchema.default('automatic'),
   businessType: taxBusinessTypeSchema.default('saas'),
-  defaultTaxCode: z.string().max(50).default('txcd_10103000'),
-  provider: z.string().max(50).default('stripe'),
+  defaultTaxCode: pgVarchar(50).default('txcd_10103000'),
+  provider: pgVarchar(50).default('stripe'),
   providerSettings: z
     .object({
       stripeSettings: z
@@ -45,22 +47,22 @@ export const createTaxConfigSchema = z.object({
     })
     .optional(),
   businessDetails: z.object({
-    businessName: z.string().min(1),
-    taxId: z.string().optional(),
+    businessName: pgText.min(1),
+    taxId: pgText.optional(),
     address: z.object({
-      line1: z.string().min(1),
-      line2: z.string().optional(),
-      city: z.string().min(1),
-      state: z.string().min(1),
-      country: z.string().length(2),
-      postalCode: z.string().min(1),
+      line1: pgText.min(1),
+      line2: pgText.optional(),
+      city: pgText.min(1),
+      state: pgText.min(1),
+      country: pgText.length(2),
+      postalCode: pgText.min(1),
     }),
     registrations: z
       .array(
         z.object({
-          country: z.string().length(2),
-          type: z.string(),
-          number: z.string(),
+          country: pgText.length(2),
+          type: pgText,
+          number: pgText,
           status: z.enum(['active', 'inactive', 'pending']),
         }),
       )
@@ -98,31 +100,32 @@ export const taxRateSchema = z
   .refine(rate => Number(rate) <= 100, 'A tax rate is at most 100');
 
 export const createJurisdictionSchema = z.object({
-  name: z.string().min(1).max(255),
-  code: z.string().max(20),
+  name: pgVarchar(255).min(1),
+  code: pgVarchar(20),
   type: jurisdictionTypeSchema,
   parentId: taxJurisdictionIdSchema.optional(),
-  countryCode: z.string().length(2),
-  stateCode: z.string().max(10).optional(),
-  standardRate: taxRateSchema.optional(),
+  countryCode: pgText.length(2),
+  stateCode: pgVarchar(10).optional(),
+  /** The column holds 10 characters */
+  standardRate: taxRateSchema.max(10).optional(),
   reducedRates: z
     .array(
       z.object({
         rate: taxRateSchema,
-        description: z.string(),
-        applicableTo: z.array(z.string()),
+        description: pgText,
+        applicableTo: z.array(pgText),
       }),
     )
     .optional(),
   taxIdRequired: z.boolean().default(false),
   registrationRequired: z.boolean().default(false),
-  filingFrequency: z.string().max(50).optional(),
-  effectiveFrom: instantSchema().optional(),
-  effectiveTo: instantSchema().optional(),
+  filingFrequency: pgVarchar(50).optional(),
+  effectiveFrom: pgInstantSchema().optional(),
+  effectiveTo: pgInstantSchema().optional(),
 });
 
 export const getJurisdictionsByCountryInputSchema = z.object({
-  countryCode: z.string().length(2),
+  countryCode: pgText.length(2),
 });
 
 export const getJurisdictionHierarchyInputSchema = z.object({
@@ -164,21 +167,21 @@ export const exemptionPeriodSchema = z
 export const createExemptionSchema = z
   .object({
   type: exemptionTypeSchema,
-  customerId: z.string().max(255).optional(),
-  productCode: z.string().max(100).optional(),
+  customerId: pgVarchar(255).optional(),
+  productCode: pgVarchar(100).optional(),
   jurisdictionId: taxJurisdictionIdSchema.optional(),
-  exemptionCode: z.string().max(50),
-  reason: z.string().min(1),
-  certificateNumber: z.string().max(100).optional(),
-  validFrom: instantSchema(),
-  validTo: instantSchema().optional(),
+  exemptionCode: pgVarchar(50),
+  reason: pgText.min(1),
+  certificateNumber: pgVarchar(100).optional(),
+  validFrom: pgInstantSchema(),
+  validTo: pgInstantSchema().optional(),
   documents: z
     .array(
       z.object({
-        type: z.string(),
-        url: z.url(),
-        uploadedAt: z.string(),
-        expiresAt: z.string().optional(),
+        type: pgText,
+        url: pgText.pipe(z.url()),
+        uploadedAt: pgText,
+        expiresAt: pgText.optional(),
       }),
     )
     .optional(),
@@ -190,7 +193,7 @@ export const createExemptionSchema = z
   });
 
 export const getCustomerExemptionsInputSchema = z.object({
-  customerId: z.string(),
+  customerId: pgText,
 });
 
 export const getExpiringExemptionsInputSchema = z.object({
@@ -205,9 +208,86 @@ export const revokeExemptionInputSchema = z.object({
   id: taxExemptionIdSchema,
 });
 
+// What each table can store. The tax repositories check every row they write with one of these, so a
+// value a column would refuse (U+0000 in text or JSON, text over the column's length, a bigint in JSON,
+// a rate `numeric(8,4)` cannot hold, a negative tax amount, a time outside the years 1 to 9999) returns `InvalidInput`
+// (`schema.invalid_input`) and nothing is written, never a raw Postgres error.
+
+/** A `tax_configurations` row. `TaxConfigurationRepository` checks inserts with it, updates with `.partial()`. */
+export const taxConfigurationRowSchema = z.object({
+  name: pgVarchar(255),
+  description: pgText.nullish(),
+  defaultTaxCode: pgVarchar(50).optional(),
+  provider: pgVarchar(50).optional(),
+  providerSettings: pgJsonSchema.optional(),
+  businessDetails: pgJsonSchema.optional(),
+  taxRules: pgJsonSchema.optional(),
+  features: pgJsonSchema.optional(),
+  createdBy: pgVarchar(255).nullish(),
+  updatedBy: pgVarchar(255).nullish(),
+});
+
+/** A `tax_jurisdictions` row. `TaxJurisdictionRepository` checks inserts with it, updates with `.partial()`. */
+export const taxJurisdictionRowSchema = z.object({
+  name: pgVarchar(255),
+  code: pgVarchar(20),
+  countryCode: pgVarchar(2),
+  stateCode: pgVarchar(10).nullish(),
+  standardRate: pgVarchar(10).nullish(),
+  reducedRates: pgJsonSchema.optional(),
+  filingFrequency: pgVarchar(50).nullish(),
+  effectiveFrom: pgInstantSchema().nullish(),
+  effectiveTo: pgInstantSchema().nullish(),
+});
+
+/** A `tax_exemptions` row. `TaxExemptionRepository` checks inserts with it, updates and approvals with `.partial()`. */
+export const taxExemptionRowSchema = z.object({
+  customerId: pgVarchar(255).nullish(),
+  productCode: pgVarchar(100).nullish(),
+  exemptionCode: pgVarchar(50),
+  reason: pgText,
+  certificateNumber: pgVarchar(100).nullish(),
+  validFrom: pgInstantSchema(),
+  validTo: pgInstantSchema().nullish(),
+  documents: pgJsonSchema.optional(),
+  createdBy: pgVarchar(255).nullish(),
+  approvedBy: pgVarchar(255).nullish(),
+});
+
+/** A `tax_audit_entries` row. `TaxAuditRepository.record` checks every entry with it. */
+export const taxAuditRowSchema = z.object({
+  entityId: pgVarchar(255),
+  details: pgJsonSchema,
+  occurredAt: pgInstantSchema().optional(),
+});
+
+/** A `tax_records` row. `TaxRecordRepository.recordMany` checks every row with it, and `createTaxTransaction` before it asks the provider. */
+export const taxRecordRowSchema = z.object({
+  reference: pgVarchar(255),
+  jurisdiction: pgVarchar(255),
+  /** Percent as decimal text; the column is `numeric(8,4)`, so 10000 or more cannot be stored */
+  rate: z
+    .string()
+    .regex(/^\d+(\.\d+)?$/, 'A tax rate is a non-negative decimal number')
+    .refine(rate => Number(rate) <= 9999.9999, 'A stored tax rate is at most 9999.9999'),
+  /** Collected or given back, `type` says which: never negative */
+  taxAmountMinor: z.number().int().min(0),
+  /** ISO 4217: the reports read the amounts back as `Money` */
+  currency: currencyCodeSchema,
+  taxCode: pgVarchar(50).nullish(),
+  customerId: pgVarchar(255).nullish(),
+  paymentId: pgVarchar(255).nullish(),
+  subscriptionId: pgVarchar(255).nullish(),
+  providerTransactionId: pgVarchar(255).nullish(),
+  occurredAt: pgInstantSchema().optional(),
+});
+
 // Tax calculation
-export const taxCalculationInputSchema = z.object({
-  customerId: z.string(),
+
+/** A sale's line items share its currency: one in another currency cannot be added to the rest. */
+export const taxCalculationInputSchema = z
+  .object({
+  customerId: pgText,
   lineItems: z.array(
     z.object({
       /** In `currency` */
@@ -241,10 +321,14 @@ export const taxCalculationInputSchema = z.object({
         .optional(),
     })
     .optional(),
-});
+  })
+  .refine(input => input.lineItems.every(item => item.amount.currency.code === input.currency), {
+    path: ['lineItems'],
+    message: 'Every line item must be in the currency of the sale',
+  });
 
 export const calculateSubscriptionTaxInputSchema = z.object({
-  customerId: z.string(),
+  customerId: pgText,
   planAmount: positiveMoneySchema,
   planInterval: z.enum(['monthly', 'yearly']),
   taxCode: z.string().optional(),
@@ -258,7 +342,7 @@ export const taxIdValidationSchema = z.object({
 });
 
 export const getCustomerTaxSummaryInputSchema = z.object({
-  customerId: z.string(),
+  customerId: pgText,
   year: z.number().min(2000).max(2100),
 });
 
@@ -268,7 +352,7 @@ export const generateComplianceReportInputSchema = z.object({
   year: z.number().min(2000).max(2100),
   quarter: z.number().min(1).max(4).optional(),
   month: z.number().min(1).max(12).optional(),
-  jurisdiction: z.string().optional(),
+  jurisdiction: pgText.optional(),
 });
 
 export const exportTaxDataInputSchema = z.object({
@@ -280,7 +364,7 @@ export const exportTaxDataInputSchema = z.object({
 });
 
 export const getCustomerAnnualSummaryInputSchema = z.object({
-  customerId: z.string(),
+  customerId: pgText,
   year: z.number().min(2000).max(2100),
 });
 

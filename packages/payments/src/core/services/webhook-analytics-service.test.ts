@@ -9,6 +9,8 @@ import { defineRelations } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import { core, openDb } from '../../test-support.js';
 import { PaymentRepository } from '../repository.js';
 import { WebhookAnalyticsService } from './webhook-analytics-service.js';
@@ -45,5 +47,32 @@ describe('WebhookAnalyticsService.createAlert', () => {
     for (const call of consoleCalls) {
       expect(call).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe('WebhookAnalyticsService.getWebhookMetrics', () => {
+  it('counts processed events too, so a healthy stream does not read as a 0% processing rate', async () => {
+    const repository = new PaymentRepository(drizzle({ client, relations }), core);
+    const processed = orThrow(
+      await repository.createWebhookEvent({
+        provider: 'stripe',
+        eventType: 'customer.created',
+        providerEventId: 'evt_metrics_done',
+        data: {},
+      }),
+    );
+    orThrow(await repository.markWebhookEventAsProcessed(processed.id));
+    orThrow(
+      await repository.createWebhookEvent({
+        provider: 'stripe',
+        eventType: 'customer.created',
+        providerEventId: 'evt_metrics_open',
+        data: {},
+      }),
+    );
+
+    const metrics = await service.getWebhookMetrics();
+
+    expect(metrics).toMatchObject({ totalEvents: 2, processedEvents: 1, processingRate: 50 });
   });
 });

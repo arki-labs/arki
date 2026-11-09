@@ -16,7 +16,9 @@ import { money, UnknownCurrency } from '@arki/money';
 
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
 import { userIdFactory } from '../core/user-id.js';
-import { core, schema, users } from '../test-support.js';
+import { PaymentRetryService } from '../core/services/payment-retry-service.js';
+import { coreReads, runnerOn } from '../service-test-support.js';
+import { core, customerId as fixtureCustomerId, openDb, planId, schema, typed, users } from '../test-support.js';
 import { createDunningCampaignId } from './primitives.js';
 import { DunningIntegrationService } from './services/integration-service.js';
 import { createDunningTables } from './tables.js';
@@ -204,15 +206,21 @@ async function plainDatabase() {
   return { client, db, service, customerId };
 }
 
+type StoredTrigger = (typeof dunning.dunningCampaigns.$inferInsert)['trigger'];
+
 /** One campaign with one step, stored as the campaign service stores them. */
-async function campaignWithStep(db: Awaited<ReturnType<typeof plainDatabase>>['db'], stopOnPaymentSuccess: boolean) {
+async function campaignWithStep(
+  db: Awaited<ReturnType<typeof plainDatabase>>['db'],
+  stopOnPaymentSuccess: boolean,
+  trigger?: StoredTrigger,
+) {
   const [campaign] = await db
     .insert(dunning.dunningCampaigns)
     .values({
       name: 'Recover',
       type: 'payment_failed',
       status: 'active',
-      trigger: { type: 'payment_failure', conditions: {} },
+      trigger: trigger ?? { type: 'payment_failure', conditions: {} },
       settings: {
         enabled: true,
         priority: 1,
@@ -395,5 +403,155 @@ describe('healthCheck and getIntegrationMetrics read the stored rows', () => {
       averageProcessingTime: 200,
     });
     await client.close();
+  });
+});
+
+/** The database refuses every new dunning execution, as an outage in the middle of a campaign run would. */
+async function refuseExecutions(db: Awaited<ReturnType<typeof plainDatabase>>['db']) {
+  await db.execute(
+    sql.raw(
+      "CREATE FUNCTION refuse_execution() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'the database refused the execution'; END $$",
+    ),
+  );
+  await db.execute(
+    sql`CREATE TRIGGER refuse_execution BEFORE INSERT ON ${dunning.dunningExecutions} FOR EACH ROW EXECUTE FUNCTION refuse_execution()`,
+  );
+}
+
+/** The error the refusing trigger raises (SQLSTATE P0001, raise_exception). */
+function refusedByTheDatabase(error: unknown) {
+  return findDatabaseError(error)?.sqlState === 'P0001';
+}
+
+describe('an event handler never acknowledges a campaign run that threw', () => {
+  it('handlePaymentFailure, handleSubscriptionStatusChange and handleTrialEnding throw the database error', async () => {
+    const { client, db, service, customerId } = await plainDatabase();
+    try {
+      const [customer] = await db.select().from(core.customers).where(sql`${core.customers.id} = ${customerId}`);
+      if (!customer) throw new Error('the customer was not stored');
+      await campaignWithStep(db, false);
+      await campaignWithStep(db, false, { type: 'subscription_status', conditions: { subscriptionStatus: ['past_due'] } });
+      await campaignWithStep(db, false, { type: 'time_based', conditions: { trialEndingDays: 3 } });
+      await db.insert(core.plans).values({ id: planId, name: 'Pro', priceMinor: 1000 });
+      const [pastDue, trialing] = await db
+        .insert(core.subscriptions)
+        .values(
+          (['past_due', 'trialing'] as const).map(status => ({
+            id: orThrow(createSubscriptionId()),
+            userId: customer.userId,
+            planId,
+            customerId,
+            providerSubscriptionId: `sub_${status}`,
+            status,
+            // The past due period has ended; the trialing one runs on
+            currentPeriodStart: sub(now(), { hours: 720 }),
+            currentPeriodEnd: status === 'past_due' ? sub(now(), { hours: 1 }) : add(now(), { hours: 720 }),
+            trialEnd: status === 'trialing' ? add(now(), { hours: 60 }) : undefined,
+          })),
+        )
+        .returning();
+      if (!pastDue || !trialing) throw new Error('the subscriptions were not stored');
+      const paymentId = orThrow(createPaymentId());
+      await db.insert(core.payments).values({
+        id: paymentId,
+        userId: customer.userId,
+        customerId,
+        providerPaymentId: `pi_${paymentId}`,
+        amountMinor: 1999,
+        currency: 'EUR',
+        status: 'failed',
+        createdAt: now(),
+      });
+      await refuseExecutions(db);
+
+      await expect(service.handlePaymentFailure({ ...event, paymentId, customerId })).rejects.toSatisfy(
+        refusedByTheDatabase,
+      );
+      await expect(
+        service.handleSubscriptionStatusChange({
+          subscriptionId: pastDue.id,
+          customerId,
+          oldStatus: 'active',
+          newStatus: 'past_due',
+        }),
+      ).rejects.toSatisfy(refusedByTheDatabase);
+      await expect(
+        service.handleTrialEnding({
+          subscriptionId: trialing.id,
+          customerId,
+          trialEndDate: add(now(), { hours: 60 }),
+          daysUntilEnd: 3,
+        }),
+      ).rejects.toSatisfy(refusedByTheDatabase);
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe('an event handler names what the event refers to and has no row', () => {
+  it('an unknown customer returns payments.reference_not_found (customer) from each handler, and nothing is written', async () => {
+    const { client, db, service } = await plainDatabase();
+    try {
+      const unknown = orThrow(createCustomerId());
+      const subscriptionId = orThrow(createSubscriptionId());
+      const paymentId = orThrow(createPaymentId());
+
+      const answers = [
+        await service.handlePaymentFailure({ ...event, paymentId, customerId: unknown }),
+        await service.handlePaymentSuccess({ paymentId, customerId: unknown, amount: money('50', 'EUR') }),
+        await service.handleSubscriptionStatusChange({
+          subscriptionId,
+          customerId: unknown,
+          oldStatus: 'active',
+          newStatus: 'past_due',
+        }),
+      ];
+
+      for (const answer of answers) {
+        expect(answer).toMatchObject({ code: 'payments.reference_not_found', data: { kind: 'customer', id: unknown } });
+      }
+      expect(await db.select().from(dunning.customerRiskProfiles)).toEqual([]);
+      expect(await db.select().from(dunning.dunningExecutions)).toEqual([]);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('handlePaymentFailure returns payments.reference_not_found (payment) when the retry service has no such payment', async () => {
+    const { db, client } = await openDb({
+      ...dunning.enums,
+      dunningCampaigns: dunning.dunningCampaigns,
+      dunningCampaignAnalytics: dunning.dunningCampaignAnalytics,
+      dunningTemplates: dunning.dunningTemplates,
+      dunningExecutions: dunning.dunningExecutions,
+      dunningCommunications: dunning.dunningCommunications,
+      customerSegments: dunning.customerSegments,
+      customerRiskProfiles: dunning.customerRiskProfiles,
+    });
+    try {
+      // The retry service only reads the payment here; it never reaches the payment provider
+      const provider: ConstructorParameters<typeof PaymentRetryService>[0] = {
+        async confirmPayment() {
+          throw new Error('scheduling a retry never confirms a payment');
+        },
+      };
+      const retries = new PaymentRetryService(provider, coreReads(db), typed.core.writes(runnerOn(db)));
+      const handlers = new DunningIntegrationService(
+        db,
+        { customers: core.customers, payments: core.payments, subscriptions: core.subscriptions, plans: core.plans },
+        dunning,
+        { systemUserId: 'usr_system' },
+        retries,
+      );
+      const paymentId = orThrow(createPaymentId());
+
+      const answer = await handlers.handlePaymentFailure({ ...event, paymentId, customerId: fixtureCustomerId });
+
+      expect(answer).toMatchObject({ code: 'payments.reference_not_found', data: { kind: 'payment', id: paymentId } });
+      expect(await db.select().from(dunning.customerRiskProfiles)).toEqual([]);
+    } finally {
+      await client.close();
+    }
   });
 });

@@ -196,7 +196,7 @@ describe('an id with no row', () => {
   });
 
   it('as the new default configuration, keeps the current default', async () => {
-    const current = await repos.configurations.createConfiguration({ name: 'Current default', isDefault: true });
+    const current = orThrow(await repos.configurations.createConfiguration({ name: 'Current default', isDefault: true }));
 
     const refused = await repos.configurations.setDefaultConfiguration(orThrow(createTaxConfigId()));
 
@@ -524,5 +524,119 @@ describe('an insert that returns no row', () => {
       await db.execute(sql`DROP TRIGGER skip_tax_config_insert ON pay.tax_configurations`);
       await db.execute(sql`DROP FUNCTION pay.skip_row()`);
     }
+  });
+});
+
+describe('a jurisdiction that rows still name', () => {
+  // A delete that met a child or an exemption used to reject with a raw Postgres 23503; an admin screen must get an answer it can show
+  it('is kept: deleteJurisdiction returns payments.tax_jurisdiction_in_use, and deletes it once nothing names it', async () => {
+    const country = orThrow(await repos.jurisdictions.createJurisdiction({ name: 'Usedland', code: 'UL', type: 'country', countryCode: 'UL' }));
+    const state = orThrow(await repos.jurisdictions.createJurisdiction({ name: 'Usedstate', code: 'UL-S', type: 'state', countryCode: 'UL', parentId: country.id }));
+    const exemption = orThrow(await repos.exemptions.createExemption({
+      type: 'jurisdiction',
+      jurisdictionId: state.id,
+      exemptionCode: 'USED',
+      reason: 'Exempt in the state',
+      validFrom: past,
+    }));
+
+    expect(await repos.jurisdictions.deleteJurisdiction(country.id)).toMatchObject({
+      code: 'payments.tax_jurisdiction_in_use',
+      status: 409,
+      data: { id: country.id, usedBy: 'jurisdiction', usedById: state.id },
+    });
+    expect(await repos.jurisdictions.deleteJurisdiction(state.id)).toMatchObject({
+      code: 'payments.tax_jurisdiction_in_use',
+      data: { id: state.id, usedBy: 'exemption', usedById: exemption.id },
+    });
+    expect(await repos.jurisdictions.findJurisdictionById(state.id)).not.toBeNull();
+
+    await repos.exemptions.deleteExemption(exemption.id);
+    expect(await repos.jurisdictions.deleteJurisdiction(state.id)).toBeUndefined();
+    expect(await repos.jurisdictions.deleteJurisdiction(country.id)).toBeUndefined();
+    expect(await repos.jurisdictions.findJurisdictionById(country.id)).toBeNull();
+    // An unknown id deletes nothing, and is no failure
+    expect(await repos.jurisdictions.deleteJurisdiction(country.id)).toBeUndefined();
+  });
+});
+
+describe('a value a tax column cannot store', () => {
+  const nul = 'a\u0000b';
+  const long = (length: number) => 'x'.repeat(length);
+  const invalid = { code: InvalidInput.code };
+
+  // U+0000, text over the column's length and a bigint in JSON used to reach Postgres and come back as raw 22021, 22001 or 22P05
+  it('returns schema.invalid_input from every write, and nothing is written', async () => {
+    expect(await repos.configurations.createConfiguration({ name: nul })).toMatchObject(invalid);
+    const config = orThrow(await repos.configurations.createConfiguration({ name: 'Storable config' }));
+    expect(await repos.configurations.updateConfiguration(config.id, { name: long(256) })).toMatchObject(invalid);
+    expect(await repos.configurations.updateConfiguration(config.id, { description: nul })).toMatchObject(invalid);
+    expect(await repos.configurations.findConfigurationById(config.id)).toMatchObject({ name: 'Storable config' });
+    await repos.configurations.deleteConfiguration(config.id);
+
+    expect(await repos.jurisdictions.createJurisdiction({ name: 'Nul', code: nul, type: 'country', countryCode: 'NL' })).toMatchObject(invalid);
+    expect(await repos.jurisdictions.createJurisdiction({ name: 'Long', code: long(21), type: 'country', countryCode: 'LG' })).toMatchObject(invalid);
+    const place = orThrow(await repos.jurisdictions.createJurisdiction({ name: 'Storeland', code: 'SL', type: 'country', countryCode: 'SL' }));
+    expect(await repos.jurisdictions.updateJurisdiction(place.id, { reducedRates: [{ rate: '5', description: nul, applicableTo: [] }] })).toMatchObject(invalid);
+
+    const exemption = { type: 'customer' as const, customerId: 'cus_storable', exemptionCode: 'OK', reason: 'Storable', validFrom: past };
+    expect(await repos.exemptions.createExemption({ ...exemption, reason: nul })).toMatchObject(invalid);
+    // A time past the year 9999 used to come back as a raw 22009
+    expect(await repos.exemptions.createExemption({ ...exemption, validFrom: instant('+010000-01-01T00:00:00Z') })).toMatchObject(invalid);
+    const created = orThrow(await repos.exemptions.createExemption(exemption));
+    expect(await repos.exemptions.updateExemption(created.id, { exemptionCode: long(51) })).toMatchObject(invalid);
+    expect(await repos.exemptions.approveExemption(created.id, long(256))).toMatchObject(invalid);
+    expect(await repos.exemptions.findExemptionById(created.id)).toMatchObject({ exemptionCode: 'OK', status: 'pending_review' });
+
+    await repos.exemptions.deleteExemption(created.id);
+    expect(await repos.jurisdictions.deleteJurisdiction(place.id)).toBeUndefined();
+  });
+
+  // No stored row holds U+0000, so a read for it finds nothing; Postgres used to refuse the parameter with a raw 22021
+  it('finds nothing when a read is asked for U+0000', async () => {
+    expect(await repos.jurisdictions.findJurisdictionByCode(nul, 'DE')).toBeNull();
+    expect(await repos.jurisdictions.findJurisdictionsByCountry(nul)).toEqual([]);
+    expect(await repos.exemptions.findCustomerExemptions(nul)).toEqual([]);
+    expect(await repos.exemptions.findCustomerExemptionsInRange(nul, past, instant('2100-01-01T00:00:00Z'))).toEqual([]);
+    expect(await repos.exemptions.findApplicableExemptions(nul)).toEqual([]);
+    expect(await repos.exemptions.findProductExemptions(nul)).toEqual([]);
+  });
+
+  it('is refused by the request contracts first', () => {
+    expect(createJurisdictionSchema.safeParse({ name: nul, code: 'X', type: 'country', countryCode: 'XX' }).success).toBe(false);
+    expect(createJurisdictionSchema.safeParse({ name: 'X', code: 'X', type: 'country', countryCode: 'XX', standardRate: '19.00000001' }).success).toBe(false);
+    expect(createExemptionSchema.safeParse({ type: 'customer', customerId: 'cus_1', exemptionCode: 'X', reason: nul, validFrom: past }).success).toBe(false);
+  });
+});
+
+describe('a new tax row with an id another row has', () => {
+  // An explicit id is allowed; one that is taken used to reject with a raw 23505
+  it('returns payments.tax_row_exists, and the first row is kept', async () => {
+    const config = orThrow(await repos.configurations.createConfiguration({ name: 'First config' }));
+    expect(await repos.configurations.createConfiguration({ id: config.id, name: 'Second config' })).toMatchObject({
+      code: 'payments.tax_row_exists',
+      status: 409,
+      data: { kind: 'configuration', id: config.id },
+    });
+
+    const place = orThrow(await repos.jurisdictions.createJurisdiction({ name: 'Firstland', code: 'FL', type: 'country', countryCode: 'FL' }));
+    expect(await repos.jurisdictions.createJurisdiction({ id: place.id, name: 'Secondland', code: 'SL2', type: 'country', countryCode: 'SL' })).toMatchObject({
+      code: 'payments.tax_row_exists',
+      data: { kind: 'jurisdiction', id: place.id },
+    });
+
+    const exemption = { type: 'customer' as const, customerId: 'cus_twice', exemptionCode: 'ONE', reason: 'First', validFrom: past };
+    const first = orThrow(await repos.exemptions.createExemption(exemption));
+    expect(await repos.exemptions.createExemption({ ...exemption, id: first.id, exemptionCode: 'TWO' })).toMatchObject({
+      code: 'payments.tax_row_exists',
+      data: { kind: 'exemption', id: first.id },
+    });
+
+    expect(await repos.configurations.findConfigurationById(config.id)).toMatchObject({ name: 'First config' });
+    expect(await repos.jurisdictions.findJurisdictionById(place.id)).toMatchObject({ name: 'Firstland' });
+    expect(await repos.exemptions.findExemptionById(first.id)).toMatchObject({ exemptionCode: 'ONE' });
+    await repos.exemptions.deleteExemption(first.id);
+    expect(await repos.jurisdictions.deleteJurisdiction(place.id)).toBeUndefined();
+    await repos.configurations.deleteConfiguration(config.id);
   });
 });

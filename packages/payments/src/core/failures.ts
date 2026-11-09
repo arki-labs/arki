@@ -144,6 +144,46 @@ export const WebhookEventNotFound = /* @__PURE__ */ defineFailure('payments.webh
   remediation: 'Check the webhook event id.',
 });
 
+/**
+ * A plan with this id is already stored, so `createPlan` wrote nothing.
+ *
+ * @fix Update the stored plan (`updatePlan`), or leave `id` out so a new one is made.
+ * @verify bun run test -- src/core/repository.customers.test.ts
+ */
+export const PlanAlreadyExists = /* @__PURE__ */ defineFailure('payments.plan_already_exists', {
+  status: 409,
+  data: z.object({ planId: z.string() }),
+  message: 'Plan {planId} already exists',
+  remediation: 'Update the stored plan, or leave the id out so a new one is made.',
+});
+
+/**
+ * The customer cannot be deleted: a row that may not go with it (a refund of one of its payments,
+ * or an app row) still points at it or at one of its payments. Nothing was deleted.
+ *
+ * @fix Keep the customer, or remove what points at it first.
+ * @verify bun run test -- src/core/repository.customers.test.ts
+ */
+export const CustomerInUse = /* @__PURE__ */ defineFailure('payments.customer_in_use', {
+  status: 409,
+  data: z.object({ customerId: z.string() }),
+  message: 'Customer {customerId} cannot be deleted: other rows still point at it or at its payments',
+  remediation: 'Keep the customer, or remove what points at it first.',
+});
+
+/**
+ * Another webhook event already holds this provider event id (or this webhook id). Nothing was written.
+ *
+ * @fix Read the stored event (`findWebhookEventByProviderEventId`); a delivery handler claims events with `claimWebhookEvent`.
+ * @verify bun run test -- src/core/repository.customers.test.ts
+ */
+export const WebhookEventExists = /* @__PURE__ */ defineFailure('payments.webhook_event_exists', {
+  status: 409,
+  data: z.object({ providerEventId: z.string() }),
+  message: 'A webhook event already holds provider event {providerEventId}',
+  remediation: 'Read the stored event; claim deliveries with claimWebhookEvent.',
+});
+
 /** Which notification did not go out, in `NotificationFailed`. */
 const notificationKindSchema = z.enum(['refund_approval_request', 'refund_status_update', 'refund_failure_alert']);
 

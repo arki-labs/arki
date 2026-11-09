@@ -24,7 +24,8 @@ const noExemptions = {
   jurisdictions: { findJurisdictionById: () => Promise.resolve(null) },
   records: {
     findByReference: () => Promise.resolve([]),
-    recordMany: () => Promise.resolve(),
+    // eslint-disable-next-line unicorn/no-useless-undefined -- the stub answers as recordMany does: undefined when written
+    recordMany: () => Promise.resolve(undefined),
     totalsByJurisdiction: () => Promise.resolve([]),
     countSaleTransactions: () => Promise.resolve(0),
   },

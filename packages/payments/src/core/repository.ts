@@ -2,13 +2,15 @@ import type { AnyRelations, SQL } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { and, count, desc, eq, gte, lt, lte } from 'drizzle-orm';
+import { and, count, desc, eq, gte, lt, lte, ne, or } from 'drizzle-orm';
 
 import type { UserId } from './user-id.js';
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
-import type { FailureOf } from '@arki/failure';
-import { invariant } from '@arki/failure';
+import type { FailureOf, SchemaFailure } from '@arki/failure';
+import { findDatabaseError } from '@arki/db/errors';
+import { invariant, isFailure } from '@arki/failure';
+import { parse } from '@arki/schema';
 
 import type { PaymentQuery, PlanQuery, SubscriptionQuery } from './contracts.js';
 import type { CoreTables } from './tables.js';
@@ -38,12 +40,64 @@ import type {
   WebhookEventType,
   WebhookId,
 } from './types.js';
-import { CustomerConflict, WebhookEventNotFound } from './failures.js';
+import { createCoreDerivedSchemas } from './derived-schemas.js';
+import {
+  CustomerConflict,
+  CustomerInUse,
+  PlanAlreadyExists,
+  WebhookEventExists,
+  WebhookEventNotFound,
+} from './failures.js';
+import { lockReferences } from './journal/support.js';
+import { isPgInstant, pgTextSchema, pgVarcharSchema } from './pg-values.js';
 import { ReferenceNotFound } from './providers/provider-error.js';
 import { claimWebhookEvent, reclaimWebhookEvent } from './webhook-claims.js';
 
 type NotFound = FailureOf<typeof ReferenceNotFound>;
 type EventNotFound = FailureOf<typeof WebhookEventNotFound>;
+type Conflict = FailureOf<typeof CustomerConflict>;
+type EventExists = FailureOf<typeof WebhookEventExists>;
+
+/** SQLSTATE `foreign_key_violation`: a row still points at the one being deleted. */
+const FOREIGN_KEY_VIOLATION = '23503';
+/** SQLSTATE `unique_violation`. */
+const UNIQUE_VIOLATION = '23505';
+
+/** A provider id a `varchar(255)` column can hold. A lookup by any other value finds no row. */
+const providerIdSchema = pgVarcharSchema(255);
+
+/**
+ * The schemas the write methods check their input with: what each column can hold, so a value
+ * Postgres would refuse comes back as `InvalidInput` (`schema.invalid_input`), never a raw error.
+ * The methods then write the typed input itself, as given.
+ * `errorMessage` and `sourceIp` take any text their column holds: the insert contract's length cap
+ * and IP pattern are for API input.
+ */
+function buildWriteSchemas(tables: Pick<CoreTables, 'plans' | 'customers' | 'subscriptions' | 'payments' | 'webhookEvents'>) {
+  const derived = createCoreDerivedSchemas(tables);
+  const webhookEvent = derived.webhookEventInsertSchema.extend({
+    errorMessage: pgTextSchema.nullable().optional(),
+    sourceIp: pgVarcharSchema(45).nullable().optional(),
+  });
+  return {
+    newPlan: derived.planInsertSchema,
+    planChange: derived.planInsertSchema.partial().omit({ id: true }),
+    newCustomer: derived.customerInsertSchema,
+    customerChange: derived.customerInsertSchema.partial().omit({ id: true }),
+    newWebhookEvent: webhookEvent,
+    webhookEventChange: webhookEvent.partial().omit({ id: true }),
+  };
+}
+
+/** The precondition of a read bounded by a time: an `instant` column compares only with years 1 to 9999. */
+function assertComparable(value: Instant | undefined, name: string): void {
+  invariant(value === undefined || isPgInstant(value), () => `[@arki/payments] ${name} must fall in the years 1 to 9999`);
+}
+
+/** The precondition of a row count or a page size: a whole number Postgres takes in LIMIT. */
+function assertCount(value: number, name: string): void {
+  invariant(Number.isSafeInteger(value) && value >= 0, () => `[@arki/payments] ${name} must be a whole number of 0 or more`);
+}
 
 /**
  * Structural database type accepted by the payments repositories.
@@ -64,6 +118,7 @@ export class PaymentRepository {
   private readonly subscriptions: CoreTables['subscriptions'];
   private readonly payments: CoreTables['payments'];
   private readonly webhookEvents: CoreTables['webhookEvents'];
+  private readonly writeSchemas: ReturnType<typeof buildWriteSchemas>;
 
   constructor(
     db: PaymentDatabase,
@@ -78,13 +133,23 @@ export class PaymentRepository {
     this.subscriptions = tables.subscriptions;
     this.payments = tables.payments;
     this.webhookEvents = tables.webhookEvents;
+    this.writeSchemas = buildWriteSchemas(tables);
   }
 
   // Plan methods
-  async createPlan(data: NewPlan): Promise<Plan> {
-    const [row] = await this.db.insert(this.plans).values(data).returning();
-    invariant(row, 'Failed to create plan');
-    return row;
+  /**
+   * The new plan. `InvalidInput` when a value does not fit its column (a negative or fractional
+   * price, a currency outside ISO 4217, text with U+0000 or past its length, an interval count or
+   * trial past 365 days); `PlanAlreadyExists` when a plan has `data.id`. Nothing is written then.
+   */
+  async createPlan(data: NewPlan): Promise<Plan | SchemaFailure | FailureOf<typeof PlanAlreadyExists>> {
+    const checked = parse(this.writeSchemas.newPlan, data);
+    if (isFailure(checked)) return checked;
+    const [row] = await this.db.insert(this.plans).values(data).onConflictDoNothing({ target: this.plans.id }).returning();
+    if (row) return row;
+    // No row back: the id was taken, or something in the database (a trigger) dropped the insert
+    invariant(data.id !== undefined && (await this.findPlanById(data.id)), 'Failed to create plan');
+    return PlanAlreadyExists({ planId: data.id });
   }
 
   async findPlanById(id: PlanId): Promise<Plan | null> {
@@ -127,8 +192,13 @@ export class PaymentRepository {
       .orderBy(this.plans.tier, this.plans.priceMinor);
   }
 
-  /** The updated plan, or `ReferenceNotFound` when no plan has this id. */
-  async updatePlan(id: PlanId, data: UpdatePlan): Promise<Plan | NotFound> {
+  /**
+   * The updated plan, `ReferenceNotFound` when no plan has this id, or `InvalidInput` when a value
+   * does not fit its column (the rules of `createPlan`).
+   */
+  async updatePlan(id: PlanId, data: UpdatePlan): Promise<Plan | NotFound | SchemaFailure> {
+    const checked = parse(this.writeSchemas.planChange, data);
+    if (isFailure(checked)) return checked;
     const result = await this.db
       .update(this.plans)
       .set({ ...data, updatedAt: now() })
@@ -165,22 +235,37 @@ export class PaymentRepository {
    * create the same customer both succeed: the second gets the row the first wrote. A customer
    * that clashes with a different one (another provider id for the user, or the provider id
    * of another user) is returned as `CustomerConflict`, never a silent pick of either row.
+   *
+   * `ReferenceNotFound` (kind `user`) when no user has `data.userId`, and `InvalidInput` when a value
+   * does not fit its column (an email that is not an address or past 255 characters, text with
+   * U+0000). Nothing is written then.
    */
-  async createCustomer(data: NewCustomer): Promise<Customer | FailureOf<typeof CustomerConflict>> {
-    const [created] = await this.db.insert(this.customers).values(data).onConflictDoNothing().returning();
-    if (created) {
-      return created;
-    }
+  async createCustomer(data: NewCustomer): Promise<Customer | Conflict | NotFound | SchemaFailure> {
+    const checked = parse(this.writeSchemas.newCustomer, data);
+    if (isFailure(checked)) return checked;
+    const values = data;
 
-    const existing = await this.findCustomerByUserId(data.userId);
-    if (existing && existing.providerCustomerId === data.providerCustomerId) {
-      return existing;
-    }
+    return this.db.transaction(async tx => {
+      const missing = await lockReferences(tx, this.customers, [
+        {
+          column: this.customers.userId,
+          value: values.userId,
+          missing: () => ReferenceNotFound({ kind: 'user', id: values.userId, missing: 'row' }),
+        },
+      ]);
+      if (missing) return missing;
 
-    return CustomerConflict({
-      userId: data.userId,
-      providerCustomerId: data.providerCustomerId,
-      existingCustomerId: existing?.id ?? null,
+      const [created] = await tx.insert(this.customers).values(values).onConflictDoNothing().returning();
+      if (created) return created;
+
+      const [existing] = await tx.select().from(this.customers).where(eq(this.customers.userId, values.userId)).limit(1);
+      if (existing && existing.providerCustomerId === values.providerCustomerId) return existing;
+
+      return CustomerConflict({
+        userId: values.userId,
+        providerCustomerId: values.providerCustomerId,
+        existingCustomerId: existing?.id ?? null,
+      });
     });
   }
 
@@ -198,10 +283,12 @@ export class PaymentRepository {
     return customer ?? null;
   }
 
+  /** Null too for an id no row can hold (U+0000, or past 255 characters). */
   async findCustomerByProviderCustomerId(
     providerCustomerId: string,
     provider: PaymentProviderType,
   ): Promise<Customer | null> {
+    if (!providerIdSchema.safeParse(providerCustomerId).success) return null;
     const [customer] = await this.db
       .select()
       .from(this.customers)
@@ -210,22 +297,85 @@ export class PaymentRepository {
     return customer ?? null;
   }
 
-  /** The updated customer, or `ReferenceNotFound` when no customer has this id. */
-  async updateCustomer(id: CustomerId, data: UpdateCustomer): Promise<Customer | NotFound> {
-    const result = await this.db
-      .update(this.customers)
-      .set({ ...data, updatedAt: now() })
-      .where(eq(this.customers.id, id))
-      .returning();
-    const row = result[0];
-    if (!row) {
-      return ReferenceNotFound({ kind: 'customer', id, missing: 'row' });
-    }
-    return row;
+  /**
+   * The updated customer. `ReferenceNotFound` when no customer has this id (kind `customer`) or no
+   * user has `data.userId` (kind `user`); `CustomerConflict` when the new `userId` already has
+   * another customer, or the new provider customer id belongs to another customer; `InvalidInput`
+   * when a value does not fit its column. Nothing is written then.
+   */
+  async updateCustomer(id: CustomerId, data: UpdateCustomer): Promise<Customer | NotFound | Conflict | SchemaFailure> {
+    const checked = parse(this.writeSchemas.customerChange, data);
+    if (isFailure(checked)) return checked;
+    const changes = data;
+
+    return this.db.transaction(async tx => {
+      const [current] = await tx.select().from(this.customers).where(eq(this.customers.id, id)).for('update');
+      if (!current) return ReferenceNotFound({ kind: 'customer', id, missing: 'row' });
+      const missing = await lockReferences(tx, this.customers, [
+        {
+          column: this.customers.userId,
+          value: changes.userId,
+          missing: () => ReferenceNotFound({ kind: 'user', id: String(changes.userId), missing: 'row' }),
+        },
+      ]);
+      if (missing) return missing;
+
+      // The two unique indexes, checked against every other customer
+      const userId = changes.userId ?? current.userId;
+      const providerCustomerId = changes.providerCustomerId ?? current.providerCustomerId;
+      const provider = changes.provider ?? current.provider;
+      const clashWith = and(
+        ne(this.customers.id, id),
+        or(
+          eq(this.customers.userId, userId),
+          and(eq(this.customers.provider, provider), eq(this.customers.providerCustomerId, providerCustomerId)),
+        ),
+      );
+      const [clash] = await tx
+        .select({ id: this.customers.id, userId: this.customers.userId })
+        .from(this.customers)
+        .where(clashWith)
+        .limit(1);
+      if (clash) {
+        return CustomerConflict({
+          userId,
+          providerCustomerId,
+          existingCustomerId: clash.userId === userId ? clash.id : null,
+        });
+      }
+
+      try {
+        // A savepoint: a customer that took the same user or provider id meanwhile (a 23505) leaves the transaction usable
+        const [row] = await tx.transaction(async savepoint =>
+          savepoint.update(this.customers).set({ ...changes, updatedAt: now() }).where(eq(this.customers.id, id)).returning(),
+        );
+        invariant(row, 'The customer row was locked above');
+        return row;
+      } catch (error) {
+        if (findDatabaseError(error)?.sqlState !== UNIQUE_VIOLATION) throw error;
+        const [taken] = await tx.select({ id: this.customers.id, userId: this.customers.userId }).from(this.customers).where(clashWith).limit(1);
+        if (!taken) throw error;
+        return CustomerConflict({ userId, providerCustomerId, existingCustomerId: taken.userId === userId ? taken.id : null });
+      }
+    });
   }
 
-  async deleteCustomer(id: CustomerId): Promise<void> {
-    await this.db.delete(this.customers).where(eq(this.customers.id, id));
+  /**
+   * Deletes the customer, with its subscriptions and payments (their foreign keys cascade). An
+   * unknown id deletes nothing. `CustomerInUse` when a row that does not cascade still points at the
+   * customer or one of its payments (a refund): nothing is deleted then.
+   */
+  async deleteCustomer(id: CustomerId): Promise<undefined | FailureOf<typeof CustomerInUse>> {
+    try {
+      // A savepoint inside a caller's transaction, so a refused delete leaves that transaction usable
+      await this.db.transaction(async tx => {
+        await tx.delete(this.customers).where(eq(this.customers.id, id));
+      });
+      return undefined;
+    } catch (error) {
+      if (findDatabaseError(error)?.sqlState === FOREIGN_KEY_VIOLATION) return CustomerInUse({ customerId: id });
+      throw error;
+    }
   }
 
   // Subscription methods
@@ -265,9 +415,11 @@ export class PaymentRepository {
     return subscription ?? null;
   }
 
+  /** Null too for an id no row can hold (U+0000, or past 255 characters). */
   async findSubscriptionByProviderSubscriptionId(
     providerSubscriptionId: string,
   ): Promise<Subscription | null> {
+    if (!providerIdSchema.safeParse(providerSubscriptionId).success) return null;
     const [subscription] = await this.readSubscriptions({
       where: eq(this.subscriptions.providerSubscriptionId, providerSubscriptionId),
       limit: 1,
@@ -282,12 +434,23 @@ export class PaymentRepository {
     });
   }
 
-  async findSubscriptionsEndingInRange(startDate: Instant, endDate: Instant): Promise<Subscription[]> {
+  /**
+   * Subscriptions in `status` (`active` when left out) whose current period ends between the two
+   * times, both included. Both times must fall in the years 1 to 9999 (a precondition: anything
+   * else throws).
+   */
+  async findSubscriptionsEndingInRange(
+    startDate: Instant,
+    endDate: Instant,
+    status: SubscriptionStatus = 'active',
+  ): Promise<Subscription[]> {
+    assertComparable(startDate, 'startDate');
+    assertComparable(endDate, 'endDate');
     return this.readSubscriptions({
       where: and(
         gte(this.subscriptions.currentPeriodEnd, startDate),
         lte(this.subscriptions.currentPeriodEnd, endDate),
-        eq(this.subscriptions.status, 'active'),
+        eq(this.subscriptions.status, status),
       ),
       orderBy: [this.subscriptions.currentPeriodEnd],
     });
@@ -303,7 +466,9 @@ export class PaymentRepository {
     return payment ?? null;
   }
 
+  /** The newest `limit` payments of the user. `limit` is a whole number of 0 or more (a precondition: anything else throws). */
   async findPaymentsByUserId(userId: UserId, limit = 50): Promise<Payment[]> {
+    assertCount(limit, 'limit');
     return this.readPayments({
       where: eq(this.payments.userId, userId),
       orderBy: [desc(this.payments.createdAt)],
@@ -337,7 +502,9 @@ export class PaymentRepository {
     });
   }
 
+  /** Null too for an id no row can hold (U+0000, or past 255 characters). */
   async findPaymentByProviderPaymentId(providerPaymentId: string): Promise<Payment | null> {
+    if (!providerIdSchema.safeParse(providerPaymentId).success) return null;
     const [payment] = await this.readPayments({
       where: eq(this.payments.providerPaymentId, providerPaymentId),
       limit: 1,
@@ -412,18 +579,32 @@ export class PaymentRepository {
 
 
   // Webhook event methods
-  async createWebhookEvent(data: NewWebhookEvent): Promise<WebhookEvent> {
-    const [row] = await this.db.insert(this.webhookEvents).values(data).returning();
-    invariant(row, 'Failed to create webhook event');
-    return row;
+  /**
+   * The new event. `WebhookEventExists` when another event holds its provider event id or its id,
+   * and `InvalidInput` when a value does not fit its column (an id past 255 characters, U+0000 in
+   * text or in `data`, a `sourceIp` past 45 characters). Nothing is written then. A delivery handler
+   * uses `claimWebhookEvent` instead, which hands back the stored copy.
+   */
+  async createWebhookEvent(data: NewWebhookEvent): Promise<WebhookEvent | EventExists | SchemaFailure> {
+    const checked = parse(this.writeSchemas.newWebhookEvent, data);
+    if (isFailure(checked)) return checked;
+    const [row] = await this.db.insert(this.webhookEvents).values(data).onConflictDoNothing().returning();
+    return row ?? WebhookEventExists({ providerEventId: data.providerEventId });
   }
 
-  /** Insert the event, or return the row that holds its id. See `claimWebhookEvent` in `webhook-claims.ts`. */
+  /**
+   * Insert the event, or return the row that holds its id. See `claimWebhookEvent` in `webhook-claims.ts`,
+   * which also returns `InvalidInput` when a value does not fit its column.
+   */
   async claimWebhookEvent(data: NewWebhookEvent): ReturnType<typeof claimWebhookEvent> {
     return claimWebhookEvent(this.db, this.webhookEvents, data);
   }
 
-  /** Take over a failed or stale unprocessed event. See `reclaimWebhookEvent` in `webhook-claims.ts`. */
+  /**
+   * Take over a failed or stale unprocessed event. See `reclaimWebhookEvent` in `webhook-claims.ts`:
+   * `seenAttempts` is the whole `attempts` value read from the row, and `leaseCutoff` falls in the
+   * years 1 to 9999 (preconditions: anything else throws).
+   */
   async reclaimWebhookEvent(id: WebhookId, seenAttempts: number, leaseCutoff: Instant): Promise<boolean> {
     return reclaimWebhookEvent(this.db, this.webhookEvents, id, seenAttempts, leaseCutoff);
   }
@@ -437,10 +618,12 @@ export class PaymentRepository {
     return webhookEvent ?? null;
   }
 
+  /** Null too for an id no row can hold (U+0000, or past 255 characters). */
   async findWebhookEventByProviderEventId(
     providerEventId: string,
     provider: PaymentProviderType,
   ): Promise<WebhookEvent | null> {
+    if (!providerIdSchema.safeParse(providerEventId).success) return null;
     const [webhookEvent] = await this.db
       .select()
       .from(this.webhookEvents)
@@ -449,12 +632,45 @@ export class PaymentRepository {
     return webhookEvent ?? null;
   }
 
-  async findUnprocessedWebhookEvents(limit = 100): Promise<WebhookEvent[]> {
+  /**
+   * The oldest `limit` unprocessed events; with `belowAttempts`, only those with fewer attempts.
+   * Both are whole numbers of 0 or more (a precondition: anything else throws).
+   */
+  async findUnprocessedWebhookEvents(limit = 100, belowAttempts?: number): Promise<WebhookEvent[]> {
+    assertCount(limit, 'limit');
+    if (belowAttempts !== undefined) assertCount(belowAttempts, 'belowAttempts');
     return this.db
       .select()
       .from(this.webhookEvents)
-      .where(eq(this.webhookEvents.processed, false))
+      .where(
+        and(
+          eq(this.webhookEvents.processed, false),
+          belowAttempts === undefined ? undefined : lt(this.webhookEvents.attempts, belowAttempts),
+        ),
+      )
       .orderBy(this.webhookEvents.createdAt)
+      .limit(limit);
+  }
+
+  /**
+   * The newest `limit` events, processed or not, created between the two times (both included, each
+   * optional). A time given falls in the years 1 to 9999, and `limit` is a whole number of 0 or more
+   * (preconditions: anything else throws).
+   */
+  async findWebhookEventsCreatedBetween(startDate?: Instant, endDate?: Instant, limit = 1000): Promise<WebhookEvent[]> {
+    assertComparable(startDate, 'startDate');
+    assertComparable(endDate, 'endDate');
+    assertCount(limit, 'limit');
+    return this.db
+      .select()
+      .from(this.webhookEvents)
+      .where(
+        and(
+          startDate ? gte(this.webhookEvents.createdAt, startDate) : undefined,
+          endDate ? lte(this.webhookEvents.createdAt, endDate) : undefined,
+        ),
+      )
+      .orderBy(desc(this.webhookEvents.createdAt))
       .limit(limit);
   }
 
@@ -466,18 +682,32 @@ export class PaymentRepository {
       .orderBy(desc(this.webhookEvents.createdAt));
   }
 
-  /** The updated event, or `WebhookEventNotFound` when no event has this id. */
-  async updateWebhookEvent(id: WebhookId, data: UpdateWebhookEvent): Promise<WebhookEvent | EventNotFound> {
-    const result = await this.db
-      .update(this.webhookEvents)
-      .set({ ...data, updatedAt: now() })
-      .where(eq(this.webhookEvents.id, id))
-      .returning();
-    const row = result[0];
-    if (!row) {
-      return WebhookEventNotFound({ webhookId: id });
+  /**
+   * The updated event. `WebhookEventNotFound` when no event has this id, `WebhookEventExists` when
+   * another event holds the new provider event id, and `InvalidInput` when a value does not fit its
+   * column (the rules of `createWebhookEvent`). Nothing is written then.
+   */
+  async updateWebhookEvent(
+    id: WebhookId,
+    data: UpdateWebhookEvent,
+  ): Promise<WebhookEvent | EventNotFound | EventExists | SchemaFailure> {
+    const checked = parse(this.writeSchemas.webhookEventChange, data);
+    if (isFailure(checked)) return checked;
+    const changes = data;
+    try {
+      // A savepoint inside a caller's transaction, so a refused update leaves that transaction usable
+      const [row] = await this.db.transaction(async tx =>
+        tx
+          .update(this.webhookEvents)
+          .set({ ...changes, updatedAt: now() })
+          .where(eq(this.webhookEvents.id, id))
+          .returning(),
+      );
+      return row ?? WebhookEventNotFound({ webhookId: id });
+    } catch (error) {
+      if (findDatabaseError(error)?.sqlState !== UNIQUE_VIOLATION || changes.providerEventId === undefined) throw error;
+      return WebhookEventExists({ providerEventId: changes.providerEventId });
     }
-    return row;
   }
 
   /** The processed event, or `WebhookEventNotFound` when no event has this id. */
@@ -498,8 +728,16 @@ export class PaymentRepository {
     return row;
   }
 
-  /** The event with one more attempt, or `WebhookEventNotFound` when no event has this id. */
-  async incrementWebhookEventAttempts(id: WebhookId, errorMessage?: string): Promise<WebhookEvent | EventNotFound> {
+  /**
+   * The event with one more attempt, `WebhookEventNotFound` when no event has this id, or
+   * `InvalidInput` when `errorMessage` holds U+0000 (nothing is written then).
+   */
+  async incrementWebhookEventAttempts(
+    id: WebhookId,
+    errorMessage?: string,
+  ): Promise<WebhookEvent | EventNotFound | SchemaFailure> {
+    const message = parse(pgTextSchema.optional(), errorMessage);
+    if (isFailure(message)) return message;
     const currentEvent = await this.findWebhookEventById(id);
     if (!currentEvent) {
       return WebhookEventNotFound({ webhookId: id });
@@ -510,7 +748,7 @@ export class PaymentRepository {
       .set({
         attempts: currentEvent.attempts + 1,
         lastAttemptAt: now(),
-        errorMessage,
+        errorMessage: message,
         updatedAt: now(),
       })
       .where(eq(this.webhookEvents.id, id))
@@ -524,10 +762,13 @@ export class PaymentRepository {
   }
 
   // Analytics and reporting methods
+  /** Subscriptions created between the two times, both included. A time given falls in the years 1 to 9999 (a precondition: anything else throws). */
   async getSubscriptionStats(
     startDate?: Instant,
     endDate?: Instant,
   ): Promise<SubscriptionWithRelations[]> {
+    assertComparable(startDate, 'startDate');
+    assertComparable(endDate, 'endDate');
     const rows = await this.db
       .select({ subscription: this.subscriptions, plan: this.plans })
       .from(this.subscriptions)
@@ -542,7 +783,10 @@ export class PaymentRepository {
     return rows.map(({ subscription, plan }) => ({ ...subscription, plan }));
   }
 
+  /** Payments created between the two times, both included. A time given falls in the years 1 to 9999 (a precondition: anything else throws). */
   async getPaymentStats(startDate?: Instant, endDate?: Instant): Promise<PaymentWithRelations[]> {
+    assertComparable(startDate, 'startDate');
+    assertComparable(endDate, 'endDate');
     // The plan is loaded too: `getSubscriptionAnalytics` splits revenue by its interval.
     const rows = await this.db
       .select({ payment: this.payments, subscription: this.subscriptions, plan: this.plans })
@@ -575,8 +819,10 @@ export class PaymentRepository {
     return row?.total ?? 0;
   }
 
-  /** How many payments were created from `start` (included) to `end` (excluded). */
+  /** How many payments were created from `start` (included) to `end` (excluded). Both fall in the years 1 to 9999 (a precondition: anything else throws). */
   async countPaymentsCreatedBetween(start: Instant, end: Instant): Promise<number> {
+    assertComparable(start, 'start');
+    assertComparable(end, 'end');
     const [row] = await this.db
       .select({ total: count() })
       .from(this.payments)

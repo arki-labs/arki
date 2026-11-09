@@ -2,6 +2,8 @@ import type { Instant } from '@arki/date';
 import { fromDate, now, sub } from '@arki/date';
 import type { Failure } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
+import { is, parse } from '@arki/schema';
+import { z } from '@arki/contracts';
 import { getLogger } from '@arki/log';
 import { Currency, CurrencyMismatchError, Money, ProviderAmount, sum, UnknownCurrencyError } from '@arki/money';
 
@@ -10,7 +12,8 @@ import type { CustomerId, PaymentId, SubscriptionId } from '../core/types.js';
 import type { TaxExemptionId } from './primitives.js';
 import type { TaxExemptionRepository, TaxJurisdictionRepository, TaxRecordRepository } from './repository.js';
 import type { TaxJurisdiction } from './types.js';
-import { TaxCurrencyMismatch, TaxRefundSaleNotFound } from './failures.js';
+import { getCustomerTaxSummaryInputSchema, taxRecordRowSchema } from './contracts.js';
+import { TaxCurrencyMismatch, TaxLineCurrencyMismatch, TaxRefundSaleNotFound } from './failures.js';
 import { checkTaxIdFormat } from './tax-id.js';
 
 /** What `TaxService` reads. A `TaxExemptionRepository` and a `TaxJurisdictionRepository` fit. */
@@ -69,6 +72,18 @@ function stripeCurrency(code: string) {
   const upper = code.toUpperCase();
   const currency = Currency.parse(upper);
   return isFailure(currency) ? ProviderAmount({ cause: new UnknownCurrencyError(upper) }) : currency;
+}
+
+/** `TaxLineCurrencyMismatch` for the first line item that is not in `currency`. */
+function lineInOtherCurrency(lineItems: readonly { amount: Money; reference: string }[], currency: Currency) {
+  const line = lineItems.find(item => item.amount.currency.code !== currency.code);
+  return line === undefined
+    ? undefined
+    : TaxLineCurrencyMismatch({
+        lineReference: line.reference,
+        lineCurrency: line.amount.currency.code,
+        transactionCurrency: currency.code,
+      });
 }
 
 /**
@@ -173,11 +188,14 @@ export class TaxService {
    * A Stripe amount that `@arki/money` refuses (an unknown currency, units off Stripe's rule) is returned as a
    * `MoneyFailure`, so a sale is never priced with a wrong tax. So is a sale Stripe cannot price:
    * `money.provider_amount` for a currency outside ISO 4217 (a custom currency; Stripe is not asked),
-   * and for a Stripe answer in another currency than the sale's.
+   * and for a Stripe answer in another currency than the sale's. A line item in another currency than
+   * `input.currency` returns `TaxLineCurrencyMismatch` before anything is read or asked.
    */
   async calculateTax(input: TaxCalculationInput) {
     const currency = stripeCurrency(input.currency);
     if (isFailure(currency)) return currency;
+    const mismatch = lineInOtherCurrency(input.lineItems, currency);
+    if (mismatch) return mismatch;
     // An exemption "for a customer" must name the customer; same for the other two types
     const applicable = await this.reads.exemptions.findApplicableExemptions(input.customerId);
     const scoped = applicable.filter(
@@ -302,6 +320,13 @@ export class TaxService {
    * add up. Recording a `reference` twice (for the same `type`) returns the first record and does
    * not call the provider again. A failure is the caller's to handle, as in `calculateTax`; a currency
    * outside ISO 4217 returns `money.provider_amount` before anything is read or recorded.
+   *
+   * Nothing is read and the provider is not called when the input cannot be recorded: a line item in
+   * another currency (`TaxLineCurrencyMismatch`), a breakdown line in another currency
+   * (`TaxCurrencyMismatch`), or a record a `tax_records` column cannot store (`InvalidInput`, from
+   * `taxRecordRowSchema`: a reference or jurisdiction over 255 characters, U+0000, a negative amount,
+   * a rate of 10000 or more, an `occurredAt` outside the years 1 to 9999). So the provider and the records never disagree. A `reference` recorded
+   * earlier in another currency returns `TaxCurrencyMismatch` too.
    */
   async createTaxTransaction(params: {
     reference: string;
@@ -327,6 +352,8 @@ export class TaxService {
   }) {
     const currency = stripeCurrency(params.currency);
     if (isFailure(currency)) return currency;
+    const mismatch = lineInOtherCurrency(params.lineItems, currency);
+    if (mismatch) return mismatch;
     const taxCode = params.lineItems[0]?.taxCode;
 
     // Per jurisdiction and rate: one record each, whatever number of lines carried it
@@ -350,8 +377,34 @@ export class TaxService {
       lines.map(line => line.taxAmount),
       currency,
     );
+    const createdAt = params.occurredAt ?? now();
+    // The records as they will be written, less the provider's id: checked now, before the provider records anything
+    const rows = lines.map(line => ({
+      reference: params.reference,
+      type: params.type,
+      jurisdiction: line.jurisdiction,
+      rate: String(line.rate),
+      taxAmountMinor: line.taxAmount.toMinorNumber(),
+      currency: currency.code,
+      taxCode,
+      customerId: params.customerId,
+      paymentId: params.paymentId,
+      subscriptionId: params.subscriptionId,
+      occurredAt: createdAt,
+    }));
+    const storable = parse(z.array(taxRecordRowSchema), rows);
+    if (isFailure(storable)) return storable;
 
     const existing = await this.reads.records.findByReference(params.type, params.reference);
+    const stranger = existing.find(record => record.currency !== currency.code);
+    if (stranger) {
+      return TaxCurrencyMismatch({
+        reference: params.reference,
+        jurisdiction: stranger.jurisdiction,
+        taxCurrency: stranger.currency,
+        transactionCurrency: currency.code,
+      });
+    }
     const first = existing[0];
     if (first) {
       logger.debug('Tax transaction {reference} was already recorded', { reference: params.reference });
@@ -420,23 +473,9 @@ export class TaxService {
       });
     }
 
-    const createdAt = params.occurredAt ?? now();
-    await this.reads.records.recordMany(
-      lines.map(line => ({
-        reference: params.reference,
-        type: params.type,
-        jurisdiction: line.jurisdiction,
-        rate: String(line.rate),
-        taxAmountMinor: line.taxAmount.toMinorNumber(),
-        currency: currency.code,
-        taxCode,
-        customerId: params.customerId,
-        paymentId: params.paymentId,
-        subscriptionId: params.subscriptionId,
-        providerTransactionId: transaction.id,
-        occurredAt: createdAt,
-      })),
-    );
+    const written = await this.reads.records.recordMany(rows.map(row => ({ ...row, providerTransactionId: transaction.id })));
+    // Only the provider's id was not checked before the provider was called
+    if (isFailure(written)) return written;
 
     const created: TaxTransaction = {
       id: transaction.id,
@@ -545,6 +584,10 @@ export class TaxService {
    * customer's sales, less what it gave back on refunds. Totals are one `Money` per currency
    * (never added across currencies), ordered by currency code; `breakdown` has one row per
    * jurisdiction and currency. `totalTransactions` counts the sales that carried tax.
+   *
+   * `year` is from 2000 to 2100, as `getCustomerTaxSummaryInputSchema` reads it from a request:
+   * anything else (NaN, a year outside that range) is a bug in the caller, and throws
+   * `FailureError` (`invariant`) before anything is read.
    */
   async getCustomerTaxSummary(params: {
     customerId: CustomerId;
@@ -558,6 +601,10 @@ export class TaxService {
       transactionCount: number;
     }[];
   }> {
+    invariant(
+      is(params.year, getCustomerTaxSummaryInputSchema.shape.year),
+      () => `getCustomerTaxSummary needs a year from 2000 to 2100, received ${String(params.year)}`,
+    );
     const start = fromDate(new Date(Date.UTC(params.year, 0, 1)));
     const end = sub(fromDate(new Date(Date.UTC(params.year + 1, 0, 1))), { nanoseconds: 1 });
     const period = { start, end, customerId: params.customerId };

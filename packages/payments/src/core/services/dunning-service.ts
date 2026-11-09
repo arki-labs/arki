@@ -241,8 +241,9 @@ export class DunningService {
 
   /**
    * Handle a payment failure and initiate dunning process. Returns nothing, or a failure:
-   * `ReferenceNotFound` for an unknown payment or subscription (nothing is scheduled or written),
-   * or the refusal of the journal write.
+   * `ReferenceNotFound` for an unknown payment or subscription, or the refusal of the journal write
+   * that marks the subscription `past_due` (a canceled one, say). Nothing is scheduled then: the
+   * steps are scheduled only once the subscription is stored as past due.
    */
   async handlePaymentFailure(
     paymentId: PaymentId,
@@ -253,6 +254,11 @@ export class DunningService {
     if (!payment) return ReferenceNotFound({ kind: 'payment', id: paymentId, missing: 'row' });
     const subscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
     if (!subscription) return ReferenceNotFound({ kind: 'subscription', id: subscriptionId, missing: 'row' });
+
+    // Update subscription status to past_due. A refused write schedules nothing: the steps would
+    // retry, pause or cancel a subscription the journal says is not past due.
+    const marked = await this.writes.markSubscriptionPastDue({ subscriptionId });
+    if (isFailure(marked)) return marked;
 
     // Create dunning events based on configured rules
     const failureDate = now();
@@ -281,10 +287,6 @@ export class DunningService {
       this.dunningEvents.set(dunningEvent.id, dunningEvent);
     }
 
-    // Update subscription status to past_due
-    const marked = await this.writes.markSubscriptionPastDue({ subscriptionId });
-    if (isFailure(marked)) return marked;
-
     logger.debug('Initiated dunning for payment {paymentId} on subscription {subscriptionId}', {
       paymentId,
       subscriptionId,
@@ -293,33 +295,46 @@ export class DunningService {
   }
 
   /**
-   * Process scheduled dunning events
+   * Run the dunning steps that are due, oldest first, and report what each did, in that order:
+   *
+   * - `done`: the step ran.
+   * - `refused`: the step returned a failure (the provider refused the pause, cancel or retry, the
+   *   journal refused the write, a sender failed, or a row is gone). It is not run again; `failure`
+   *   says why, so the caller can act on it (the subscription may still be `past_due`).
+   * - `thrown`: the step threw (a fault). It stays scheduled and runs again on the next call.
+   *
+   * One broken step never stops the others.
    */
-  async processDunningEvents(): Promise<void> {
+  async processDunningEvents() {
     const current = now();
     const eventsToProcess = [...this.dunningEvents.values()]
       .filter(event => !event.processedAt && event.scheduledFor && isSameOrBefore(event.scheduledFor, current))
       .toSorted((a, b) => (a.scheduledFor ? toMillis(a.scheduledFor) : 0) - (b.scheduledFor ? toMillis(b.scheduledFor) : 0));
 
-    // One broken step must not stop the others. A step that threw stays unprocessed and runs again next time.
+    const reports = [];
     for (const event of eventsToProcess) {
-      try {
-        const processed = await this.processEvent(event);
-        if (isFailure(processed)) {
-          logger.warn('Dunning event {eventId} was refused: {code}', {
-            eventId: event.id,
-            code: processed.code,
-            failure: processed,
-          });
-        }
-        event.processedAt = now();
-        logger.debug('Processed dunning event {eventId}', { eventId: event.id });
-      } catch (error) {
-        logger.error('Dunning event {eventId} failed and stays scheduled: {error}', {
-          eventId: event.id,
-          error: error instanceof Error ? error : String(error),
-        });
+      reports.push(await this.runStep(event));
+    }
+    return reports;
+  }
+
+  /** One due step, run and reported (see `processDunningEvents`). */
+  private async runStep(event: DunningEvent) {
+    try {
+      const processed = await this.processEvent(event);
+      event.processedAt = now();
+      if (isFailure(processed)) {
+        logger.warn('Dunning event {eventId} was refused: {code}', { eventId: event.id, code: processed.code });
+        return { eventId: event.id, status: 'refused' as const, failure: processed };
       }
+      logger.debug('Processed dunning event {eventId}', { eventId: event.id });
+      return { eventId: event.id, status: 'done' as const };
+    } catch (error) {
+      logger.error('Dunning event {eventId} failed and stays scheduled: {error}', {
+        eventId: event.id,
+        error: error instanceof Error ? error : String(error),
+      });
+      return { eventId: event.id, status: 'thrown' as const, error };
     }
   }
 
@@ -338,13 +353,11 @@ export class DunningService {
       }
 
       case 'pause_subscription': {
-        await this.pauseSubscription(event);
-        break;
+        return this.pauseSubscription(event);
       }
 
       case 'cancel_subscription': {
-        await this.cancelSubscription(event, action.config);
-        break;
+        return this.cancelSubscription(event, action.config);
       }
 
       case 'webhook': {
@@ -383,8 +396,10 @@ export class DunningService {
   }
 
   /**
-   * Retry failed payment. Nothing, or `ReferenceNotFound` when the event names no payment or an
-   * unknown one. A refused retry or write is logged and ends the step.
+   * Retry failed payment. Nothing (the retry ran; a payment that is still not paid is logged), or
+   * the failure that refused it: `ReferenceNotFound` when the event names no payment or an unknown
+   * one, the provider's refusal of the retry, or the journal's refusal to reactivate the subscription
+   * after the money came in (a canceled subscription stays canceled).
    */
   private async retryPayment(event: DunningEvent, _config: Record<string, unknown>) {
     if (!event.paymentId) {
@@ -398,27 +413,13 @@ export class DunningService {
 
     // Attempt to retry the payment through the provider
     const retryResult = await this.paymentProvider.confirmPayment(event.paymentId);
-    if (isFailure(retryResult)) {
-      logger.warn('Payment retry failed for {paymentId}: {code}', {
-        paymentId: event.paymentId,
-        code: retryResult.code,
-        failure: retryResult,
-      });
-      return;
-    }
+    if (isFailure(retryResult)) return retryResult;
 
     if (retryResult.status === 'succeeded') {
       // Payment recovered - update subscription status.
-      // A canceled subscription stays canceled: the command refuses, and the refusal is logged.
+      // A canceled subscription stays canceled: the command refuses, and the refusal is returned.
       const activated = await this.writes.activateSubscription({ subscriptionId: event.subscriptionId });
-      if (isFailure(activated)) {
-        logger.warn('Could not reactivate subscription {subscriptionId}: {code}', {
-          subscriptionId: event.subscriptionId,
-          code: activated.code,
-          failure: activated,
-        });
-        return;
-      }
+      if (isFailure(activated)) return activated;
 
       // Remove remaining dunning events for this subscription
       this.cancelDunningEventsForSubscription(event.subscriptionId);
@@ -434,53 +435,36 @@ export class DunningService {
   }
 
   /**
-   * Pause subscription due to payment failure
+   * Pause subscription due to payment failure. Nothing, or the failure that refused it: the
+   * provider's (the row is left as it is) or the journal's.
    */
-  private async pauseSubscription(event: DunningEvent): Promise<void> {
+  private async pauseSubscription(event: DunningEvent) {
     const paused = await this.paymentProvider.pauseSubscription(event.subscriptionId);
     // The provider did not pause it, so the row must not say paused
-    if (isFailure(paused)) {
-      logger.warn('Could not pause subscription {subscriptionId}: {code}', {
-        subscriptionId: event.subscriptionId,
-        code: paused.code,
-        failure: paused,
-      });
-      return;
-    }
+    if (isFailure(paused)) return paused;
 
     // Update local database
     const stored = await this.writes.pauseSubscription({ subscriptionId: event.subscriptionId });
-    if (isFailure(stored)) {
-      logger.warn('Could not store the pause of subscription {subscriptionId}: {code}', {
-        subscriptionId: event.subscriptionId,
-        code: stored.code,
-        failure: stored,
-      });
-      return;
-    }
+    if (isFailure(stored)) return stored;
 
     logger.info('Paused subscription {subscriptionId} after a failed payment', {
       subscriptionId: event.subscriptionId,
     });
+    return;
   }
 
   /**
-   * Cancel subscription due to payment failure
+   * Cancel subscription due to payment failure. Nothing, or the failure that refused it: the
+   * provider's (the row is left as it is) or the journal's.
    */
-  private async cancelSubscription(event: DunningEvent, config: Record<string, unknown>): Promise<void> {
+  private async cancelSubscription(event: DunningEvent, config: Record<string, unknown>) {
+    const reason = config['reason'];
     const canceled = await this.paymentProvider.cancelSubscription(event.subscriptionId, {
       immediately: true,
-      reason: config['reason'] as string || 'payment_failure',
+      reason: typeof reason === 'string' && reason !== '' ? reason : 'payment_failure',
     });
     // The provider did not cancel it, so the row must not say canceled
-    if (isFailure(canceled)) {
-      logger.warn('Could not cancel subscription {subscriptionId}: {code}', {
-        subscriptionId: event.subscriptionId,
-        code: canceled.code,
-        failure: canceled,
-      });
-      return;
-    }
+    if (isFailure(canceled)) return canceled;
 
     // Update local database
     const stored = await this.writes.cancelSubscription({
@@ -488,14 +472,7 @@ export class DunningService {
       status: 'canceled',
       canceledAt: now(),
     });
-    if (isFailure(stored)) {
-      logger.warn('Could not store the cancellation of subscription {subscriptionId}: {code}', {
-        subscriptionId: event.subscriptionId,
-        code: stored.code,
-        failure: stored,
-      });
-      return;
-    }
+    if (isFailure(stored)) return stored;
 
     // Remove remaining dunning events
     this.cancelDunningEventsForSubscription(event.subscriptionId);
@@ -503,6 +480,7 @@ export class DunningService {
     logger.info('Canceled subscription {subscriptionId} after a failed payment', {
       subscriptionId: event.subscriptionId,
     });
+    return;
   }
 
   /** Hand the step to the app's `sendWebhook`. Nothing, or the sender's failure. */
@@ -559,7 +537,7 @@ export class DunningService {
   }
 
   /**
-   * Get dunning statistics for analytics
+   * Get dunning statistics for analytics. A time given falls in the years 1 to 9999 (a precondition: anything else throws an invariant failure).
    */
   async getDunningStats(startDate?: Instant, endDate?: Instant): Promise<DunningStats> {
     const payments = await this.paymentRepository.getPaymentStats(startDate, endDate);

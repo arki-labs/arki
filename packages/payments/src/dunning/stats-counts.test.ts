@@ -74,7 +74,7 @@ afterAll(async () => {
 describe('stats read through raw aggregates', () => {
   it('campaign analytics and communication metrics are numbers, not bigint text', async () => {
     const repositories = createDunningRepository(db, tables);
-    const campaign = await repositories.campaigns.create({
+    const created = await repositories.campaigns.create({
       name: 'Stats',
       type: 'payment_failed',
       trigger: { type: 'manual', conditions: {} },
@@ -98,6 +98,7 @@ describe('stats read through raw aggregates', () => {
       ],
       createdBy: 'usr_admin',
     });
+    const campaign = orThrow(created);
     await db.insert(tables.dunningCampaignAnalytics).values({
       id: 'stats-row',
       campaignId: campaign.id,

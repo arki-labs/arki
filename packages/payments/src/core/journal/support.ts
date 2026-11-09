@@ -5,10 +5,14 @@
  * Plain TypeScript only: this file runs on Node, Bun, Deno, browsers and Hermes.
  */
 
+import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
+import { eq, sql } from 'drizzle-orm';
+import { getTableConfig } from 'drizzle-orm/pg-core';
+
 import type { Instant } from '@arki/date';
 import type { IdGenerationFailure } from '@arki/contracts';
 import type { Failure, SchemaFailure } from '@arki/failure';
-import type { CommandFailure } from '@arki/journal';
+import type { CommandFailure, DbHandle } from '@arki/journal';
 import { instant } from '@arki/date';
 import { invariant, isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
@@ -106,4 +110,39 @@ export async function writtenRow(
   void version;
 
   return rest;
+}
+
+/** One foreign key a write sets: its column, the value written there, and the failure when no row has that value. */
+export type RowReference<Missing> = {
+  readonly column: PgColumn;
+  readonly value: string | null | undefined;
+  readonly missing: () => Missing;
+};
+
+/**
+ * Looks up the row each reference points at, in the table the column's foreign key names, and locks
+ * it (`FOR KEY SHARE`) until the transaction ends, so the write that follows cannot meet a missing or
+ * just-deleted row (a raw Postgres 23503). Returns the first `missing()` for a value no row holds, or
+ * `undefined` when every row is there. A `null` or `undefined` value names nothing to check. Run it
+ * in the transaction that writes.
+ */
+export async function lockReferences<Missing>(
+  db: Pick<DbHandle, 'select'>,
+  table: PgTable,
+  references: readonly RowReference<Missing>[],
+): Promise<Missing | undefined> {
+  const keys = getTableConfig(table).foreignKeys.map(key => key.reference());
+  for (const { column, value, missing } of references) {
+    if (value === null || value === undefined) continue;
+    const key = keys.find(candidate => candidate.columns[0] === column);
+    const target = key?.foreignColumns[0];
+    invariant(key && target, () => `[@arki/payments] ${column.name} has no foreign key to look the row up by`);
+    const [found] = await db
+      .select({ found: sql`1` })
+      .from(key.foreignTable)
+      .where(eq(target, value))
+      .for('key share');
+    if (!found) return missing();
+  }
+  return undefined;
 }

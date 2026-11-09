@@ -18,6 +18,9 @@ type AlertingService = {
   sendWarningAlert(alert: unknown): Promise<void>;
 }
 
+/** A KV write that did not go through: `kv.unavailable` on an outage or timeout, `kv.cancelled`. */
+type KvWriteFailure = Exclude<Awaited<ReturnType<KV['set']>>, boolean>;
+
 type MetricValue = {
   value: number;
   timestamp: number;
@@ -121,62 +124,82 @@ export class PaymentMonitoringService {
     });
   }
 
-  async recordPaymentAttempt(result: PaymentResult): Promise<void> {
-    // Record success/failure metrics
-    await this.recordMetric('payment_attempts_total', 1, { status: result.status });
-    await this.recordMetric('payment_processing_time', result.processingTime);
+  /*
+   * The record methods keep every metric in memory, so the rates and alerts work while KV is down.
+   * Each resolves with nothing when every KV write went through, or with the first KV failure
+   * (`kv.unavailable`, `kv.cancelled`) when a metric or an alert was not persisted.
+   */
+
+  /** `outcome` (`success` or `failure`) is what the success and refund rates count; `status` is the payment's own. */
+  async recordPaymentAttempt(result: PaymentResult): Promise<KvWriteFailure | undefined> {
+    const outcome = result.success ? 'success' : 'failure';
+    const writes = [
+      await this.recordMetric('payment_attempts_total', 1, { status: result.status, outcome }),
+      await this.recordMetric('payment_processing_time', result.processingTime),
+    ];
 
     if (!result.success) {
-      await this.recordMetric('payment_failures_total', 1, {
-        reason: result.errorCode ?? 'unknown',
-        provider: result.provider ?? 'unknown',
-      });
-
-      // Check failure rate
-      await this.checkFailureRate();
+      writes.push(
+        await this.recordMetric('payment_failures_total', 1, {
+          reason: result.errorCode ?? 'unknown',
+          provider: result.provider ?? 'unknown',
+        }),
+        await this.checkFailureRate(),
+      );
     }
 
     // Record revenue metrics
     // A metric is a float gauge per currency: the one place an amount is meant to become a number
     if (result.success && result.amount) {
-      await this.recordMetric('revenue_processed', result.amount.toNumber(), {
-        currency: result.amount.currency.code,
-        provider: result.provider ?? 'unknown',
-      });
+      writes.push(
+        await this.recordMetric('revenue_processed', result.amount.toNumber(), {
+          currency: result.amount.currency.code,
+          provider: result.provider ?? 'unknown',
+        }),
+      );
     }
+    return writes.find(write => write !== undefined);
   }
 
-  async recordWebhookProcessing(duration: number, success: boolean): Promise<void> {
-    await this.recordMetric('webhook_processing_time', duration);
-    await this.recordMetric('webhook_attempts_total', 1, {
-      status: success ? 'success' : 'failure',
-    });
+  async recordWebhookProcessing(duration: number, success: boolean): Promise<KvWriteFailure | undefined> {
+    const outcome = success ? 'success' : 'failure';
+    const writes = [
+      await this.recordMetric('webhook_processing_time', duration),
+      await this.recordMetric('webhook_attempts_total', 1, { status: outcome, outcome }),
+    ];
 
     const threshold = this.alertThresholds.get('webhook_processing_time');
     if (threshold && duration > threshold.warning) {
-      await this.checkWebhookPerformance();
+      writes.push(await this.checkWebhookPerformance());
     }
+    return writes.find(write => write !== undefined);
   }
 
-  async recordSubscriptionEvent(event: 'created' | 'canceled' | 'upgraded' | 'downgraded'): Promise<void> {
-    await this.recordMetric(`subscription_${event}_total`, 1);
+  async recordSubscriptionEvent(
+    event: 'created' | 'canceled' | 'upgraded' | 'downgraded',
+  ): Promise<KvWriteFailure | undefined> {
+    const writes = [await this.recordMetric(`subscription_${event}_total`, 1)];
 
     if (event === 'canceled') {
-      await this.checkChurnRate();
+      writes.push(await this.checkChurnRate());
     }
+    return writes.find(write => write !== undefined);
   }
 
-  async recordRefund(amount: Money, reason: string): Promise<void> {
-    await this.recordMetric('refunds_total', 1, { reason });
-    await this.recordMetric('refund_amount_total', amount.toNumber(), { currency: amount.currency.code });
-    await this.checkRefundRate();
+  async recordRefund(amount: Money, reason: string): Promise<KvWriteFailure | undefined> {
+    const writes = [
+      await this.recordMetric('refunds_total', 1, { reason }),
+      await this.recordMetric('refund_amount_total', amount.toNumber(), { currency: amount.currency.code }),
+      await this.checkRefundRate(),
+    ];
+    return writes.find(write => write !== undefined);
   }
 
   private async recordMetric(
     name: string,
     value: number,
     labels?: Record<string, string>,
-  ): Promise<void> {
+  ): Promise<KvWriteFailure | undefined> {
     const metric: MetricValue = {
       value,
       timestamp: Date.now(),
@@ -190,12 +213,15 @@ export class PaymentMonitoringService {
     this.metrics.set(name, values);
 
     // Also store in KV for persistence. A refused write keeps the in-memory metric: the
-    // rates still work, only the persisted copy is missing, so it is a WARN and not a failure.
+    // rates still work, only the persisted copy is missing, so it is a WARN and the failure is returned.
     const key = `metrics:${name}:${Date.now()}`;
     const stored = await this.kv.set(key, metric, 3600); // TTL 1 hour
-    if (!stored) {
-      logger.warn('Metric {name} was not stored in KV; it is kept in memory only', { name });
-    }
+    if (stored === true) return undefined;
+    logger.warn('Metric {name} was not stored in KV ({code}); it is kept in memory only', {
+      name,
+      code: stored === false ? 'refused' : stored.code,
+    });
+    return stored === false ? undefined : stored;
   }
 
   private async getMetricValues(name: string, since: number): Promise<MetricValue[]> {
@@ -203,7 +229,7 @@ export class PaymentMonitoringService {
     return values.filter(v => v.timestamp >= since);
   }
 
-  private async checkFailureRate(): Promise<void> {
+  private async checkFailureRate(): Promise<KvWriteFailure | undefined> {
     const window = 5 * 60 * 1000; // 5 minutes
     const nowMs = Date.now();
     const cutoff = nowMs - window;
@@ -221,7 +247,7 @@ export class PaymentMonitoringService {
       const threshold = this.alertThresholds.get('payment_failure_rate')!;
 
       if (failureRate >= threshold.critical) {
-        await this.triggerAlert('payment_failure_rate', 'critical', {
+        return this.triggerAlert('payment_failure_rate', 'critical', {
           current: failureRate,
           threshold: threshold.critical,
           window: '5 minutes',
@@ -229,7 +255,7 @@ export class PaymentMonitoringService {
           totalFailures,
         });
       } else if (failureRate >= threshold.warning) {
-        await this.triggerAlert('payment_failure_rate', 'warning', {
+        return this.triggerAlert('payment_failure_rate', 'warning', {
           current: failureRate,
           threshold: threshold.warning,
           window: '5 minutes',
@@ -238,34 +264,36 @@ export class PaymentMonitoringService {
         });
       }
     }
+    return undefined;
   }
 
-  private async checkWebhookPerformance(): Promise<void> {
+  private async checkWebhookPerformance(): Promise<KvWriteFailure | undefined> {
     const window = 60 * 1000; // 1 minute
     const cutoff = Date.now() - window;
 
     const processingTimes = await this.getMetricValues('webhook_processing_time', cutoff);
-    if (processingTimes.length === 0) return;
+    if (processingTimes.length === 0) return undefined;
 
     const avgTime = processingTimes.reduce((sum, m) => sum + m.value, 0) / processingTimes.length;
     const threshold = this.alertThresholds.get('webhook_processing_time')!;
 
     if (avgTime >= threshold.critical) {
-      await this.triggerAlert('webhook_processing_time', 'critical', {
+      return this.triggerAlert('webhook_processing_time', 'critical', {
         avgTime,
         threshold: threshold.critical,
         sampleSize: processingTimes.length,
       });
     } else if (avgTime >= threshold.warning) {
-      await this.triggerAlert('webhook_processing_time', 'warning', {
+      return this.triggerAlert('webhook_processing_time', 'warning', {
         avgTime,
         threshold: threshold.warning,
         sampleSize: processingTimes.length,
       });
     }
+    return undefined;
   }
 
-  private async checkChurnRate(): Promise<void> {
+  private async checkChurnRate(): Promise<KvWriteFailure | undefined> {
     const window = 24 * 60 * 60 * 1000; // 24 hours
     const cutoff = Date.now() - window;
 
@@ -281,14 +309,14 @@ export class PaymentMonitoringService {
       const threshold = this.alertThresholds.get('subscription_churn_rate')!;
 
       if (churnRate >= threshold.critical) {
-        await this.triggerAlert('subscription_churn_rate', 'critical', {
+        return this.triggerAlert('subscription_churn_rate', 'critical', {
           churnRate,
           threshold: threshold.critical,
           totalCanceled,
           netActive,
         });
       } else if (churnRate >= threshold.warning) {
-        await this.triggerAlert('subscription_churn_rate', 'warning', {
+        return this.triggerAlert('subscription_churn_rate', 'warning', {
           churnRate,
           threshold: threshold.warning,
           totalCanceled,
@@ -296,18 +324,17 @@ export class PaymentMonitoringService {
         });
       }
     }
+    return undefined;
   }
 
-  private async checkRefundRate(): Promise<void> {
+  private async checkRefundRate(): Promise<KvWriteFailure | undefined> {
     const window = 24 * 60 * 60 * 1000; // 24 hours
     const cutoff = Date.now() - window;
 
     const payments = await this.getMetricValues('payment_attempts_total', cutoff);
     const refunds = await this.getMetricValues('refunds_total', cutoff);
 
-    const successfulPayments = payments.filter(p =>
-      p.labels?.status === 'success',
-    );
+    const successfulPayments = payments.filter(p => p.labels?.outcome === 'success');
     const totalPayments = successfulPayments.reduce((sum, m) => sum + m.value, 0);
     const totalRefunds = refunds.reduce((sum, m) => sum + m.value, 0);
 
@@ -316,14 +343,14 @@ export class PaymentMonitoringService {
       const threshold = this.alertThresholds.get('refund_rate')!;
 
       if (refundRate >= threshold.critical) {
-        await this.triggerAlert('refund_rate', 'critical', {
+        return this.triggerAlert('refund_rate', 'critical', {
           refundRate,
           threshold: threshold.critical,
           totalRefunds,
           totalPayments,
         });
       } else if (refundRate >= threshold.warning) {
-        await this.triggerAlert('refund_rate', 'warning', {
+        return this.triggerAlert('refund_rate', 'warning', {
           refundRate,
           threshold: threshold.warning,
           totalRefunds,
@@ -331,6 +358,7 @@ export class PaymentMonitoringService {
         });
       }
     }
+    return undefined;
   }
 
   async detectAnomalies(): Promise<PaymentAnomaly[]> {
@@ -414,7 +442,7 @@ export class PaymentMonitoringService {
     metricName: string,
     severity: 'warning' | 'critical',
     data: Record<string, number | string>,
-  ): Promise<void> {
+  ): Promise<KvWriteFailure | undefined> {
     const alert: PaymentAlert = {
       id: crypto.randomUUID(),
       metricName,
@@ -427,8 +455,12 @@ export class PaymentMonitoringService {
 
     // Store alert. A refused write still sends and logs the alert: losing the stored copy must not hide it.
     const stored = await this.kv.set(`alert:${alert.id}`, alert, 86_400); // 24 hour TTL
-    if (!stored) {
-      logger.warn('Alert {alertId} ({metricName}) was not stored in KV', { alertId: alert.id, metricName });
+    if (stored !== true) {
+      logger.warn('Alert {alertId} ({metricName}) was not stored in KV ({code})', {
+        alertId: alert.id,
+        metricName,
+        code: stored === false ? 'refused' : stored.code,
+      });
     }
 
     // Send notifications based on severity
@@ -446,11 +478,12 @@ export class PaymentMonitoringService {
     } else {
       logger.warn(line, { severity, metricName, data });
     }
+    return stored === true || stored === false ? undefined : stored;
   }
 
   private async calculateSuccessRate(metric: string, start: number, _end: number): Promise<number> {
     const values = await this.getMetricValues(metric, start);
-    const successful = values.filter(v => v.labels?.status === 'success');
+    const successful = values.filter(v => v.labels?.outcome === 'success');
     const total = values.length;
 
     return total > 0 ? successful.length / total : 0;

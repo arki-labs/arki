@@ -24,6 +24,7 @@ import { userIdFactory } from '../core/user-id.js';
 import { core, planId, schema, users } from '../test-support.js';
 import { CustomerSegmentNotFound } from './failures.js';
 import { createCustomerSegmentId } from './primitives.js';
+import { createCustomerSegmentRepository } from './repository.js';
 import { CustomerSegmentationService } from './services/segmentation-service.js';
 import { createDunningTables } from './tables.js';
 
@@ -270,5 +271,45 @@ describe('customer history', () => {
 
     expect(payments).toMatchObject({ totalPayments: 3, successfulPayments: 3, averageAmount: 2000, currency: 'EUR' });
     expect(profile.paymentHistory).toMatchObject({ averageAmount: 2000, currency: 'EUR' });
+  });
+});
+
+describe('the segmentation doors name what Postgres would refuse', () => {
+  it('updateCustomerRiskProfile for an unknown customer returns payments.reference_not_found and writes no profile', async () => {
+    const unknown = orThrow(createCustomerId());
+
+    const answer = await service.updateCustomerRiskProfile(unknown);
+
+    expect(answer).toMatchObject({ code: 'payments.reference_not_found', data: { kind: 'customer', id: unknown } });
+    const profiles = await db
+      .select()
+      .from(tables.customerRiskProfiles)
+      .where(eq(tables.customerRiskProfiles.customerId, unknown));
+    expect(profiles).toEqual([]);
+  });
+
+  it('createSegment with an actor id Postgres cannot store returns schema.invalid_input and writes nothing', async () => {
+    const answer = await service.createSegment(
+      { name: 'Bad actor', type: 'custom', criteria: {}, autoUpdate: false, updateFrequency: 24 },
+      'usr_\u0000',
+    );
+
+    expect(answer).toMatchObject({ code: 'schema.invalid_input' });
+    const rows = await db.select().from(tables.customerSegments).where(eq(tables.customerSegments.name, 'Bad actor'));
+    expect(rows).toEqual([]);
+  });
+
+  it('CustomerSegmentRepository.updateCustomerCount refuses a count the int4 column cannot hold', async () => {
+    const segment = orThrow(
+      await service.createSegment(
+        { name: 'Counted', type: 'custom', criteria: {}, autoUpdate: false, updateFrequency: 24 },
+        'usr_admin',
+      ),
+    );
+    const segments = createCustomerSegmentRepository(db, tables);
+
+    expect(await segments.updateCustomerCount(segment.id, 3_000_000_000)).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await segments.updateCustomerCount(segment.id, 1.5)).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await segments.updateCustomerCount(segment.id, 7)).toMatchObject({ customerCount: 7 });
   });
 });

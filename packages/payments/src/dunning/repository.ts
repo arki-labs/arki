@@ -5,14 +5,18 @@ import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import { and, asc, desc, eq, gte, ilike, lte, sql } from 'drizzle-orm';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 
+import { z } from '@arki/contracts';
 import { findDatabaseError } from '@arki/db/errors';
-import type { FailureOf } from '@arki/failure';
-import { invariant } from '@arki/failure';
+import type { FailureOf, SchemaFailure } from '@arki/failure';
+import { invariant, isFailure } from '@arki/failure';
+import { parse } from '@arki/schema';
 
 import type { Instant } from '@arki/date';
 import { fromDate, now, sub } from '@arki/date';
 
 import type { CustomerId } from '../core/primitives.js';
+import type { UserId } from '../core/user-id.js';
+import { INT4_MAX, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from '../core/pg-values.js';
 import { ReferenceNotFound } from '../core/providers/provider-error.js';
 import type {
   CreateCustomerSegmentInput,
@@ -26,6 +30,7 @@ import type {
   UpdateDunningCampaignInput,
   UpdateDunningTemplateInput,
 } from './contracts.js';
+import { dunningActorSchema } from './contracts.js';
 import type {
   CustomerSegmentId,
   DunningCampaignId,
@@ -34,9 +39,11 @@ import type {
   DunningExecutionId,
   DunningTemplateId,
   ExecutionStatus,
+  RiskCategory,
 } from './primitives.js';
 import type { DunningTables } from './tables.js';
 import type {
+  CampaignTrigger,
   CustomerRiskProfile,
   DunningCampaign,
   DunningCommunication,
@@ -48,6 +55,7 @@ import type {
 } from './types.js';
 import { sumMinorByCurrency } from './analytics-money.js';
 import {
+  CustomerRiskProfileExists,
   DunningCampaignNotFound,
   DunningExecutionNotFound,
   DunningTemplateInUse,
@@ -77,6 +85,34 @@ export type CommunicationReferenceMissing =
   | FailureOf<typeof DunningExecutionNotFound>
   | FailureOf<typeof DunningTemplateNotFound>
   | FailureOf<typeof ReferenceNotFound>;
+
+/**
+ * The text, JSON and counts a caller writes into an execution row, checked against the columns before the
+ * write: a value Postgres refuses returns `schema.invalid_input` instead of a raw SQLSTATE error.
+ */
+const executionValuesSchema = z.looseObject({
+  triggerType: pgVarcharSchema(100).optional(),
+  triggerData: pgJsonRecordSchema.optional(),
+  result: pgJsonRecordSchema.nullish(),
+  errorMessage: pgTextSchema.nullish(),
+  retryCount: z.number().int().min(0).max(INT4_MAX).optional(),
+  metadata: pgJsonRecordSchema.nullish(),
+});
+
+/** The text and JSON a caller writes into a communication row, checked against the columns before the write. */
+const communicationValuesSchema = z.looseObject({
+  recipient: pgVarcharSchema(255).optional(),
+  subject: pgVarcharSchema(500).nullish(),
+  content: pgTextSchema.optional(),
+  failureReason: pgTextSchema.nullish(),
+  providerMessageId: pgVarcharSchema(255).nullish(),
+  providerResponse: pgJsonRecordSchema.nullish(),
+  trackingData: pgJsonRecordSchema.nullish(),
+  metadata: pgJsonRecordSchema.nullish(),
+});
+
+/** A customer count stored in the segment's `customer_count` (int4). */
+const customerCountSchema = z.number().int().min(0).max(INT4_MAX);
 
 /** SQLSTATE `foreign_key_violation`: the row a new row points at does not exist. */
 const FOREIGN_KEY_VIOLATION = '23503';
@@ -163,7 +199,10 @@ export class DunningCampaignRepository {
       .offset(offset);
   }
 
-  async create(input: CreateDunningCampaignInput & { createdBy: string }): Promise<DunningCampaign> {
+  /** The new campaign. An actor id Postgres cannot store returns `schema.invalid_input` and writes nothing. */
+  async create(input: CreateDunningCampaignInput & { createdBy: UserId }): Promise<DunningCampaign | SchemaFailure> {
+    const actor = parse(dunningActorSchema, input.createdBy);
+    if (isFailure(actor)) return actor;
     const [campaign] = await this.db
       .insert(this.dunningCampaigns)
       .values({
@@ -182,10 +221,13 @@ export class DunningCampaignRepository {
     return campaign;
   }
 
+  /** The updated campaign, `null` for an unknown id. An actor id Postgres cannot store returns `schema.invalid_input`. */
   async update(
     id: DunningCampaignId,
-    input: UpdateDunningCampaignInput & { updatedBy: string },
-  ): Promise<DunningCampaign | null> {
+    input: UpdateDunningCampaignInput & { updatedBy: UserId },
+  ): Promise<DunningCampaign | null | SchemaFailure> {
+    const actor = parse(dunningActorSchema, input.updatedBy);
+    if (isFailure(actor)) return actor;
     const [campaign] = await this.db
       .update(this.dunningCampaigns)
       .set({ ...input, updatedAt: now() })
@@ -231,8 +273,8 @@ export class DunningCampaignRepository {
   }
 
   async findActiveForTrigger(
-    triggerType: string,
-    customerSegmentIds?: string[],
+    triggerType: CampaignTrigger['type'],
+    customerSegmentIds?: CustomerSegmentId[],
   ): Promise<DunningCampaign[]> {
     // The trigger-type lookup hits a JSONB field (`trigger->>'type'`) and the
     // segment intersection uses a JSONB EXISTS subquery — both have no
@@ -262,8 +304,10 @@ export class DunningCampaignRepository {
   async updateStatus(
     id: DunningCampaignId,
     status: 'active' | 'draft' | 'archived' | 'paused',
-    updatedBy: string,
-  ): Promise<DunningCampaign | undefined> {
+    updatedBy: UserId,
+  ): Promise<DunningCampaign | undefined | SchemaFailure> {
+    const actor = parse(dunningActorSchema, updatedBy);
+    if (isFailure(actor)) return actor;
     const [campaign] = await this.db
       .update(this.dunningCampaigns)
       .set({ status, updatedBy, updatedAt: now() })
@@ -524,11 +568,14 @@ export class DunningExecutionRepository {
   /**
    * The new execution, or the failure that names the row it points at that does not exist:
    * `DunningCampaignNotFound`, `DunningTemplateNotFound`, or `ReferenceNotFound` for the customer,
-   * subscription or payment. Nothing is written then.
+   * subscription or payment. Text or JSON its column cannot store returns `schema.invalid_input`.
+   * Nothing is written then.
    */
   async create(input: Omit<NewDunningExecution, 'id' | 'createdAt' | 'updatedAt'>): Promise<
-    DunningExecution | ExecutionReferenceMissing
+    DunningExecution | ExecutionReferenceMissing | SchemaFailure
   > {
+    const values = parse(executionValuesSchema, input);
+    if (isFailure(values)) return values;
     const table = this.dunningExecutions;
     return insertOrMissing<DunningExecution, ExecutionReferenceMissing>(this.db, table, tx => this.insertExecution(tx, input), [
       { column: table.campaignId, value: input.campaignId, missing: () => DunningCampaignNotFound({ campaignId: input.campaignId }) },
@@ -578,13 +625,19 @@ export class DunningExecutionRepository {
     return execution;
   }
 
+  /**
+   * Set the execution's status, with its result or error message. A result or message its column cannot
+   * store returns `schema.invalid_input` and writes nothing.
+   */
   async updateStatus(
     id: DunningExecutionId,
     status: ExecutionStatus,
     result?: ExecutionResultDb,
     errorMessage?: string,
     customScheduledAt?: Instant,
-  ): Promise<DunningExecution | undefined> {
+  ): Promise<DunningExecution | undefined | SchemaFailure> {
+    const values = parse(executionValuesSchema, { result, errorMessage });
+    if (isFailure(values)) return values;
     const updateData: Partial<DunningExecution> = {
       status,
       updatedAt: now(),
@@ -676,9 +729,17 @@ export class DunningExecutionRepository {
     errorMessage: string,
     nextRetryAt: Instant | null,
   ): Promise<DunningExecution | undefined> {
+    // The failure is recorded even when its message holds text the column cannot store: that text is dropped
+    const message = pgTextSchema.safeParse(errorMessage);
     const [execution] = await this.db
       .update(this.dunningExecutions)
-      .set({ status: 'failed', errorMessage, nextRetryAt, completedAt: now(), updatedAt: now() })
+      .set({
+        status: 'failed',
+        errorMessage: message.success ? message.data : 'The error message cannot be stored',
+        nextRetryAt,
+        completedAt: now(),
+        updatedAt: now(),
+      })
       .where(eq(this.dunningExecutions.id, id))
       .returning();
 
@@ -751,11 +812,14 @@ export class DunningCommunicationRepository {
   /**
    * The new communication, or the failure that names the row it points at that does not exist:
    * `DunningExecutionNotFound`, `DunningTemplateNotFound`, or `ReferenceNotFound` for the customer.
-   * Nothing is written then.
+   * Text or JSON its column cannot store (a recipient over 255 characters, U+0000) returns
+   * `schema.invalid_input`. Nothing is written then.
    */
   async create(input: Omit<NewDunningCommunication, 'id' | 'createdAt' | 'updatedAt'>): Promise<
-    DunningCommunication | CommunicationReferenceMissing
+    DunningCommunication | CommunicationReferenceMissing | SchemaFailure
   > {
+    const values = parse(communicationValuesSchema, input);
+    if (isFailure(values)) return values;
     const table = this.dunningCommunications;
     return insertOrMissing<DunningCommunication, CommunicationReferenceMissing>(this.db, table, tx => this.insertCommunication(tx, input), [
       { column: table.executionId, value: input.executionId, missing: () => DunningExecutionNotFound({ executionId: input.executionId }) },
@@ -796,6 +860,10 @@ export class DunningCommunicationRepository {
     return communication;
   }
 
+  /**
+   * Set the communication's status and the fields that go with it. Text or JSON its column cannot store
+   * returns `schema.invalid_input` and writes nothing; `null` for an unknown id.
+   */
   async updateStatus(
     id: DunningCommunicationId,
     status: DunningCommunication['status'],
@@ -809,7 +877,9 @@ export class DunningCommunicationRepository {
       providerResponse?: Record<string, unknown>;
       trackingData?: Record<string, unknown>;
     } = {},
-  ): Promise<DunningCommunication | null> {
+  ): Promise<DunningCommunication | null | SchemaFailure> {
+    const values = parse(communicationValuesSchema, updates);
+    if (isFailure(values)) return values;
     const [communication] = await this.db
       .update(this.dunningCommunications)
       .set({
@@ -832,9 +902,11 @@ export class DunningCommunicationRepository {
       .limit(limit);
   }
 
+  /** The communication the provider knows by this id. An id the column cannot hold matches none. */
   async findByProviderMessageId(
     providerMessageId: string,
   ): Promise<DunningCommunication | undefined> {
+    if (!pgVarcharSchema(255).safeParse(providerMessageId).success) return undefined;
     const [communication] = await this.db
       .select()
       .from(this.dunningCommunications)
@@ -900,9 +972,12 @@ export class CustomerSegmentRepository {
       .offset(offset);
   }
 
+  /** The new segment. An actor id Postgres cannot store returns `schema.invalid_input` and writes nothing. */
   async create(
-    input: CreateCustomerSegmentInput & { createdBy: string },
-  ): Promise<CustomerSegmentRow | undefined> {
+    input: CreateCustomerSegmentInput & { createdBy: UserId },
+  ): Promise<CustomerSegmentRow | undefined | SchemaFailure> {
+    const actor = parse(dunningActorSchema, input.createdBy);
+    if (isFailure(actor)) return actor;
     const [segment] = await this.db
       .insert(this.customerSegments)
       .values({
@@ -936,10 +1011,13 @@ export class CustomerSegmentRepository {
     await this.db.delete(this.customerSegments).where(eq(this.customerSegments.id, id));
   }
 
+  /** Store the segment's customer count. A count `customer_count` (int4) cannot hold returns `schema.invalid_input`. */
   async updateCustomerCount(
     id: CustomerSegmentId,
     count: number,
-  ): Promise<CustomerSegmentRow | undefined> {
+  ): Promise<CustomerSegmentRow | undefined | SchemaFailure> {
+    const valid = parse(customerCountSchema, count);
+    if (isFailure(valid)) return valid;
     const [segment] = await this.db
       .update(this.customerSegments)
       .set({
@@ -1019,9 +1097,11 @@ export class CustomerRiskProfileRepository {
   /**
    * The new profile, or `ReferenceNotFound` (`kind: 'customer'`) when no customer has
    * `input.customerId`; nothing is written then. A customer has one profile: a second `create` for it
-   * is refused by the unique index, so use `upsert` to replace one.
+   * returns `CustomerRiskProfileExists` and changes nothing, so use `upsert` to replace one.
    */
-  async create(input: RiskProfileInput): Promise<CustomerRiskProfile | CustomerNotFound> {
+  async create(
+    input: RiskProfileInput,
+  ): Promise<CustomerRiskProfile | CustomerNotFound | FailureOf<typeof CustomerRiskProfileExists>> {
     const table = this.customerRiskProfiles;
     return insertOrMissing(
       this.db,
@@ -1030,8 +1110,9 @@ export class CustomerRiskProfileRepository {
         const [profile] = await tx
           .insert(table)
           .values({ customerId: input.customerId, ...riskProfileFields(input) })
+          .onConflictDoNothing({ target: table.customerId })
           .returning();
-        invariant(profile, 'the risk profile insert returned no row');
+        if (!profile) return CustomerRiskProfileExists({ customerId: input.customerId });
         return readCustomerRiskProfile(profile);
       },
       [{ column: table.customerId, value: input.customerId, missing: () => customerNotFound(input.customerId) }],
@@ -1076,7 +1157,7 @@ export class CustomerRiskProfileRepository {
     );
   }
 
-  async findByRiskCategory(category: string, limit = 100): Promise<CustomerRiskProfile[]> {
+  async findByRiskCategory(category: RiskCategory, limit = 100): Promise<CustomerRiskProfile[]> {
     const table = this.customerRiskProfiles;
     const profiles = await this.db
       .select()

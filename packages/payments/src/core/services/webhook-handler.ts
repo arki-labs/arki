@@ -19,6 +19,7 @@ import { refundIdSchema } from '../../refunds/primitives.js';
 import { REFUND_SETTLED_STATUSES, refundRunId } from '../../refunds/workflow.js';
 import { createWebhookId, webhookEventTypeValues } from '../primitives.js';
 import { observePayments } from '../telemetry.js';
+import { pgJsonRecordSchema, pgVarcharSchema } from '../pg-values.js';
 import {
   parseStripeCharge,
   parseStripeDispute,
@@ -91,8 +92,11 @@ const paymentMovesFrom: Record<PaymentOutcome, readonly PaymentStatus[]> = {
   requires_action: ['pending', 'processing'],
 };
 
-/** The two fields of a provider event the claim needs. */
-const eventEnvelopeSchema = z.object({ id: z.string().min(1), type: z.string().min(1) });
+/** The two fields of a provider event the claim needs. The id is stored in a `varchar(255)` column. */
+const eventEnvelopeSchema = z.object({ id: pgVarcharSchema(255).min(1), type: z.string().min(1) });
+
+/** A source address the `source_ip` column holds (45 characters, the longest IPv6 text). */
+const storedSourceIpSchema = pgVarcharSchema(45);
 
 export type WebhookEventData = {
   type: WebhookEventType;
@@ -213,7 +217,12 @@ export class WebhookHandler extends EventEmitter {
     const webhookIdResult = createWebhookId();
     if (isFailure(webhookIdResult)) return webhookIdResult;
 
+    // The body is stored as jsonb, which cannot hold U+0000: such a body is final, a resend carries it again
     const data = validation.data ?? {};
+    const storable = parse(pgJsonRecordSchema, data);
+    if (isFailure(storable)) return WebhookPayloadInvalid({ retryable: false }, { cause: storable });
+    // An address the column cannot hold (possible with `skipIpValidation`) is not kept
+    const storedIp = storedSourceIpSchema.safeParse(sourceIp);
     const claim = await this.paymentRepository.claimWebhookEvent({
       id: webhookIdResult,
       provider,
@@ -223,7 +232,7 @@ export class WebhookHandler extends EventEmitter {
       processed: false,
       attempts: 1,
       lastAttemptAt: now(),
-      sourceIp,
+      sourceIp: storedIp.success ? storedIp.data : null,
       createdAt: now(),
       updatedAt: now(),
     });
@@ -267,55 +276,37 @@ export class WebhookHandler extends EventEmitter {
    * Re-run failed or crashed events without waiting for a resend. Optional:
    * provider resends already do this. Uses the same takeover as a resend, so
    * it never runs an event whose attempt is still inside its lease.
+   *
+   * Reads only events with attempts left (fewer than `maxRetries`), oldest first, so events given
+   * up on never crowd out newer ones. A run whose attempt was the last one emits `webhook:failed`
+   * once, next to `webhook:processing_error`; the row keeps the error that attempt recorded.
    */
   async retryFailedWebhooks(): Promise<void> {
     try {
-      const unprocessedEvents = await this.paymentRepository.findUnprocessedWebhookEvents();
+      const unprocessedEvents = await this.paymentRepository.findUnprocessedWebhookEvents(100, this.config.maxRetries);
 
       for (const event of unprocessedEvents) {
-        if (event.attempts < this.config.maxRetries) {
-          const reclaimed = await this.paymentRepository.reclaimWebhookEvent(
-            event.id,
-            event.attempts,
-            this.leaseCutoff(),
-          );
-          if (!reclaimed) {
-            continue;
-          }
-          try {
-            const outcome = await this.runClaimed(event.id, event.eventType, event.provider, event.data);
-            if (isFailure(outcome)) {
-              this.emit('webhook:processing_error', {
-                webhookId: event.id,
-                eventType: event.eventType,
-                provider: event.provider,
-                error: outcome.code,
-              });
-            }
-          } catch (error) {
-            this.emit('webhook:processing_error', {
-              webhookId: event.id,
-              eventType: event.eventType,
-              provider: event.provider,
-              error: error instanceof Error ? error.message : 'Unknown error',
-            });
-          }
-        } else {
-          // Mark as failed after max retries
-          const marked = await this.paymentRepository.updateWebhookEvent(event.id, {
-            errorMessage: 'Max retry attempts exceeded',
-          });
-          if (isFailure(marked)) {
-            continue;
-          }
-
-          this.emit('webhook:failed', {
-            webhookId: event.id,
-            eventType: event.eventType,
-            provider: event.provider,
-            error: 'Max retry attempts exceeded',
-          });
+        const reclaimed = await this.paymentRepository.reclaimWebhookEvent(
+          event.id,
+          event.attempts,
+          this.leaseCutoff(),
+        );
+        if (!reclaimed) {
+          continue;
         }
+        let error: string | undefined;
+        try {
+          const outcome = await this.runClaimed(event.id, event.eventType, event.provider, event.data);
+          if (isFailure(outcome)) error = outcome.code;
+        } catch (error_) {
+          error = error_ instanceof Error ? error_.message : 'Unknown error';
+        }
+        if (error === undefined) continue;
+
+        const report = { webhookId: event.id, eventType: event.eventType, provider: event.provider, error };
+        this.emit('webhook:processing_error', report);
+        // The takeover counted this attempt: `event.attempts + 1` have now failed
+        if (event.attempts + 1 >= this.config.maxRetries) this.emit('webhook:failed', report);
       }
     } catch (error) {
       this.emit('webhook:retry_error', {
@@ -403,7 +394,10 @@ export class WebhookHandler extends EventEmitter {
    * meanwhile has nothing to take over: that is logged, and the attempt's own outcome still stands.
    */
   private async recordError(webhookId: WebhookId, errorMessage: string): Promise<void> {
-    const recorded = await this.paymentRepository.updateWebhookEvent(webhookId, { errorMessage });
+    // A message can quote payload text; the column cannot hold U+0000, so it becomes U+FFFD
+    const recorded = await this.paymentRepository.updateWebhookEvent(webhookId, {
+      errorMessage: errorMessage.replaceAll('\u0000', '\uFFFD'),
+    });
     if (isFailure(recorded)) {
       logger.warn('Webhook {webhookId} has no row to record its error on: {code}', { webhookId, code: recorded.code });
     }

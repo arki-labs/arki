@@ -7,9 +7,13 @@ import {
   createCustomerSegmentInputSchema,
   createDunningCampaignInputSchema,
   createDunningTemplateInputSchema,
+  MAX_DUNNING_DAYS,
+  MAX_DUNNING_HOURS,
   segmentCriteriaSchema,
+  updateCommunicationStatusInputSchema,
+  updateDunningCampaignInputSchema,
 } from './contracts.js';
-import { createDunningCampaignId } from './primitives.js';
+import { createDunningCampaignId, createDunningCommunicationId } from './primitives.js';
 
 describe('segmentCriteriaSchema totalSpent', () => {
   it('keeps the range as { amount, currency } JSON, because criteria are stored in a jsonb column', () => {
@@ -94,7 +98,7 @@ describe('the contracts refuse what the columns refuse', () => {
     });
   });
 
-  it('a step number or delay above 2^31 - 1 returns schema.invalid_input; 2^31 - 1 itself is accepted', () => {
+  it('a step number or delay above 2^31 - 1 returns schema.invalid_input; a step number of 2^31 - 1 is accepted', () => {
     const tooBig = 2_147_483_648;
     for (const refused of [
       parse(createDunningCampaignInputSchema, { ...campaign, templates: [{ ...step, delayHours: tooBig }] }),
@@ -105,10 +109,111 @@ describe('the contracts refuse what the columns refuse', () => {
       expect(refused).toMatchObject({ code: 'schema.invalid_input' });
     }
     expect(
+      parse(createDunningCampaignInputSchema, { ...campaign, templates: [{ ...step, stepNumber: tooBig - 1 }] }),
+    ).toMatchObject({ templates: [{ stepNumber: tooBig - 1 }] });
+  });
+
+  it('a providerMessageId over 255 characters (the varchar) returns schema.invalid_input; 255 is accepted', () => {
+    const update = { communicationId: orThrow(createDunningCommunicationId()), status: 'sent' as const };
+
+    expect(
+      parse(updateCommunicationStatusInputSchema, { ...update, providerMessageId: 'm'.repeat(256) }),
+    ).toMatchObject({ code: 'schema.invalid_input' });
+    expect(
+      parse(updateCommunicationStatusInputSchema, { ...update, providerMessageId: 'm'.repeat(255) }),
+    ).toMatchObject({
+      providerMessageId: 'm'.repeat(255),
+    });
+  });
+});
+
+// The services turn day, month and hour counts into dates. A count past 100 years leaves the range of
+// dates `@arki/date` and Postgres hold (a RangeError, or SQLSTATE 22009/22008), so the contract refuses it.
+describe('the contracts refuse spans that leave the dates the services can compute', () => {
+  const communication = { channel: 'email' as const, content: 'Please update your card', variables: [] };
+  const step = { name: 'Step 1', stepNumber: 1, delayHours: 0, communication };
+  const settings = {
+    enabled: true,
+    priority: 1,
+    cooldownPeriod: 24,
+    maxExecutionsPerCustomer: 3,
+    stopOnPaymentSuccess: true,
+    respectUnsubscribe: true,
+    businessHoursOnly: false,
+  };
+  const campaign = {
+    name: 'Recover failed payments',
+    type: 'payment_failed' as const,
+    trigger: { type: 'payment_failure' as const, conditions: {} },
+    settings,
+    templates: [step],
+  };
+
+  it('campaign day counts, cooldown and step delays past 100 years return schema.invalid_input; 100 years is accepted', () => {
+    for (const conditions of [
+      { daysSinceFailure: MAX_DUNNING_DAYS + 1 },
+      { daysSinceLastPayment: MAX_DUNNING_DAYS + 1 },
+      { trialEndingDays: MAX_DUNNING_DAYS + 1 },
+      { renewalReminderDays: MAX_DUNNING_DAYS + 1 },
+    ]) {
+      expect(
+        parse(createDunningCampaignInputSchema, { ...campaign, trigger: { type: 'time_based', conditions } }),
+      ).toMatchObject({ code: 'schema.invalid_input' });
+    }
+    expect(
       parse(createDunningCampaignInputSchema, {
         ...campaign,
-        templates: [{ ...step, stepNumber: tooBig - 1, delayHours: tooBig - 1 }],
+        settings: { ...settings, cooldownPeriod: MAX_DUNNING_HOURS + 1 },
       }),
-    ).toMatchObject({ templates: [{ stepNumber: tooBig - 1, delayHours: tooBig - 1 }] });
+    ).toMatchObject({ code: 'schema.invalid_input' });
+    expect(
+      parse(createDunningCampaignInputSchema, {
+        ...campaign,
+        templates: [{ ...step, delayHours: MAX_DUNNING_HOURS + 1 }],
+      }),
+    ).toMatchObject({ code: 'schema.invalid_input' });
+
+    const atLimit = parse(createDunningCampaignInputSchema, {
+      ...campaign,
+      trigger: { type: 'payment_failure', conditions: { daysSinceFailure: MAX_DUNNING_DAYS } },
+      settings: { ...settings, cooldownPeriod: MAX_DUNNING_HOURS },
+      templates: [{ ...step, delayHours: MAX_DUNNING_HOURS }],
+    });
+    expect(atLimit).toMatchObject({ settings: { cooldownPeriod: MAX_DUNNING_HOURS } });
+  });
+
+  it('steps whose delays add up past 100 years return schema.invalid_input, though each one fits', () => {
+    const half = MAX_DUNNING_HOURS / 2;
+    const steps = [1, 2, 3].map(stepNumber => ({ ...step, stepNumber, delayHours: half }));
+
+    expect(parse(createDunningCampaignInputSchema, { ...campaign, templates: steps })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(parse(updateDunningCampaignInputSchema, { templates: steps })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(parse(updateDunningCampaignInputSchema, { templates: steps.slice(0, 2) })).toMatchObject({
+      templates: [{ delayHours: half }, { delayHours: half }],
+    });
+  });
+
+  it('segment month and day counts past 100 years return schema.invalid_input', () => {
+    for (const criteria of [
+      { subscriptionDuration: { min: 1201 } },
+      { subscriptionDuration: { max: 1201 } },
+      { lastPaymentDate: { daysAgo: MAX_DUNNING_DAYS + 1 } },
+      { paymentFailureHistory: { count: 1, timeframe: MAX_DUNNING_DAYS + 1 } },
+    ]) {
+      expect(parse(createCustomerSegmentInputSchema, { name: 'Old', type: 'custom', criteria })).toMatchObject({
+        code: 'schema.invalid_input',
+      });
+    }
+    expect(
+      parse(createCustomerSegmentInputSchema, {
+        name: 'Old',
+        type: 'custom',
+        criteria: { subscriptionDuration: { min: 1200 } },
+      }),
+    ).toMatchObject({ criteria: { subscriptionDuration: { min: 1200 } } });
   });
 });

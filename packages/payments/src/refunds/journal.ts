@@ -28,10 +28,11 @@ import type { CommandRunner, EventDef, JournalDefinitions, RootDb, TransactionSo
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { userIdSchema } from '../core/user-id.js';
 import { and, eq, inArray, sql } from 'drizzle-orm';
+import { getTableConfig } from 'drizzle-orm/pg-core';
 
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
-import { isFailure, orThrow } from '@arki/failure';
+import { invariant, isFailure, orThrow } from '@arki/failure';
 import { CommandConflict, CommandInvalid, CommandNotFound } from '@arki/journal';
 import { Money } from '@arki/money';
 import { anyMoneySchema } from '@arki/money/zod';
@@ -42,6 +43,7 @@ import type { Refund } from './types.js';
 import type { JournalWriteFailure } from '../core/journal/support.js';
 import { writtenRow } from '../core/journal/support.js';
 import { fromStoredNumber, moneyJsonSchema, toMinorColumn } from '../core/money.js';
+import { pgTextSchema, pgVarcharSchema } from '../core/pg-values.js';
 import { paymentIdSchema } from '../core/primitives.js';
 import { refundRejectionReasonSchema } from './contracts.js';
 import { RefundCurrencyMismatch } from './failures.js';
@@ -59,18 +61,18 @@ export const requestRefundInputSchema = z.object({
   originalAmount: anyMoneySchema(),
   refundAmount: anyMoneySchema(),
   reason: reasonSchema,
-  customerNote: z.string().nullable().optional(),
-  internalNotes: z.string().nullable().optional(),
+  customerNote: pgTextSchema.nullable().optional(),
+  internalNotes: pgTextSchema.nullable().optional(),
   requestedBy: userIdSchema,
   /** A JSON string: the column is `text` */
-  metadata: z.string().nullable().optional(),
+  metadata: pgTextSchema.nullable().optional(),
 });
 
 export const approveRefundInputSchema = z.object({
   refundId: refundIdSchema,
   approvedBy: userIdSchema,
   /** The approver's notes. Left out or null: none. */
-  notes: z.string().nullable().optional(),
+  notes: pgTextSchema.nullable().optional(),
 });
 
 export const rejectRefundInputSchema = z.object({
@@ -85,11 +87,11 @@ export const processRefundInputSchema = z.object({ refundId: refundIdSchema });
 export const completeRefundInputSchema = z.object({
   refundId: refundIdSchema,
   /** The provider's id of the refund. It is known only when the provider answered. */
-  providerRefundId: z.string().min(1).max(255),
-  providerResponse: z.string().nullable().optional(),
+  providerRefundId: pgVarcharSchema(255).min(1),
+  providerResponse: pgTextSchema.nullable().optional(),
 });
 
-export const failRefundInputSchema = z.object({ refundId: refundIdSchema, errorMessage: z.string() });
+export const failRefundInputSchema = z.object({ refundId: refundIdSchema, errorMessage: pgTextSchema });
 
 export type RequestRefundInput = z.input<typeof requestRefundInputSchema>;
 export type ApproveRefundInput = z.input<typeof approveRefundInputSchema>;
@@ -165,6 +167,20 @@ export interface RefundCompletedEvent extends EventDef<'RefundCompleted', typeof
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
 export interface RefundFailedEvent extends EventDef<'RefundFailed', typeof refundFailedSchema> {}
 
+/**
+ * The users table the refund's `requestedBy`, `approvedBy` and `rejectedBy` point at: the `userIdRef`
+ * given to `createRefundsTables`. A refunds table without that foreign key is a configuration fault,
+ * so building the journal fails with `FailureError` (`invariant`).
+ */
+function userKeyOf(refunds: RefundsTables['refunds']) {
+  const key = getTableConfig(refunds)
+    .foreignKeys.map(foreignKey => foreignKey.reference())
+    .find(reference => reference.columns[0] === refunds.requestedBy);
+  const column = key?.foreignColumns[0];
+  invariant(key && column, 'the refunds table has no foreign key from requested_by to the users table');
+  return { table: key.foreignTable, column };
+}
+
 function requireRefund(row: RefundRow | null, refundId: string): RefundRow | CommandNotFound {
   if (!row) {
     return CommandNotFound({ detail: `Refund ${refundId} not found` });
@@ -184,6 +200,19 @@ export function createRefundsJournal<
   AppDb extends RootDb,
 >(j: JournalDefinitions<Meta, Tx, AppDb>, tables: Pick<RefundsTables, 'refunds'> & Pick<CoreTables, 'payments'>) {
   const { payments } = tables;
+  const users = userKeyOf(tables.refunds);
+  /**
+   * `CommandNotFound` when no user has `userId`. Otherwise the user's row is locked until the command
+   * ends, so it cannot be deleted before the refund points at it (a raw Postgres 23503).
+   */
+  const missingUser = async (tx: Tx, userId: string) => {
+    const [found] = await tx
+      .select({ found: sql`1` })
+      .from(users.table)
+      .where(eq(users.column, userId))
+      .for('key share');
+    return found ? undefined : CommandNotFound({ detail: `User ${userId} not found` });
+  };
   const RefundRequested: RefundRequestedEvent = j.event('RefundRequested', refundRequestedSchema);
   const RefundRequestedV2: RefundRequestedV2Event = j.event('RefundRequestedV2', refundRequestedV2Schema);
   const RefundApproved: RefundApprovedEvent = j.event('RefundApproved', refundApprovedSchema);
@@ -295,6 +324,8 @@ export function createRefundsJournal<
       if (!payment) {
         return CommandNotFound({ detail: `Payment ${input.paymentId} not found` });
       }
+      const noRequester = await missingUser(tx, input.requestedBy);
+      if (noRequester) return noRequester;
       // The same rule as `RefundService`: a refund pays back the payment's own money
       const paymentCurrency = payment.currency.toUpperCase();
       if (input.refundAmount.currency.code !== paymentCurrency) {
@@ -365,8 +396,11 @@ export function createRefundsJournal<
     'approveRefund',
     approveRefundInputSchema,
     { writes: [RefundApproved] },
-    (input, { write }) =>
-      write(refund, input.refundId, row => {
+    async (input, { tx, write }) => {
+      const noApprover = await missingUser(tx, input.approvedBy);
+      if (noApprover) return noApprover;
+
+      return write(refund, input.refundId, row => {
         const current = requireRefund(row, input.refundId);
         if (isFailure(current)) return current;
 
@@ -375,15 +409,19 @@ export function createRefundsJournal<
         }
 
         return [RefundApproved({ approvedBy: input.approvedBy, notes: input.notes ?? null })];
-      }),
+      });
+    },
   );
 
   const rejectRefund = j.command(
     'rejectRefund',
     rejectRefundInputSchema,
     { writes: [RefundRejected] },
-    (input, { write }) =>
-      write(refund, input.refundId, row => {
+    async (input, { tx, write }) => {
+      const noRejecter = await missingUser(tx, input.rejectedBy);
+      if (noRejecter) return noRejecter;
+
+      return write(refund, input.refundId, row => {
         const current = requireRefund(row, input.refundId);
         if (isFailure(current)) return current;
 
@@ -392,7 +430,8 @@ export function createRefundsJournal<
         }
 
         return [RefundRejected({ rejectedBy: input.rejectedBy, rejectionReason: input.rejectionReason })];
-      }),
+      });
+    },
   );
 
   const processRefund = j.command(

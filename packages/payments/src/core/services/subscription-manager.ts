@@ -5,7 +5,7 @@ import type { IdGenerationFailure } from '@arki/contracts';
 import type { FailureOf, Result } from '@arki/failure';
 import type { CommandNotFound } from '@arki/journal';
 import type { MoneyFailure } from '@arki/money';
-import { isFailure } from '@arki/failure';
+import { invariant, isFailure } from '@arki/failure';
 
 import type { CoreWrites } from '../journal.js';
 import type { JournalWriteFailure } from '../journal/support.js';
@@ -344,17 +344,23 @@ export class SubscriptionManager {
     });
   }
 
-  /** Trialing subscriptions whose period ends in the local calendar day `daysBeforeExpiration` days from now. */
+  /**
+   * Trialing subscriptions whose period (the trial) ends in the local calendar day
+   * `daysBeforeExpiration` days from now. `daysBeforeExpiration` is a whole number from 0 to 365 (a
+   * precondition: anything else throws).
+   */
   async handleTrialEndingSoon(daysBeforeExpiration = 3): Promise<Subscription[]> {
+    invariant(
+      Number.isInteger(daysBeforeExpiration) && daysBeforeExpiration >= 0 && daysBeforeExpiration <= 365,
+      '[@arki/payments] daysBeforeExpiration must be a whole number from 0 to 365',
+    );
     // Local-time calendar days, as before: the working values stay `Date`s until the query.
     const startDate = new Date();
     startDate.setDate(startDate.getDate() + daysBeforeExpiration - 1);
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + daysBeforeExpiration);
 
-    const subscriptions = await this.paymentRepository.findSubscriptionsEndingInRange(fromDate(startDate), fromDate(endDate));
-
-    return subscriptions.filter(sub => sub.status === 'trialing');
+    return this.paymentRepository.findSubscriptionsEndingInRange(fromDate(startDate), fromDate(endDate), 'trialing');
   }
 
   /** Every past due subscription. */
@@ -362,6 +368,7 @@ export class SubscriptionManager {
     return this.paymentRepository.findSubscriptionsByStatus('past_due');
   }
 
+  /** Subscription and revenue figures for the range. A time given falls in the years 1 to 9999 (a precondition: anything else throws an invariant failure). */
   async getSubscriptionAnalytics(startDate?: Instant, endDate?: Instant): Promise<SubscriptionAnalytics> {
     const subscriptions = await this.paymentRepository.getSubscriptionStats(startDate, endDate);
     const payments = await this.paymentRepository.getPaymentStats(startDate, endDate);
@@ -457,12 +464,20 @@ export class SubscriptionManager {
     });
   }
 
+  /**
+   * Whether the user may use the product: an `active` or `trialing` subscription (newest first)
+   * grants access, as `getEntitlement` does, and with `requiredTiers` its plan must be in one of
+   * them. Without one, `subscription` is the user's newest subscription, if any, and `reason` says why.
+   */
   async validateSubscriptionAccess(userId: UserId, requiredTiers: string[] = []): Promise<{
     hasAccess: boolean;
     subscription: Subscription | null;
     reason?: string;
   }> {
-    const subscription = await this.getActiveSubscription(userId);
+    const subscriptions = await this.paymentRepository.findSubscriptionsByUserId(userId);
+    const subscription =
+      subscriptions.find(candidate => candidate.status === 'active' || candidate.status === 'trialing') ??
+      subscriptions[0];
 
     if (!subscription) {
       return {

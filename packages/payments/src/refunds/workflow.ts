@@ -13,8 +13,10 @@
  * 4. `record`: completes or fails the row from what Stripe says. A refund still on its way throws, so the step's
  *    backoff asks Stripe again later. A refund Stripe fails after the row is `completed` stays completed: the run
  *    ends `completed` with `lateFailure`, the error is logged, and support is alerted.
- * 5. `notify`: tells the customer the refund is completed, or support that it failed. The mailer takes no key, so a
- *    crash after the send and before the checkpoint sends the mail a second time.
+ * 5. `notify`: tells the customer the refund is completed, or support that it failed. The refund is done either
+ *    way, so a mail that did not go out is not retried: its failure code is the run's `notificationFailure`, for an
+ *    operator screen to show and act on. The mailer takes no key, so a crash after the send and before the
+ *    checkpoint sends the mail a second time.
  *
  * Stripe's answers a caller must handle (`ReferenceNotFound`, `IdempotencyConflict`) are returned, so the step dies at
  * once: the run waits, stuck, for an operator (`journal.workflows.retryStep` or `resolveStep`). A throw is retried
@@ -113,6 +115,8 @@ export function createRefundWorkflow<
           outcome: z.enum(['completed', 'failed']),
           /** Set when Stripe failed the refund after the row was `completed`: Stripe's reason, or `unknown`. */
           lateFailure: z.string().optional(),
+          /** Set when the `notify` mail did not go out: the code of the failure the mailer returned. */
+          notificationFailure: z.string().optional(),
         }),
         needs: {
           /** The provider is built on the database the step runs on. */
@@ -296,20 +300,26 @@ export function createRefundWorkflow<
           results.record.errorMessage === null
             ? await notifications.sendRefundStatusUpdate?.(row, 'completed')
             : await notifications.sendRefundFailureAlert?.(row, new Error(results.record.errorMessage));
-        // The refund is done either way: a notification that did not go out is logged, not retried
+        // The refund is done either way: a mail that did not go out is reported in the run's output, not retried
         if (isFailure(sent)) {
           logger.warn('Refund {refundId} notification was not sent: {code}', {
             refundId: row.id,
             code: sent.code,
             failure: sent,
           });
+          return sent.code;
         }
 
         return null;
       })
       .finish(({ results }) => {
         const { providerRefundId, outcome, lateFailure } = results.record;
-        return lateFailure === null ? { providerRefundId, outcome } : { providerRefundId, outcome, lateFailure };
+        return {
+          providerRefundId,
+          outcome,
+          ...(lateFailure === null ? {} : { lateFailure }),
+          ...(results.notify === null ? {} : { notificationFailure: results.notify }),
+        };
       })
   );
 }

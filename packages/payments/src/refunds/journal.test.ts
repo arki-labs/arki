@@ -34,6 +34,7 @@ import type { RefundCurrencyMismatch } from './failures.js';
 import type { RefundWrites } from './journal.js';
 import type { RefundId } from './primitives.js';
 import { createPaymentId } from '../core/primitives.js';
+import { userIdFactory } from '../core/user-id.js';
 import {
   adminId,
   countEvents,
@@ -683,3 +684,49 @@ function rejectsATableWithoutVersion() {
   createRefundsJournal(plain.j, { refunds: legacyRefunds, payments: core.payments });
 }
 void rejectsATableWithoutVersion;
+
+describe('a refund command that names no user', () => {
+  // The user columns point at the app's users table; an unknown user used to come back as db.transaction_rejected with a raw 23503
+  it('requestRefund, approveRefund and rejectRefund return journal.not_found and write nothing', async () => {
+    const nobody = orThrow(userIdFactory.create());
+    const notFound = { code: 'journal.not_found', data: { detail: `User ${nobody} not found` } };
+    const eventsBefore = await countEvents(db);
+
+    expect(await journal.run(db, commands.requestRefund, { ...request(), requestedBy: nobody }, meta)).toMatchObject(notFound);
+    const refundId = await seed('pending');
+    const afterSeed = await countEvents(db);
+    expect(afterSeed).toBe(eventsBefore + 1);
+    expect(await journal.run(db, commands.approveRefund, { refundId, approvedBy: nobody }, meta)).toMatchObject(notFound);
+    expect(
+      await journal.run(db, commands.rejectRefund, { refundId, rejectedBy: nobody, rejectionReason: 'no' }, meta),
+    ).toMatchObject(notFound);
+
+    expect(await countEvents(db)).toBe(afterSeed);
+    expect(await rowOf(refundId)).toMatchObject({ status: 'pending', approvedBy: null, rejectedBy: null });
+  });
+});
+
+describe('refund command text Postgres cannot store', () => {
+  const nul = 'a\u0000b';
+
+  // U+0000 used to pass the command schema and fail the event's jsonb insert as db.transaction_rejected (22P05)
+  it('is refused as schema.invalid_input by every command that stores text, and nothing is written', async () => {
+    const eventsBefore = await countEvents(db);
+    for (const field of ['customerNote', 'internalNotes', 'metadata'] as const) {
+      const refused = await journal.run(db, commands.requestRefund, { ...request(), [field]: nul }, meta);
+      expect(InvalidInput.is(refused) && refused.data.issues[0]?.path).toEqual([field]);
+    }
+    const refundId = await seed('pending');
+    const afterSeed = await countEvents(db);
+    expect(afterSeed).toBe(eventsBefore + 1);
+
+    expect(await journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId, notes: nul }, meta)).toMatchObject({
+      code: InvalidInput.code,
+    });
+    expect(
+      await journal.run(db, commands.rejectRefund, { refundId, rejectedBy: adminId, rejectionReason: nul }, meta),
+    ).toMatchObject({ code: InvalidInput.code });
+    expect(await countEvents(db)).toBe(afterSeed);
+    expect(await rowOf(refundId)).toMatchObject({ status: 'pending' });
+  });
+});

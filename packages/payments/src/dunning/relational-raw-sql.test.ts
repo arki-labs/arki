@@ -15,10 +15,12 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
+import { orThrow } from '@arki/failure';
 
 import type { CustomerSegmentId } from './primitives.js';
 import type { CustomerRiskProfile } from './types.js';
 import { core, customerId, schema, userId, users } from '../test-support.js';
+import { createCustomerSegmentId } from './primitives.js';
 import { createDunningRepository } from './repository.js';
 import { createDunningTables } from './tables.js';
 
@@ -132,19 +134,21 @@ describe('customer risk profile queries', () => {
 
 describe('campaign and segment queries', () => {
   it('findActiveForTrigger filters on the jsonb trigger type and target segments', async () => {
+    const targeted = orThrow(createCustomerSegmentId());
+    const other = orThrow(createCustomerSegmentId());
     await db.insert(dunning.dunningCampaigns).values({
       name: 'Retry',
       type: 'payment_failed',
       status: 'active',
       trigger: { type: 'payment_failure', conditions: {} },
       settings,
-      targetSegments: ['seg_a'],
+      targetSegments: [targeted],
       createdBy: 'usr_admin',
     });
 
     expect(await repositories.campaigns.findActiveForTrigger('payment_failure')).toHaveLength(1);
-    expect(await repositories.campaigns.findActiveForTrigger('payment_failure', ['seg_a'])).toHaveLength(1);
-    expect(await repositories.campaigns.findActiveForTrigger('payment_failure', ['seg_b'])).toEqual([]);
+    expect(await repositories.campaigns.findActiveForTrigger('payment_failure', [targeted])).toHaveLength(1);
+    expect(await repositories.campaigns.findActiveForTrigger('payment_failure', [other])).toEqual([]);
     expect(await repositories.campaigns.findActiveForTrigger('manual')).toEqual([]);
   });
 
