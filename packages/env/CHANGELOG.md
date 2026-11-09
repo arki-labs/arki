@@ -1,5 +1,13 @@
 # @arki/env
 
+## 0.2.1
+
+### Patch Changes
+
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- 4f24c6d: Span status now follows one rule. A returned failure always sets `failure.code`. It sets the span status to error only when `isFault(failure)` is true (status 500 or higher). An expected outcome (a 4xx, such as a missing record, a held lock or a declined card) leaves the status unset, so alerts on span errors fire only for faults. Thrown errors still set the error status. `@arki/env` and `@arki/schedule` now set `failure.code`, which they did not before. `@arki/payments` used to leave the status unset for every returned failure; a 5xx now sets error. `@arki/async`: `Cancelled` (499) no longer marks the span as an error.
+- 53d25f7: The README has an `## Observability` section: the `env.*` spans of `@arki/env/node`, the `env.operation.duration` histogram, and why pure parts have no span. No code change.
+
 ## 0.2.0
 
 ### Minor Changes

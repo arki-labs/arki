@@ -1,5 +1,11 @@
 # @arki/cli
 
+## 0.2.1
+
+### Patch Changes
+
+- 4f24c6d: Each package README now records what it instruments, including why these packages need no spans.
+
 ## 0.2.0
 
 ### Minor Changes
