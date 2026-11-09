@@ -229,3 +229,13 @@ describe('generic civil helpers', () => {
     expect(zFirst.toString()).toBe('2026-05-01T00:00:00+03:00[Europe/Bucharest]');
   });
 });
+
+// Why: the README Limits section promises this; a caller near Temporal's range must get the documented
+// RangeError, not a wrong date.
+describe('startOf / endOf at the edge of Temporal range (audit-2 noticed)', () => {
+  it('throws RangeError when the start or end of the unit is outside the range', () => {
+    expect(() => startOf(plainDate('-271821-04-19'), 'year')).toThrow(RangeError);
+    expect(() => endOf(plainDate('+275760-09-13'), 'year')).toThrow(RangeError);
+    expect(startOf(plainDate('-271821-04-19'), 'day').toString()).toBe('-271821-04-19');
+  });
+});

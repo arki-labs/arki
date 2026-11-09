@@ -113,6 +113,23 @@ describe('framing', () => {
     expect(statuses).toEqual(['connecting', 'live']);
   });
 
+  it('reads one long line sent in many small chunks in one pass', async () => {
+    // Why: the body is the server's text. A line with no end yet was read again with every chunk, so one long
+    // frame in small chunks cost its length times the chunk count (seconds for 2 MB); it must cost one pass.
+    const long = { ...hello(), manifest: [{ path: ['x'.repeat(2 * 1024 * 1024)], reads: [{ schema: 'public', table: 'posts' }] }] };
+    const text = frame(long);
+    const chunks: string[] = [];
+    for (let at = 0; at < text.length; at += 1024) chunks.push(text.slice(at, at + 1024));
+    const { fetch } = scriptedFetch([() => sse(body(chunks))]);
+    const started = performance.now();
+    const { events, statuses } = client(fetch);
+    // Each chunk is a separate read: let the reads run until the frame is handed out.
+    for (let turn = 0; turn < chunks.length && events.length === 0; turn += 1) await vi.advanceTimersByTimeAsync(0);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(statuses).toEqual(['connecting', 'live']);
+    expect(events).toEqual([long]);
+  });
+
   it('an error frame or a malformed frame reconnects after a backoff, with the last good cursor', async () => {
     const { fetch, urls } = scriptedFetch([
       () => sse(body([frame(hello()), 'event: error\ndata: {"code":"X"}\n\n'])),

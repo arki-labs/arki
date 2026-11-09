@@ -129,4 +129,14 @@ describe('parseISO — failure codes', () => {
     expect(InvalidDateText.is(failure) ? failure.data.input.length : undefined).toBe(64);
     expect(InvalidDateText.is(failure) && failure.data.truncated).toBe(true);
   });
+
+  // Why: parseISO is a door for outside text. Time text full of `-` with a line break at the end made the zone
+  // pattern read to the end again from every `-` (seconds per 100 KB); it must take one pass.
+  it('rejects a large time text of offset signs ending in a line break in one pass', () => {
+    const text = `2026-05-20T10${'-a'.repeat(500_000)}\n`;
+    const started = Date.now();
+    const result = parseISOResult(text);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(InvalidDateText.is(result) && result.data.reason).toBe('not_iso');
+  });
 });

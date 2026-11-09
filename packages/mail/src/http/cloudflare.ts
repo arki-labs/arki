@@ -16,7 +16,7 @@ import type { FetchFn } from './post-json.js';
 import { MailRejected } from '../failures.js';
 import { listOf } from '../message.js';
 import { traceTransport } from '../telemetry.js';
-import { badResponse, everyRecipient, logged, rejection, unsupported } from '../transport-failures.js';
+import { badResponse, checkTimeoutMs, everyRecipient, logged, rejection, unsupported } from '../transport-failures.js';
 import { cloudflareAnswerSchema, codeText, readAnswer } from './answers.js';
 import { postJson } from './post-json.js';
 
@@ -70,6 +70,7 @@ function outcomesOf(result: CloudflareResult): readonly RecipientOutcome[] {
  */
 export function cloudflare(options: CloudflareOptions): MailTransport {
   const id = options.id ?? 'cloudflare';
+  checkTimeoutMs(id, options.timeoutMs);
   const fetchFn = options.fetch ?? globalThis.fetch;
   const url = `${CLOUDFLARE_API_BASE}/accounts/${encodeURIComponent(options.accountId)}/email/sending/send`;
   return traceTransport('cloudflare', {

@@ -56,6 +56,7 @@ import {
   withClientKey,
   withoutCallerClientKey,
   withoutClientKey,
+  withoutTrailingSlashes,
 } from './security/client-key.js';
 import { kvRateLimitStorage } from './security/kv-storage.js';
 import { createSessions } from './sessions.js';
@@ -520,7 +521,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
         ? await withClientKey(incoming, { path: enginePath(incoming), userIdOf })
         : await withoutCallerClientKey(incoming);
     const path = enginePath(request);
-    if (closedPaths.has(path.replace(/\/+$/, ''))) return new Response(null, { status: 404 });
+    if (closedPaths.has(withoutTrailingSlashes(path))) return new Response(null, { status: 404 });
     const method = signInMethodOf(path, resolved.methods);
     const before = path === '/sign-out' || path === '/change-password' ? await principalOrNull(request.headers) : null;
 

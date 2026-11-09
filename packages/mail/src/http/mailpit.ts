@@ -10,7 +10,7 @@ import type { MailTransport } from '../types.js';
 import type { FetchFn } from './post-json.js';
 import { listOf } from '../message.js';
 import { traceTransport } from '../telemetry.js';
-import { badResponse, everyRecipient, logged, rejection } from '../transport-failures.js';
+import { badResponse, checkTimeoutMs, everyRecipient, logged, rejection } from '../transport-failures.js';
 import { mailpitRefusalSchema, mailpitSentSchema, readAnswer } from './answers.js';
 import { postJson } from './post-json.js';
 
@@ -41,6 +41,7 @@ function contactOf(address: string): { readonly Email: string; readonly Name?: s
  */
 export function mailpit(options: MailpitOptions): MailTransport {
   const id = options.id ?? 'mailpit';
+  checkTimeoutMs(id, options.timeoutMs);
   const fetchFn = options.fetch ?? globalThis.fetch;
   const url = `${options.baseUrl.replace(/\/+$/, '')}/api/v1/send`;
   return traceTransport('mailpit', {

@@ -19,9 +19,26 @@ const execFile = promisify(execFileCallback);
 
 const postDirectory = 'src/content/posts';
 
-function calculateReadingTime(content: string) {
-  const contentWithoutSvg = content.replaceAll(/<svg.+?(?=<\/svg>)<\/svg>/gs, '');
-  return readingTime(contentWithoutSvg).text;
+/** @internal The reading time of a post, inline `<svg>…</svg>` blocks left out. */
+export function calculateReadingTime(content: string) {
+  return readingTime(withoutSvg(content)).text;
+}
+
+/**
+ * `content` without its `<svg>…</svg>` blocks: each `<svg` up to the first `</svg>` after it, as
+ * `/<svg.+?(?=<\/svg>)<\/svg>/gs` removed them, in one pass. That pattern read on to the end from every `<svg`
+ * with no `</svg>` after it, so a post with many of them cost a pass per tag.
+ */
+function withoutSvg(content: string): string {
+  let kept = '';
+  let copied = 0;
+  for (let open = content.indexOf('<svg'); open !== -1; open = content.indexOf('<svg', copied)) {
+    const close = content.indexOf('</svg>', open + '<svg'.length + 1);
+    if (close === -1) break;
+    kept += content.slice(copied, open);
+    copied = close + '</svg>'.length;
+  }
+  return kept + content.slice(copied);
 }
 
 /**

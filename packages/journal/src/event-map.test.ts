@@ -197,6 +197,24 @@ describe('scanEntrypoints({ root })', () => {
     expect(named('shop/entrypoints/typed.ts')).toEqual([]);
   });
 
+  // Why: the scan reads the app's own files, and file contents are outside text. A run of `import` lines with no
+  // quote, or of `{` and spaces inside a clause, must cost one pass, not one pass per line (it took seconds per 100 KB).
+  it('reads a large file of unclosed import lines, braces and spaces in one pass', async () => {
+    const run = 200_000;
+    const root = await sandbox({
+      'shop/usecases/two.mjs': `${aCommand('one')}\n${aCommand('two')}`,
+      'shop/entrypoints/flood.mjs': [
+        `import { one, x${' '.repeat(run)}y, two } from '../usecases/two.mjs';`,
+        `import ${'{'.repeat(run)} from './missing.mjs';`,
+        'import {\n'.repeat(run),
+      ].join('\n'),
+    });
+    const started = performance.now();
+    const scan = await scanEntrypoints({ root });
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(scan.entries[0]?.commands.map(command => command.name)).toEqual(['one', 'two']);
+  });
+
   // Why: the scan decides by shape. A value that has a name and a handler but no event list, or an event list of
   // plain strings, is not a journal command, and drawing it would invent an edge.
   it('keeps only values with a name, a list of event definitions and a handler', async () => {
@@ -292,5 +310,30 @@ describe('checkEventMapFile({ file, mermaid, update })', () => {
       state: 'stale',
       diff: '-   a --> b\n+   a --> c',
     });
+  });
+});
+
+/** A 70,000-line Mermaid text whose lines are `  <prefix><n> --> x`. */
+const lines = (prefix: string) => Array.from({ length: 70_000 }, (_, index) => `  ${prefix}${index} --> x`).join('\n');
+
+describe('checkEventMapFile({ file, mermaid }) on large files (audit-2 #11)', () => {
+
+  // Why: the diff once filled before × after cells, so two 70,000-line maps rejected with a raw RangeError
+  // (and ~20,000 lines each ran out of memory) instead of reporting a stale file.
+  it('reports two large, wholly different texts as stale with a one-line summary', async () => {
+    const folder = await sandbox({ 'map.mmd': lines('a') });
+    const checked = await checkEventMapFile({ file: path.join(folder, 'map.mmd'), mermaid: lines('b') });
+    expect(checked).toEqual({
+      state: 'stale',
+      diff: '~ 70000 lines on disk differ from 70000 new lines, from line 1; too many to diff line by line. Run with update: true to rewrite the file.',
+    });
+  });
+
+  it('still shows the exact changed line when a large file differs in one line', async () => {
+    const before = lines('a');
+    const folder = await sandbox({ 'map.mmd': before });
+    const after = before.replace('  a35000 --> x', '  a35000 --> y');
+    const checked = await checkEventMapFile({ file: path.join(folder, 'map.mmd'), mermaid: after });
+    expect(checked).toEqual({ state: 'stale', diff: '-   a35000 --> x\n+   a35000 --> y' });
   });
 });

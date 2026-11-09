@@ -85,6 +85,25 @@ describe('./cohere rerankers', () => {
     expect(isFailure(result) && result.data).toMatchObject({ index: 1 });
   });
 
+  // Why: the error body is the server's answer, which is outside text. A long body of `max` with no `.` made the
+  // context-length pattern read on from every `max`; it must take one pass and still find `max … tokens`.
+  it('a large 400 body of max words is read in one pass', async () => {
+    const flood = 'max '.repeat(250_000);
+    const started = performance.now();
+    const results = await Promise.all(
+      [flood, `${flood}tokens`].map(body =>
+        rerank(compatible(stubRerankFetch(() => new Response(body, { status: 400 })).fetch), 'q', ['d'], {
+          text: item => item,
+        }),
+      ),
+    );
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(results.map(result => isFailure(result) && result.code)).toEqual([
+      'embeddings.invalid_output',
+      'embeddings.input_too_long',
+    ]);
+  });
+
   it('a compatible server without a URL scheme or with an empty key is refused at create', () => {
     for (const options of [
       { baseURL: '127.0.0.1:7997', id: 'm' },

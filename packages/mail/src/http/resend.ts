@@ -9,7 +9,7 @@ import type { MailTransport } from '../types.js';
 import type { FetchFn } from './post-json.js';
 import { listOf } from '../message.js';
 import { traceTransport } from '../telemetry.js';
-import { badResponse, everyRecipient, logged, rejection } from '../transport-failures.js';
+import { badResponse, checkTimeoutMs, everyRecipient, logged, rejection } from '../transport-failures.js';
 import { readAnswer, resendRefusalSchema, resendSentSchema } from './answers.js';
 import { postJson } from './post-json.js';
 
@@ -34,6 +34,7 @@ export type ResendOptions = {
  */
 export function resend(options: ResendOptions): MailTransport {
   const id = options.id ?? 'resend';
+  checkTimeoutMs(id, options.timeoutMs);
   const fetchFn = options.fetch ?? globalThis.fetch;
   return traceTransport('resend', {
     id,

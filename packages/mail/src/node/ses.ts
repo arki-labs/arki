@@ -16,7 +16,15 @@ import { readAnswer, sesErrorSchema, sesResponseHeadersSchema } from '../http/an
 import { errorField } from '../log.js';
 import { listOf } from '../message.js';
 import { traceTransport } from '../telemetry.js';
-import { everyRecipient, logged, rejection, requestSignal, retryAfterMs, uncertain } from '../transport-failures.js';
+import {
+  checkTimeoutMs,
+  everyRecipient,
+  logged,
+  rejection,
+  requestSignal,
+  retryAfterMs,
+  uncertain,
+} from '../transport-failures.js';
 
 export type SesOptions = {
   /** Default `'ses'`. */
@@ -82,6 +90,7 @@ function retryAfter(error: unknown): number | undefined {
  */
 export function ses(options: SesOptions): MailTransport {
   const id = options.id ?? 'ses';
+  checkTimeoutMs(id, options.timeoutMs);
   const loadSdk = once(async () => {
     const { SESv2Client, SendEmailCommand } = await import('@aws-sdk/client-sesv2');
     const client = new SESv2Client({

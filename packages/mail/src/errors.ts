@@ -6,7 +6,8 @@
 
 export const MAIL_ERROR_CODES = {
   /**
-   * No transport, a duplicate transport id, an empty key or sender, a transport SDK that cannot load.
+   * No transport, a duplicate transport id, an empty key or sender, a transport SDK that cannot load,
+   * a transport `timeoutMs` that is not more than 0 and at most 2^31 - 1.
    *
    * @fix Pass one transport with a unique id and a sender, and install the transport's SDK peer.
    * @verify bun run test -- src/mailer.spec.ts

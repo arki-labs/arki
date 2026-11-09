@@ -46,8 +46,22 @@ export type MailSink = MailTransport & {
   clear(): void;
 };
 
-/** `a@b` from `Name <a@b>`, lower-cased. */
-const mailboxOf = (address: string): string => (/<([^>]+)>/.exec(address)?.[1] ?? address).trim().toLowerCase();
+/**
+ * `a@b` from `Name <a@b>`, lower-cased: the text between the first `<` that a `>` closes with something between,
+ * as `/<([^>]+)>/` read it, in one pass (that pattern read on from every `<` of a long unclosed run).
+ */
+function mailboxOf(address: string): string {
+  for (let open = address.indexOf('<'); open !== -1; open = address.indexOf('<', open + 1)) {
+    const close = address.indexOf('>', open + 1);
+    if (close === -1) break;
+    if (close > open + 1)
+      return address
+        .slice(open + 1, close)
+        .trim()
+        .toLowerCase();
+  }
+  return address.trim().toLowerCase();
+}
 
 /** A transport that sends nothing and records each mail, reported as `simulated`. */
 export function mailSink(): MailSink {

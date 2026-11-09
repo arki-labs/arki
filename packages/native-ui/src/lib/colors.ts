@@ -51,10 +51,11 @@ export function hexToRgba(hex: string, alpha = 1): string {
  * @param hex - `#rgb`, `#rrggbb` or `#rrggbbaa`
  * @param percent - Percentage to lighten (0-100)
  * @returns Lightened `#rrggbb` color (`#rrggbbaa` when the input had an alpha pair)
- * @throws RangeError when `hex` is not a hex color (see `isValidHexColor`)
+ * @throws RangeError when `hex` is not a hex color (see `isValidHexColor`), or when `percent` is not finite
  */
 export function lightenColor(hex: string, percent: number): string {
   const { r, g, b } = readHex(hex);
+  if (!Number.isFinite(percent)) throw new RangeError(`Expected a finite percent, got ${String(percent)}`);
   const amount = Math.round(2.55 * percent);
   const shift = (channel: number): string => toHexPair(Math.min(255, Math.max(0, channel + amount)));
   const alphaPair = hex.length === 9 ? hex.slice(7) : '';
@@ -66,7 +67,7 @@ export function lightenColor(hex: string, percent: number): string {
  * @param hex - `#rgb`, `#rrggbb` or `#rrggbbaa`
  * @param percent - Percentage to darken (0-100)
  * @returns Darkened `#rrggbb` color (`#rrggbbaa` when the input had an alpha pair)
- * @throws RangeError when `hex` is not a hex color (see `isValidHexColor`)
+ * @throws RangeError when `hex` is not a hex color (see `isValidHexColor`), or when `percent` is not finite
  */
 export function darkenColor(hex: string, percent: number): string {
   return lightenColor(hex, -percent);

@@ -216,7 +216,7 @@ How a service's answer maps:
 | 2xx that cannot be read          | `MailUncertain`, with `data.upstreamStatus`                             | yes                            |
 | a field the service cannot carry | throws `MailError` `E005`, before any request                           | no                             |
 
-`MailRejected` carries the service's HTTP status as `data.upstreamStatus`, its own error code as `data.providerCode`, what it said as `data.detail`, and its `Retry-After` as `data.retryAfterMs`; the outbox waits at least that long before the next try. Every HTTP transport and `ses` take `timeoutMs` (default 30 000); a request that runs out of time is `MailUncertain` with `data.reason: 'timeout'`.
+`MailRejected` carries the service's HTTP status as `data.upstreamStatus`, its own error code as `data.providerCode`, what it said as `data.detail`, and its `Retry-After` as `data.retryAfterMs`; the outbox waits at least that long before the next try. Every HTTP transport and `ses` take `timeoutMs` (default 30 000; more than 0 and at most 2 147 483 647, or building the transport throws `MailError` `ARKI_MAIL_E001`); a request that runs out of time is `MailUncertain` with `data.reason: 'timeout'`.
 
 A message id is the provider's, or `null` when it gives none. It is never made up.
 

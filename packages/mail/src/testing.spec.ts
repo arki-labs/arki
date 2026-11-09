@@ -49,6 +49,19 @@ describe('mailSink', () => {
     expect(sink.sentTo('ada@example.com').map(record => record.message.subject)).toEqual(['a', 'b']);
   });
 
+  // Why: a recipient is often an address a user typed. A long run of `<` with no `>` made the mailbox pattern read
+  // on from every `<`; looking a mail up must take one pass.
+  it('sentTo reads a large unclosed address in one pass', async () => {
+    const { sink, mail } = setup();
+    const flood = `${'<'.repeat(500_000)}ada@example.com`;
+    await orThrow(mail.sendRaw({ to: flood, subject: 'a', text: 'a' }));
+    await orThrow(mail.sendRaw({ to: 'Ada <> <Ada@Example.com>', subject: 'b', text: 'b' }));
+    const started = performance.now();
+    const found = sink.sentTo('ada@example.com');
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(found.map(record => record.message.subject)).toEqual(['b']);
+  });
+
   it('failNext fails exactly the next send, which is not recorded', async () => {
     const { sink, mail } = setup();
     sink.failNext(MailUncertain({ transport: 'sink', detail: 'timed out' }));

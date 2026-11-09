@@ -144,6 +144,7 @@ Pure computation: no I/O, so no spans or metrics.
 - The default locale is `en-US`, so a server and a client agree. Pass your app's locale.
 - `systemTimeZone()` reads the runtime zone. Never let a server's zone leak into output: pass the user's zone.
 - `parseISO` is a legacy door with date-fns semantics: zone-less text is read in local time.
+- Temporal holds dates from `-271821-04-19` to `+275760-09-13`. `startOf` and `endOf` throw `RangeError` when the start or end of the unit falls outside that range: `startOf(plainDate('-271821-04-19'), 'year')` and `endOf(plainDate('+275760-09-13'), 'year')` both throw.
 
 ## The five value types
 

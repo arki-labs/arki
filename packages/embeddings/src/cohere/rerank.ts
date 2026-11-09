@@ -110,6 +110,24 @@ type Wire = {
   readonly maxTokensPerDoc?: number;
 };
 
+const TOO_LONG = /context length|too (?:large|long)/i;
+const MAX_WORD = /max(?:imum)? /i;
+
+/**
+ * Whether an error body says the input is over the context: `context length`, `too large` or `too long`, or `max`
+ * (`maximum`) and later `tokens` with no `.` between. What `/…|max(?:imum)? [^.]*tokens/i` matched, in one pass:
+ * that pattern read on to the next `.` from every `max`, quadratic on a long answer without one.
+ */
+function saysTooLong(text: string): boolean {
+  if (TOO_LONG.test(text)) return true;
+  for (const sentence of text.split('.')) {
+    // The first `max` of a sentence leaves the most text after it, so it is the only one to check.
+    const max = MAX_WORD.exec(sentence);
+    if (max !== null && /tokens/i.test(sentence.slice(max.index + max[0].length))) return true;
+  }
+  return false;
+}
+
 /** The longest document as `InputTooLong`: the protocol names neither the document nor its count. */
 function longestTooLong(query: string, documents: readonly string[], max: number) {
   const lengths = documents.map(document => document.length);
@@ -159,10 +177,7 @@ function protocolReranker(wire: Wire): Reranker {
       if (response.status === 404) return ModelUnavailable({ model: wire.id, reason: 'unknown-model' });
       if (response.status === 503) return ModelUnavailable({ model: wire.id, reason: 'unreachable' });
       // vLLM: "This model's maximum context length is 512 tokens"; llama.cpp: "input is too large to process".
-      if (
-        (response.status === 400 || response.status === 422) &&
-        /context length|too (?:large|long)|max(?:imum)? [^.]*tokens/i.test(text)
-      ) {
+      if ((response.status === 400 || response.status === 422) && saysTooLong(text)) {
         return longestTooLong(query, documents, wire.maxInputTokens);
       }
       // A server fault is worth another try: it is the same unreachable failure a dropped connection is.

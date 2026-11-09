@@ -102,6 +102,16 @@ describe('coolify-conformance: fixture replay', () => {
     const probe = orThrow(await client.probeVersion());
     expect(probe.supported).toBe(false);
   });
+
+  // Why: the version body is the Coolify server's answer, which is outside text. A long run of digits with no
+  // `.x.y` after it made the version pattern read the run again from every digit; it must take one pass.
+  it('reads a large version body of digits in one pass and still finds the version after it', async () => {
+    const { client } = clientFor({ '/api/v1/version': { body: `${'8'.repeat(500_000)} then 1v4.1.2`, text: true } });
+    const started = performance.now();
+    const probe = orThrow(await client.probeVersion());
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect([probe.major, probe.supported]).toEqual([4, true]);
+  });
 });
 
 describe('coolify-conformance: schema drift', () => {

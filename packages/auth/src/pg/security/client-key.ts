@@ -100,7 +100,7 @@ async function accountOf(
     const userId = await userIdOf(headers);
     if (userId !== undefined) return `user:${userId}`;
   }
-  if (!EMAIL_ACCOUNT_PATHS.has(path.replace(/\/+$/, ''))) return undefined;
+  if (!EMAIL_ACCOUNT_PATHS.has(withoutTrailingSlashes(path))) return undefined;
   const email = emailOf(body, headers.get('content-type'));
   return email === undefined ? undefined : `email:${email}`;
 }
@@ -142,4 +142,15 @@ export async function withClientKey(request: Request, { path, userIdOf }: Client
     headers.set(CLIENT_KEY_HEADER, address);
   }
   return new Request(request.url, { method: request.method, headers, body, signal: request.signal });
+}
+
+/**
+ * `path` without its trailing slashes, in one pass. `path.replace(/\/+$/, '')` restarts its scan at
+ * every slash of a long run that does not end the path, which is quadratic on a request path a
+ * caller chooses.
+ */
+export function withoutTrailingSlashes(path: string): string {
+  let end = path.length;
+  while (end > 0 && path[end - 1] === '/') end -= 1;
+  return end === path.length ? path : path.slice(0, end);
 }

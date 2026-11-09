@@ -63,6 +63,8 @@ const checks = [
   ["lighten refuses non-hex text", throwsRange(() => lightenColor("zzz", 10)), "RangeError"],
   ["darken refuses text without #", throwsRange(() => darkenColor("aabbcc", 10)), "RangeError"],
   ["hex to rgba refuses non-hex text", throwsRange(() => hexToRgba("red")), "RangeError"],
+  ["lighten refuses a NaN percent", throwsRange(() => lightenColor("#336699", Number.NaN)), "RangeError"],
+  ["darken refuses an infinite percent", throwsRange(() => darkenColor("#336699", Number.POSITIVE_INFINITY)), "RangeError"],
   [
     "lighten and darken are inverse at the ends",
     `${lightenColor("#000000", 100)}/${darkenColor("#ffffff", 100)}`,

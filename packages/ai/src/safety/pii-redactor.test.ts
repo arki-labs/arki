@@ -64,15 +64,22 @@ describe('PIIRedactor default email and street-address patterns (audit-2 #10)', 
 
   // Why: a pattern that backtracks over the whole text from every start blocked the event loop for ~33 s on
   // 256 KB of '1 ', so one pasted log could stall the server.
-  it.each([
-    ['1 ', '1 '.repeat(131_072)],
-    ['a.', 'a.'.repeat(131_072)],
-    ['aa.', 'aa.'.repeat(87_381)],
-  ])('256 KB of %j with no PII is scanned in under a second', (_name, text) => {
+  // Before the fix 256 KB of '1 ' took about 33 s: the time grew with the square of the length. Linear
+  // scanning costs about 4x the time for 4x the text; quadratic costs 16x. Comparing two lengths keeps the
+  // check true on a loaded machine, where any fixed time limit is not.
+  function scanMs(text: string): number {
     const started = performance.now();
     expect(redactor.hasPII(text)).toBe(false);
     expect(redactor.detect(text)).toEqual([]);
     expect(redactor.redact(text).piiCount).toBe(0);
-    expect(performance.now() - started).toBeLessThan(1000);
+    return performance.now() - started;
+  }
+
+  it.each(['1 ', 'a.', 'aa.'])('text of %j with no PII scans in time that grows linearly with its length', unit => {
+    const small = unit.repeat(Math.ceil(65_536 / unit.length));
+    const large = unit.repeat(Math.ceil(262_144 / unit.length));
+    scanMs(small);
+    const smallMs = Math.max(scanMs(small), 5);
+    expect(scanMs(large) / smallMs).toBeLessThan(10);
   });
 });

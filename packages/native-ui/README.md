@@ -93,7 +93,7 @@ The version column says which proof ran: `runner + iOS release app`, or `runner 
 
 ## Failure behaviour
 
-None of the helpers throws on normal input. `isValidHexColor` returns a boolean. Components follow React Native: bad props are a type error, not a runtime failure.
+None of the helpers throws on normal input. `isValidHexColor` returns a boolean. `hexToRgba`, `lightenColor` and `darkenColor` throw `RangeError` for text that is not a hex color; `lightenColor` and `darkenColor` also throw it for a percent that is not finite (`NaN`, `Infinity`). Components follow React Native: bad props are a type error, not a runtime failure.
 
 ## Observability
 

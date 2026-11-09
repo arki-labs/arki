@@ -8,7 +8,6 @@ import { epochFromWall } from './offsets.js';
 
 const DATE_TIME_DELIMITER = /[T ]/;
 const TIME_ZONE_DELIMITER = /[Z ]/i;
-const TIME_ZONE = /([Z+-].*)$/;
 const YEAR = /^(?:(\d{4}|[+-]\d{6})|(\d{2}|[+-]\d{4})$)/;
 const DATE = /^-?(?:(\d{3})|(\d{2})(?:-?(\d{2}))?|W(\d{2})(?:-?(\d))?)?$/;
 const TIME = /^(\d{2}(?:[.,]\d*)?)(?::?(\d{2}(?:[.,]\d*)?))?(?::?(\d{2}(?:[.,]\d*)?))?$/;
@@ -36,7 +35,7 @@ function splitText(text: string): Pieces {
     }
   }
   if (timeText !== undefined && timeText !== '') {
-    const zone = TIME_ZONE.exec(timeText)?.[1];
+    const zone = zoneOf(timeText);
     if (zone === undefined) {
       pieces.time = timeText;
     } else {
@@ -45,6 +44,24 @@ function splitText(text: string): Pieces {
     }
   }
   return pieces;
+}
+
+/** The line terminators `.` does not match. */
+const LINE_BREAKS = '\n\r\u2028\u2029';
+
+/**
+ * The zone part of the time text: from its first `Z`, `+` or `-` after the last line break to the end, or
+ * `undefined`. What `/([Z+-].*)$/` captured, in one pass: that pattern read to the end again from every `Z`, `+`
+ * and `-` (`.` stops at a line break, so it only matches after the last one).
+ */
+function zoneOf(timeText: string): string | undefined {
+  let index = timeText.length - 1;
+  while (index >= 0 && !LINE_BREAKS.includes(timeText.charAt(index))) index -= 1;
+  for (index += 1; index < timeText.length; index += 1) {
+    const char = timeText.charAt(index);
+    if (char === 'Z' || char === '+' || char === '-') return timeText.slice(index);
+  }
+  return undefined;
 }
 
 function parseYear(text: string): { year: number; rest: string } {

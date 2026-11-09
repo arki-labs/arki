@@ -36,7 +36,9 @@ const ICON_MODULE_SUFFIX = '.es.js';
  * style, braces spanning any number of lines. Default and namespace imports
  * are not in use for these modules and stay untouched.
  */
-const ICON_IMPORT = /import\s*\{([^}]*)\}\s*from\s*(['"])(@arki\/icons\/phosphor|@phosphor-icons\/react)\2\s*;?/g;
+const ICON_IMPORT_START = /import\s*\{/g;
+/** What follows the `}` of an icon import: `from`, the quoted source, an optional `;`. Read at one index only. */
+const ICON_IMPORT_TAIL = /\s*from\s*(['"])(@arki\/icons\/phosphor|@phosphor-icons\/react)\1\s*;?/y;
 
 /** Every icon that has its own module under `dist/csr`, by base name (`Heart`, not `HeartIcon`). */
 export function phosphorIconNames(): ReadonlySet<string> {
@@ -56,7 +58,8 @@ function iconModuleOf(name: string, icons: ReadonlySet<string>): string | undefi
 
 /** The imported name of a specifier: `Heart as H` → `Heart`. */
 function importedNameOf(specifier: string): string {
-  return specifier.replace(/\s+as\s+[\w$]+$/, '');
+  // Tried only where a whitespace run starts, so a long run of spaces is read once, not once per space.
+  return specifier.replace(/(?<!\s)\s+as\s+[\w$]+$/, '');
 }
 
 /**
@@ -64,29 +67,66 @@ function importedNameOf(specifier: string): string {
  * give the same output, and code without icon imports comes back unchanged.
  */
 export function rewriteIconImports(code: string, icons: ReadonlySet<string>): string {
-  return code.replaceAll(ICON_IMPORT, (statement: string, clause: string, quote: string, source: string) => {
-    const specifiers = clause
-      .split(',')
-      .map(specifier => specifier.trim())
-      .filter(specifier => specifier.length > 0);
-    const kept: string[] = [];
-    const rewritten: string[] = [];
-    for (const specifier of specifiers) {
-      const name = importedNameOf(specifier);
-      const iconModule = specifier.startsWith('type ') ? undefined : iconModuleOf(name, icons);
-      if (iconModule !== undefined) {
-        rewritten.push(`import { ${specifier} } from ${quote}${PHOSPHOR}/dist/csr/${iconModule}${quote};`);
-      } else if (name === 'IconContext') {
-        rewritten.push(`import { ${specifier} } from ${quote}${PHOSPHOR}/dist/lib/context${quote};`);
-      } else {
-        kept.push(specifier);
-      }
+  // The statements `/import\s*\{([^}]*)\}\s*from\s*(['"])(<source>)\2\s*;?/g` matches, found in one pass: that
+  // pattern read on to the next `}` from every `import {`, so code with many unclosed ones cost a pass per import.
+  const start = new RegExp(ICON_IMPORT_START);
+  const tail = new RegExp(ICON_IMPORT_TAIL);
+  let out = '';
+  let copied = 0;
+  // The first `}` after the last brace searched; every `import {` before it closes there, so it is searched once.
+  let close = -1;
+  let tailAt = -1;
+  let tailMatch: RegExpExecArray | null = null;
+  for (let found = start.exec(code); found !== null; found = start.exec(code)) {
+    const open = found.index + found[0].length - 1;
+    if (close <= open) close = code.indexOf('}', open + 1);
+    if (close === -1) break;
+    if (tailAt !== close) {
+      tailAt = close;
+      tail.lastIndex = close + 1;
+      tailMatch = tail.exec(code);
     }
-    if (rewritten.length === 0) return statement;
-    if (kept.length > 0) rewritten.push(`import { ${kept.join(', ')} } from ${quote}${source}${quote};`);
-    // One line, then as many newlines as the statement had: every later line keeps its number.
-    return rewritten.join(' ') + '\n'.repeat(statement.split('\n').length - 1);
-  });
+    if (tailMatch === null) continue;
+    const [rest, quote = '', source = ''] = tailMatch;
+    const end = close + 1 + rest.length;
+    out +=
+      code.slice(copied, found.index) +
+      rewriteStatement(code.slice(found.index, end), code.slice(open + 1, close), quote, source, icons);
+    copied = end;
+    start.lastIndex = end;
+  }
+  return out + code.slice(copied);
+}
+
+/** One icon import statement, rewritten: one import per icon module, the rest kept on `source`. */
+function rewriteStatement(
+  statement: string,
+  clause: string,
+  quote: string,
+  source: string,
+  icons: ReadonlySet<string>,
+): string {
+  const specifiers = clause
+    .split(',')
+    .map(specifier => specifier.trim())
+    .filter(specifier => specifier.length > 0);
+  const kept: string[] = [];
+  const rewritten: string[] = [];
+  for (const specifier of specifiers) {
+    const name = importedNameOf(specifier);
+    const iconModule = specifier.startsWith('type ') ? undefined : iconModuleOf(name, icons);
+    if (iconModule !== undefined) {
+      rewritten.push(`import { ${specifier} } from ${quote}${PHOSPHOR}/dist/csr/${iconModule}${quote};`);
+    } else if (name === 'IconContext') {
+      rewritten.push(`import { ${specifier} } from ${quote}${PHOSPHOR}/dist/lib/context${quote};`);
+    } else {
+      kept.push(specifier);
+    }
+  }
+  if (rewritten.length === 0) return statement;
+  if (kept.length > 0) rewritten.push(`import { ${kept.join(', ')} } from ${quote}${source}${quote};`);
+  // One line, then as many newlines as the statement had: every later line keeps its number.
+  return rewritten.join(' ') + '\n'.repeat(statement.split('\n').length - 1);
 }
 
 /**

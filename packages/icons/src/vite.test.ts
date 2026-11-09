@@ -48,6 +48,21 @@ describe('rewriteIconImports', () => {
     const code = `import { IconContextValue } from '@arki/icons/phosphor';\nimport { Heart } from './local';`;
     expect(rewriteIconImports(code, icons)).toBe(code);
   });
+
+  // Why: the plugin reads every module the app bundles, and file contents are outside text. Many `import {` with no
+  // `}`, or a long space run inside a specifier, must cost one pass, not a pass over the rest of the module each.
+  it('rewrites a large module of unclosed imports and long space runs in one pass', () => {
+    const run = 200_000;
+    const flood = 'import {'.repeat(run);
+    const code = `import { Heart${' '.repeat(run)}x as H, Trash } from '@arki/icons/phosphor';\n${flood}`;
+    const started = performance.now();
+    const out = rewriteIconImports(code, icons);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(out.split('\n')[0]).toBe(
+      `import { Trash } from '@phosphor-icons/react/dist/csr/Trash'; import { Heart${' '.repeat(run)}x as H } from '@arki/icons/phosphor';`,
+    );
+    expect(out.endsWith(flood)).toBe(true);
+  });
 });
 
 describe('phosphorIconNames', () => {

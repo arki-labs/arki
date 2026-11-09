@@ -69,6 +69,8 @@ const noop = (): void => {
 };
 /** No byte for this long means the connection is dead: two missed 15 s heartbeats, plus slack. */
 const IDLE_MS = 35_000;
+/** An SSE line ends at `\n`, `\r` or `\r\n`. */
+const LINE_END = /[\n\r]/;
 /** A `retry-after` longer than this is cut to it. */
 const MAX_RETRY_AFTER_MS = 300_000;
 
@@ -92,6 +94,8 @@ function sseMessages(
   drop.addEventListener('abort', cancel, { once: true });
   const decoder = new TextDecoder();
   let buffer = '';
+  /** Chunks of an unfinished line that came with no line end: joined once, when the line ends. */
+  let pending: string[] = [];
   let event = '';
   let data: string[] = [];
   /** Messages read but not handed out yet: one chunk may hold several. */
@@ -113,7 +117,15 @@ function sseMessages(
         const reason: unknown = drop.reason;
         throw reason instanceof Error ? reason : new Error('the live connection was dropped');
       }
-      buffer += chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
+      const text = chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
+      // A chunk with no line end only makes the unfinished line longer. Set it aside instead of adding it to
+      // `buffer` and scanning `buffer` again: that read a long line once per chunk, quadratic in its length.
+      if (!chunk.done && !LINE_END.test(text) && !buffer.endsWith('\r')) {
+        pending.push(text);
+        continue;
+      }
+      buffer += pending.join('') + text;
+      pending = [];
       let start = 0;
       for (let index = 0; index < buffer.length; index += 1) {
         const char = buffer[index];

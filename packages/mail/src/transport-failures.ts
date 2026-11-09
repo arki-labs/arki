@@ -6,7 +6,7 @@ import type { Result } from '@arki/failure';
 import { isFailure } from '@arki/failure';
 
 import type { MailMessage, RecipientOutcome, SentMail, TransportFailure } from './types.js';
-import { MAIL_ERROR_CODES, MailError } from './errors.js';
+import { invalidConfig, MAIL_ERROR_CODES, MailError } from './errors.js';
 import { MailRejected, MailUncertain } from './failures.js';
 import { errorField, log } from './log.js';
 import { listOf } from './message.js';
@@ -32,6 +32,21 @@ export function rejection(
 
 /** The longest a request may wait for the service, in milliseconds, when the transport sets no `timeoutMs`. */
 export const DEFAULT_TIMEOUT_MS = 30_000;
+
+/** The longest `timeoutMs` a transport takes: the largest delay a runtime timer holds (2^31 - 1 ms, about 24.8 days). */
+export const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * Checks a transport's `timeoutMs` when the transport is built, so a bad value fails at boot as `MailError`
+ * (`ARKI_MAIL_E001`) instead of making every send reject with a raw `TypeError` or `RangeError`.
+ */
+export function checkTimeoutMs(transport: string, timeoutMs: number | undefined): void {
+  if (timeoutMs === undefined) return;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMEOUT_MS)
+    invalidConfig(
+      `${transport}: \`timeoutMs\` must be more than 0 and at most ${MAX_TIMEOUT_MS} milliseconds, got ${timeoutMs}.`,
+    );
+}
 
 /**
  * The signal one request runs under: the caller's `signal` joined with a timeout. After a failure,

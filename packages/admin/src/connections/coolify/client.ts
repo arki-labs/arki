@@ -54,7 +54,8 @@ export type CoolifyVersionProbe = {
   supported: boolean;
 };
 
-const versionPattern = /v?(\d+)\.\d+\.\d+/;
+// `(?<!\d)`: tried only where a digit run starts, so a long run is read once, not once per digit (same first match).
+const versionPattern = /(?<!\d)v?(\d+)\.\d+\.\d+/;
 
 function parseVersion(raw: string): CoolifyVersionProbe {
   const text = raw.trim();
