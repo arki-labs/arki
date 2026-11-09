@@ -25,7 +25,7 @@ import { isFailure } from '@arki/failure';
 import { CommandConflict, CommandNotFound } from '@arki/journal';
 
 import type { CoreTables } from '../tables.js';
-import { pgInstantSchema, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from '../pg-values.js';
+import { pgInstantSchema, pgJsonRecordSchema } from '../pg-values.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
 import {
   createSubscriptionId,
@@ -34,17 +34,17 @@ import {
   subscriptionIdSchema,
   subscriptionStatusValues,
 } from '../primitives.js';
-import { lockReferences, sameJson, toInstant, toIso, toNullableInstant } from './support.js';
+import { eventTextSchema, eventVarcharSchema, lockReferences, sameJson, toInstant, toIso, toNullableInstant } from './support.js';
 
 type SubscriptionRow = CoreTables['subscriptions']['$inferSelect'];
 
 const statusSchema = z.enum(subscriptionStatusValues);
 const isoSchema = z.iso.datetime();
 const metadataSchema = pgJsonRecordSchema;
-/** The id a command reads its subscription stream by: one a text column can hold. */
+/** The id a command reads its subscription stream by: one a text column and the event's jsonb can hold. */
 const subscriptionRefSchema = subscriptionIdSchema.refine(
-  id => pgTextSchema.safeParse(id).success,
-  'An id cannot contain the NUL character (U+0000)',
+  id => eventTextSchema.safeParse(id).success,
+  'An id cannot contain the NUL character (U+0000) or a lone surrogate',
 );
 
 /** What the provider says about a subscription, plus who owns it and which plan it is on. */
@@ -136,7 +136,7 @@ export const syncSubscriptionInputSchema = z.object({
   userId: userIdSchema,
   planId: planIdSchema,
   customerId: customerIdSchema,
-  providerSubscriptionId: pgVarcharSchema(255).min(1),
+  providerSubscriptionId: eventVarcharSchema(255).min(1),
   /** The status the provider reports */
   status: statusSchema,
   currentPeriodStart: pgInstantSchema(),

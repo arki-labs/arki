@@ -37,6 +37,7 @@ import {
   NotificationWebhookHostNotAllowed,
 } from './failures.js';
 import { createDunningExecutionId, createDunningTemplateId } from './primitives.js';
+import { createDunningCommunicationRepository } from './repository.js';
 import { DunningCampaignService } from './services/campaign-service.js';
 import {
   CommunicationOrchestrationService,
@@ -988,6 +989,108 @@ describe('getDeliveryStatus of a slow provider', () => {
     expect(fromSms).toMatchObject({
       code: 'payments.notification_provider_timeout',
       data: { provider: 'twilio', timeoutMs: 50 },
+    });
+  });
+});
+
+describe('the communication doors answer an id, time or JSON Postgres would refuse', () => {
+  const NUL = '\u0000';
+  const far = fromDate(new Date('+020000-01-01T00:00:00Z'));
+
+  async function storedCommunication(providerMessageId: string) {
+    const [execution] = await db.select().from(tables.dunningExecutions).limit(1);
+    if (!execution?.templateId) throw new Error('no execution with a step to attach the communication to');
+    const communications = createDunningCommunicationRepository(db, tables);
+    const row = orThrow(
+      await communications.create({
+        executionId: execution.id,
+        customerId,
+        templateId: execution.templateId,
+        channel: 'email',
+        recipient: 'buyer@example.com',
+        content: 'Please update your card',
+        status: 'sent',
+        providerMessageId,
+      }),
+    );
+
+    return { row, execution };
+  }
+
+  it('an id holding U+0000 is answered as unknown (null, [] or zero counts), never a raw SQLSTATE 22021', async () => {
+    const communications = createDunningCommunicationRepository(db, tables);
+    const service = new CommunicationOrchestrationService(db, tables);
+    const page = { limit: 10, offset: 0, sortBy: 'createdAt', sortOrder: 'desc' } as const;
+    const none = { total: 0, sent: 0, delivered: 0, opened: 0, clicked: 0, failed: 0 };
+
+    expect(await communications.findById(`dcm${NUL}`)).toBeNull();
+    expect(await communications.findMany({ ...page, executionId: `de${NUL}` })).toEqual([]);
+    expect(await communications.findMany({ ...page, customerId: `cust${NUL}` })).toEqual([]);
+    expect(await communications.updateStatus(`dcm${NUL}`, 'opened')).toBeNull();
+    expect(await communications.getMetricsForExecution(`de${NUL}`)).toEqual(none);
+    expect(await service.getCommunication(`dcm${NUL}`)).toBeNull();
+    expect(await service.getDeliveryStatus(`dcm${NUL}`)).toBeNull();
+    expect(await service.getCommunicationMetrics(`de${NUL}`)).toEqual(none);
+    expect(await service.updateCommunicationStatus({ communicationId: `dcm${NUL}`, status: 'opened' })).toBeNull();
+  });
+
+  it('a communication naming an execution, step or customer by an id holding U+0000 returns its not-found code', async () => {
+    const { row, execution } = await storedCommunication('email_nul_references');
+    const communications = createDunningCommunicationRepository(db, tables);
+    const valid = {
+      executionId: execution.id,
+      customerId,
+      templateId: row.templateId,
+      channel: 'email' as const,
+      recipient: 'buyer@example.com',
+      content: 'Please update your card',
+      status: 'pending' as const,
+    };
+    const before = await db.select().from(tables.dunningCommunications);
+
+    expect(await communications.create({ ...valid, executionId: `de${NUL}` })).toMatchObject({
+      code: 'payments.dunning_execution_not_found',
+    });
+    expect(await communications.create({ ...valid, templateId: `dt${NUL}` })).toMatchObject({
+      code: 'payments.dunning_template_not_found',
+    });
+    expect(await communications.create({ ...valid, customerId: `cust${NUL}` })).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'customer' },
+    });
+    expect(await db.select().from(tables.dunningCommunications)).toHaveLength(before.length);
+  });
+
+  it('a time outside the years 1 to 9999, or JSON with a lone surrogate, is schema.invalid_input and writes nothing', async () => {
+    const { row } = await storedCommunication('email_far_times');
+    const communications = createDunningCommunicationRepository(db, tables);
+    const service = new CommunicationOrchestrationService(db, tables);
+
+    // Each was a raw SQLSTATE: 22009 from an instant column, 22P02 from a jsonb one
+    const answers = [
+      await communications.updateStatus(row.id, 'sent', { sentAt: far }),
+      await communications.updateStatus(row.id, 'sent', { providerResponse: { note: 'x\uD800' } }),
+      await service.updateCommunicationStatus({ communicationId: row.id, status: 'delivered', deliveredAt: far }),
+      await service.handleCommunicationWebhook({
+        providerMessageId: 'email_far_times',
+        event: 'opened',
+        timestamp: far,
+      }),
+      await service.handleCommunicationWebhook({
+        providerMessageId: 'email_far_times',
+        event: 'opened',
+        timestamp: now(),
+        metadata: { note: 'x\uD800' },
+      }),
+    ];
+
+    for (const answer of answers) expect(answer).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await communications.findById(row.id)).toMatchObject({
+      sentAt: null,
+      deliveredAt: null,
+      openedAt: null,
+      providerResponse: null,
+      trackingData: null,
     });
   });
 });

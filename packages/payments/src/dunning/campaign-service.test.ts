@@ -1392,3 +1392,156 @@ describe('executeCampaign passes on the failure of a row deleted while it schedu
     }
   });
 });
+
+describe('the campaign, step and execution doors answer an id, time or setting Postgres would refuse', () => {
+  const NUL = '\u0000';
+  const far = fromDate(new Date('+020000-01-01T00:00:00Z'));
+  const invariantFailure = { code: FAILURE_ERROR_CODES.invariant };
+
+  it('an id holding U+0000 is answered as unknown (null, undefined, [] or zero), never a raw SQLSTATE 22021', async () => {
+    const campaigns = createDunningCampaignRepository(db, tables);
+    const templates = createDunningTemplateRepository(db, tables);
+    const executions = createDunningExecutionRepository(db, tables);
+    const campaignId = await createdCampaign('NUL ids');
+    const before = await service.getCampaign(campaignId);
+    const page = { limit: 10, offset: 0, sortBy: 'createdAt', sortOrder: 'desc' } as const;
+
+    // Each of these reached Postgres with the NUL id and threw SQLSTATE 22021
+    expect(await campaigns.findById(`dc${NUL}`)).toBeNull();
+    expect(await campaigns.update(`dc${NUL}`, { name: 'Renamed', updatedBy: userId })).toBeNull();
+    expect(await campaigns.updateStatus(`dc${NUL}`, 'paused', userId)).toBeUndefined();
+    expect(await campaigns.delete(`dc${NUL}`)).toBeUndefined();
+    expect(await campaigns.findActiveForTrigger('payment_failure', [`cs${NUL}`])).toEqual([]);
+    expect(await campaigns.getAnalyticsSince(now(), `dc${NUL}`)).toMatchObject({ executions: 0, paymentsRecovered: 0 });
+    expect(await service.getCampaignAnalytics(`dc${NUL}`)).toMatchObject({ executions: 0, communicationsSent: 0 });
+    expect(await service.updateCampaign(`dc${NUL}`, { name: 'Renamed', templates: campaignInput([0]).templates }, userId)).toBeNull();
+    expect(await templates.findById(`dt${NUL}`)).toBeNull();
+    expect(await templates.findByCampaignId(`dc${NUL}`)).toEqual([]);
+    expect(await templates.findActiveTemplates(`dc${NUL}`)).toEqual([]);
+    expect(await templates.update(`dt${NUL}`, { name: 'Renamed' })).toBeNull();
+    expect(await templates.updateStatus(`dt${NUL}`, false)).toBeUndefined();
+    expect(await templates.delete(`dt${NUL}`)).toBeUndefined();
+    expect(await executions.findById(`de${NUL}`)).toBeNull();
+    expect(await executions.findMany({ ...page, campaignId: `dc${NUL}` })).toEqual([]);
+    expect(await executions.findMany({ ...page, customerId: `cust${NUL}` })).toEqual([]);
+    expect(await executions.updateStatus(`de${NUL}`, 'cancelled')).toBeUndefined();
+    expect(await executions.startRetry(`de${NUL}`)).toBeUndefined();
+    expect(await executions.recordFailure(`de${NUL}`, 'failed', null)).toBeUndefined();
+    expect(await executions.findRecentForCustomer(`cust${NUL}`, campaignId)).toEqual([]);
+
+    // A real campaign next to them is untouched
+    expect(await service.getCampaign(campaignId)).toEqual(before);
+  });
+
+  it('an execution naming a campaign, step or customer by an id holding U+0000 returns its not-found code and writes nothing', async () => {
+    const campaignId = await createdCampaign('NUL references');
+    const campaign = await service.getCampaign(campaignId);
+    const executions = createDunningExecutionRepository(db, tables);
+    const valid = {
+      campaignId,
+      templateId: campaign?.templates[0]?.id,
+      customerId,
+      triggerType: 'manual',
+      triggerData: {},
+      scheduledAt: now(),
+    };
+
+    expect(await executions.create({ ...valid, customerId: `cust${NUL}` })).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'customer' },
+    });
+    expect(await executions.create({ ...valid, campaignId: `dc${NUL}` })).toMatchObject({ code: 'payments.dunning_campaign_not_found' });
+    expect(await executions.create({ ...valid, templateId: `dt${NUL}` })).toMatchObject({ code: 'payments.dunning_template_not_found' });
+    expect(await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.campaignId, campaignId))).toEqual([]);
+  });
+
+  it('a time an instant column cannot hold is schema.invalid_input on a write and an invariant failure on a read, before any query', async () => {
+    const campaignId = await createdCampaign('Far times');
+    const campaign = await service.getCampaign(campaignId);
+    const campaigns = createDunningCampaignRepository(db, tables);
+    const executions = createDunningExecutionRepository(db, tables);
+    const valid = {
+      campaignId,
+      templateId: campaign?.templates[0]?.id,
+      customerId,
+      triggerType: 'manual',
+      triggerData: {},
+      scheduledAt: now(),
+    };
+
+    // Each was a raw SQLSTATE 22009 from the instant column
+    expect(await executions.create({ ...valid, scheduledAt: far })).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await executions.create({ ...valid, nextRetryAt: far })).toMatchObject({ code: 'schema.invalid_input' });
+    const stored = orThrow(await executions.create(valid));
+    expect(await executions.updateStatus(stored.id, 'scheduled', undefined, undefined, far)).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    await expect(executions.recordFailure(stored.id, 'failed', far)).rejects.toMatchObject(invariantFailure);
+    await expect(campaigns.getAnalyticsSince(far)).rejects.toMatchObject(invariantFailure);
+    await expect(campaigns.findTopPerformer(far)).rejects.toMatchObject(invariantFailure);
+    expect(await executions.findById(stored.id)).toMatchObject({ status: 'scheduled', nextRetryAt: null });
+  });
+
+  it('campaign settings and trigger values the contract refuses are schema.invalid_input at the write, so no run meets them', async () => {
+    const campaigns = createDunningCampaignRepository(db, tables);
+    const before = await countOf(tables.dunningCampaigns);
+    const input = campaignInput([0]);
+    const settings = input.settings;
+
+    // Stored, each made a later executeCampaign throw: a raw invariant failure (cooldown), SQLSTATE 22003
+    // (failure count), a RangeError (a trial day count past 100 years), an endless loop (no allowed day),
+    // or 22P02 from jsonb (lone surrogate)
+    const refused = [
+      await service.createCampaign({ ...input, settings: { ...settings, cooldownPeriod: 1e12 } }, userId),
+      await service.createCampaign({ ...input, settings: { ...settings, priority: Number.NaN } }, userId),
+      await service.createCampaign({ ...input, settings: { ...settings, allowedDays: [7] } }, userId),
+      await service.createCampaign({ ...input, trigger: { type: 'payment_failure', conditions: { paymentFailureCount: 1e20 } } }, userId),
+      await service.createCampaign({ ...input, trigger: { type: 'time_based', conditions: { trialEndingDays: 1e9 } } }, userId),
+      await campaigns.create({ ...input, settings: { ...settings, timezone: 'UTC\uD800' }, createdBy: userId }),
+      await campaigns.create({ ...input, settings: { ...settings, maxExecutionsPerCustomer: 0 }, createdBy: userId }),
+    ];
+
+    for (const answer of refused) expect(answer).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await countOf(tables.dunningCampaigns)).toBe(before);
+    const campaignId = await createdCampaign('Contract updates');
+    expect(await campaigns.update(campaignId, { settings: { ...settings, cooldownPeriod: -1 }, updatedBy: userId })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await campaigns.findById(campaignId)).toMatchObject({ settings: { cooldownPeriod: 24 } });
+  });
+
+  it('a step message a jsonb column cannot store (a lone surrogate) is schema.invalid_input, not a raw SQLSTATE 22P02', async () => {
+    const campaignId = await createdCampaign('Lone surrogate step');
+    const templates = createDunningTemplateRepository(db, tables);
+    const before = await countOf(tables.dunningTemplates);
+    const communication = { channel: 'email' as const, content: 'Pay \uD800', variables: [] };
+
+    expect(await templates.create({ campaignId, name: 'Step', stepNumber: 9, delayHours: 0, communication })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    const [existing] = await templates.findByCampaignId(campaignId);
+    if (!existing) throw new Error('the campaign has no step');
+    expect(await templates.update(existing.id, { communication })).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await countOf(tables.dunningTemplates)).toBe(before);
+  });
+
+  it('executeCampaign leaves out customer ids holding U+0000: an include list of only such ids schedules nobody', async () => {
+    const buyer = await newCustomer('nul-filter');
+    await newPayment(buyer, 'failed', now());
+    const campaignId = await createdCampaign('NUL filters');
+
+    // The id went into the eligibility query and threw SQLSTATE 22021
+    const nobody = await service.executeCampaign(
+      { campaignId, dryRun: false, customFilters: { customerIds: [`cust${NUL}`], testMode: false } },
+      'usr_admin',
+    );
+    expect(nobody).toEqual([]);
+    const someone = orThrow(
+      await service.executeCampaign(
+        { campaignId, dryRun: false, customFilters: { customerIds: [buyer.id, `cust${NUL}`], excludeCustomerIds: [`cust${NUL}`], testMode: false } },
+        'usr_admin',
+      ),
+    );
+    expect(someone.map(row => row.customerId)).toEqual([buyer.id]);
+  });
+});

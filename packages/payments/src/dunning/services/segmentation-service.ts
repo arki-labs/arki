@@ -6,16 +6,16 @@ import { now, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
-import type { MoneyFailure } from '@arki/money';
-import { Money } from '@arki/money';
-import { parse } from '@arki/schema';
+import type { MoneyFailure, MoneyJSON } from '@arki/money';
+import { AmountOutOfRange, Money, RoundingNecessary } from '@arki/money';
+import { is, parse } from '@arki/schema';
 
 import type { CoreTables } from '../../core/tables.js';
 import type { Customer, CustomerId } from '../../core/types.js';
 import type { UserId } from '../../core/user-id.js';
 import type { CreateCustomerSegmentInput, ListCustomerSegmentsQuery, UpdateCustomerSegmentInput } from '../contracts.js';
 import { segmentCriteriaSchema } from '../contracts.js';
-import { pgJsonRecordSchema } from '../../core/pg-values.js';
+import { pgJsonRecordSchema, pgTextSchema } from '../../core/pg-values.js';
 import type { CustomerSegmentId, RiskCategory } from '../primitives.js';
 import type { DunningDatabase } from '../repository.js';
 import type { DunningTables } from '../tables.js';
@@ -25,8 +25,7 @@ import type {
   RiskScore,
   SegmentCriteria,
 } from '../types.js';
-import { toMinorColumn } from '../../core/money.js';
-import type { ReferenceNotFound } from '../../core/providers/provider-error.js';
+import { ReferenceNotFound } from '../../core/providers/provider-error.js';
 import type { DunningTickReport } from '../failures.js';
 import { CustomerSegmentNotFound, tickFault } from '../failures.js';
 import { createCustomerRiskProfileRepository, createCustomerSegmentRepository } from '../repository.js';
@@ -34,12 +33,28 @@ import { valueList } from '../sql-list.js';
 
 /**
  * Segment criteria as they are stored: the contract's criteria, with the spend range already turned into
- * stored JSON (`Money.fromJSON` checks it when the criteria become SQL). A plan tier holding U+0000, a
+ * stored JSON (`spendBoundMinor` checks it when the criteria become SQL). A plan tier no plan has, a
  * span or count outside its range, or NaN is refused here, so it never reaches a query.
  */
 const storedCriteriaSchema = segmentCriteriaSchema.extend({ totalSpent: pgJsonRecordSchema.optional() });
 
 const logger = getLogger('arki:payments:dunning');
+
+/**
+ * A spend bound in the whole minor units the payments' `amount_minor` column holds. The bound is caller or
+ * stored JSON, so it is read as a door, never thrown on: an amount or currency `@arki/money` refuses
+ * returns its `MoneyFailure`, digits below the currency's minor unit (`1.001 EUR`) return
+ * `RoundingNecessary`, and more than 2^53 - 1 minor units `AmountOutOfRange`.
+ */
+function spendBoundMinor(bound: MoneyJSON): number | MoneyFailure {
+  const amount = Money.fromJSON(bound);
+  if (isFailure(amount)) return amount;
+  const minor = amount.toScale(amount.currency.scale, 'down');
+  if (!minor.eq(amount)) return RoundingNecessary();
+  // `units` is a number exactly when it is a safe integer
+  if (typeof minor.units !== 'number') return AmountOutOfRange();
+  return minor.units;
+}
 
 /** The customer columns a segment listing returns. */
 export type SegmentCustomer = Pick<Customer, 'id' | 'userId' | 'email' | 'name' | 'createdAt'>;
@@ -230,7 +245,7 @@ export class CustomerSegmentationService {
 
   /**
    * Get customers matching specific criteria. Criteria the stored-criteria schema refuses (a plan tier
-   * holding U+0000, a span or count outside its range, NaN) return `schema.invalid_input`, and a spend
+   * no plan has, a span or count outside its range, NaN) return `schema.invalid_input`, and a spend
    * range money refuses its `MoneyFailure`, before any query. `limit` is a whole number of 0 or more (a
    * precondition: anything else throws an invariant failure).
    */
@@ -273,7 +288,8 @@ export class CustomerSegmentationService {
 
   /**
    * Build SQL conditions from segment criteria. The spend range comes from a stored jsonb column, so
-   * an amount `@arki/money` refuses is returned as that `MoneyFailure`, never turned into a wrong filter.
+   * an amount `@arki/money` refuses, one finer than the currency's minor unit or one past 2^53 - 1 minor
+   * units is returned as its `MoneyFailure` (`spendBoundMinor`), never thrown or turned into a wrong filter.
    */
   private buildSegmentConditions(criteria: SegmentCriteria): SQL[] | MoneyFailure {
     const conditions: SQL[] = [];
@@ -284,9 +300,9 @@ export class CustomerSegmentationService {
     if (criteria.totalSpent && spendBound) {
       const bound = Money.fromJSON(spendBound);
       if (isFailure(bound)) return bound;
-      const min = criteria.totalSpent.min === undefined ? undefined : Money.fromJSON(criteria.totalSpent.min);
+      const min = criteria.totalSpent.min === undefined ? undefined : spendBoundMinor(criteria.totalSpent.min);
       if (isFailure(min)) return min;
-      const max = criteria.totalSpent.max === undefined ? undefined : Money.fromJSON(criteria.totalSpent.max);
+      const max = criteria.totalSpent.max === undefined ? undefined : spendBoundMinor(criteria.totalSpent.max);
       if (isFailure(max)) return max;
       const totalSpentSubquery = this.db
         .select({ customerId: this.payments.customerId, total: sql<string>`SUM(${this.payments.amountMinor})`.as('total') })
@@ -304,7 +320,7 @@ export class CustomerSegmentationService {
           sql`
             ${this.customers.id} IN (
                         SELECT customer_id FROM (${totalSpentSubquery}) AS totals
-                        WHERE total >= ${toMinorColumn(min)}
+                        WHERE total >= ${min}
                       )
           `,
         );
@@ -315,7 +331,7 @@ export class CustomerSegmentationService {
           sql`
             ${this.customers.id} IN (
                         SELECT customer_id FROM (${totalSpentSubquery}) AS totals
-                        WHERE total <= ${toMinorColumn(max)}
+                        WHERE total <= ${max}
                       )
           `,
         );
@@ -404,9 +420,12 @@ export class CustomerSegmentationService {
   }
 
   /**
-   * Calculate risk score for a customer
+   * Calculate the risk score of a customer from their payments and subscriptions. An unknown customer
+   * returns `ReferenceNotFound` (`kind: 'customer'`): there is nobody to score. An id no row can hold
+   * (U+0000) is unknown too, answered without a query.
    */
-  async calculateCustomerRiskScore(customerId: CustomerId): Promise<RiskScore> {
+  async calculateCustomerRiskScore(customerId: CustomerId): Promise<RiskScore | FailureOf<typeof ReferenceNotFound>> {
+    if (!(await this.customerExists(customerId))) return ReferenceNotFound({ kind: 'customer', id: customerId, missing: 'row' });
     const paymentHistory = await this.getCustomerPaymentHistory(customerId);
     const subscriptionHistory = await this.getCustomerSubscriptionHistory(customerId);
     const engagementMetrics = await this.getCustomerEngagementMetrics(customerId);
@@ -923,14 +942,17 @@ export class CustomerSegmentationService {
   }
 
   /**
-   * Update or create the customer risk profile. An unknown customer returns `ReferenceNotFound` (`kind: 'customer'`).
-   * The repository's `schema.invalid_input` for JSON Postgres cannot store is passed on; the profile is built from
-   * rows Postgres already stored, so it is not expected here.
+   * Update or create the customer risk profile. An unknown customer (also an id no row can hold) returns
+   * `ReferenceNotFound` (`kind: 'customer'`) and writes nothing. A stored segment whose spend range is not
+   * valid money returns its `MoneyFailure` (see `getCustomerSegments`). The repository's
+   * `schema.invalid_input` for JSON Postgres cannot store is passed on; the profile is built from rows
+   * Postgres already stored, so it is not expected here.
    */
   async updateCustomerRiskProfile(
     customerId: CustomerId,
   ): Promise<CustomerRiskProfile | MoneyFailure | FailureOf<typeof ReferenceNotFound> | SchemaFailure> {
     const riskScore = await this.calculateCustomerRiskScore(customerId);
+    if (isFailure(riskScore)) return riskScore;
     const paymentHistory = await this.getCustomerPaymentHistory(customerId);
     const subscriptionHistory = await this.getCustomerSubscriptionHistory(customerId);
     const engagementMetrics = await this.getCustomerEngagementMetrics(customerId);
@@ -965,16 +987,12 @@ export class CustomerSegmentationService {
   }
 
   /**
-   * Get segments that a customer belongs to
+   * The active segments the customer belongs to. An unknown customer (also an id no row can hold, without a
+   * query) belongs to none: `[]`. A stored segment whose spend range is not valid money returns its
+   * `MoneyFailure` (`money.unknown_currency`, `money.rounding_necessary`, `money.out_of_range`, …).
    */
   async getCustomerSegments(customerId: CustomerId): Promise<CustomerSegmentId[] | MoneyFailure> {
-    const [customer] = await this.db
-      .select({ id: this.customers.id })
-      .from(this.customers)
-      .where(eq(this.customers.id, customerId))
-      .limit(1);
-
-    if (!customer) return [];
+    if (!(await this.customerExists(customerId))) return [];
 
     const dbSegments = await this.segmentRepo.findMany({
       limit: 100,
@@ -1003,6 +1021,17 @@ export class CustomerSegmentationService {
     }
 
     return matchingSegments;
+  }
+
+  /** Whether a customer row has this id. An id no row can hold (U+0000) has none, answered without a query. */
+  private async customerExists(customerId: CustomerId): Promise<boolean> {
+    if (!is(customerId, pgTextSchema)) return false;
+    const [customer] = await this.db
+      .select({ id: this.customers.id })
+      .from(this.customers)
+      .where(eq(this.customers.id, customerId))
+      .limit(1);
+    return customer !== undefined;
   }
 
   /**
@@ -1128,9 +1157,7 @@ export class CustomerSegmentationService {
     return report;
   }
 
-  /**
-   * Get risk profile for a customer
-   */
+  /** The customer's risk profile, or `null` when there is none (also for an id no row can hold, without a query). */
   async getCustomerRiskProfile(customerId: CustomerId): Promise<CustomerRiskProfile | null> {
     const dbProfile = await this.riskProfileRepo.findByCustomerId(customerId);
     return dbProfile ?? null;

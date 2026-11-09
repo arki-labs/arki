@@ -10,9 +10,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { fromUnix, now } from '@arki/date';
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 import { money } from '@arki/money';
-import { CurrencyMismatchError } from '@arki/money/errors';
 
 import type { Payment } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
@@ -377,7 +376,7 @@ describe('calculateTax', () => {
     expect(result.taxBreakdown[0]?.amount.toString()).toBe('150 JPY');
   });
 
-  it('refuses a line item in another currency before calling Stripe', async () => {
+  it('a line item in another currency breaks the stated precondition: an invariant failure before calling Stripe', async () => {
     const { stripe, requests } = taxProvider();
 
     await expect(
@@ -386,7 +385,7 @@ describe('calculateTax', () => {
         currency: 'USD',
         lineItems: [{ amount: money(10, 'EUR'), reference: 'plan' }],
       }),
-    ).rejects.toBeInstanceOf(CurrencyMismatchError);
+    ).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
     expect(requests).toHaveLength(0);
   });
 });

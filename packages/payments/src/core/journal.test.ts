@@ -43,7 +43,7 @@ import {
   userId,
 } from '../test-support.js';
 import { createCoreJournal } from './journal.js';
-import { ReferenceNotFound } from './providers/provider-error.js';
+import type { ReferenceNotFound } from './providers/provider-error.js';
 import { createPaymentId, createSubscriptionId, paymentIdFactory, subscriptionIdFactory } from './primitives.js';
 
 const { payments } = core;
@@ -302,6 +302,64 @@ describe('what the caller sends that the payments table cannot hold is a typed f
       await journal.run(db, commands.recordPaymentRefund, { paymentId, refundedAmount: { amount: '100000000000000', currency: 'USD' } }, meta),
     ).toMatchObject({ code: 'schema.invalid_input' });
     expect(await countEvents(db)).toBe(before);
+  });
+});
+
+describe('a lone surrogate, which the jsonb event data refuses (22P02), is a typed failure and writes nothing', () => {
+  const lone = 'a\uD800';
+
+  it.each([
+    ['the description', { description: lone }],
+    ['the provider payment id', { providerPaymentId: `pi_${lone}` }],
+    ['metadata', { metadata: { note: lone } }],
+    ['the payment id', { paymentId: `pay_${lone}` }],
+  ] as const)('initiatePayment refuses one in %s as schema.invalid_input', async (_what, overrides) => {
+    const before = await countEvents(db);
+
+    expect(await journal.run(db, commands.initiatePayment, { ...intent(), ...overrides }, meta)).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await countEvents(db)).toBe(before);
+  });
+
+  it('initiatePayment answers a user or customer id holding one as reference_not_found, as no row holds it', async () => {
+    const before = await countEvents(db);
+
+    expect(await journal.run(db, commands.initiatePayment, { ...intent(), userId: `usr_${lone}` }, meta)).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'user' },
+    });
+    expect(await journal.run(db, commands.initiatePayment, { ...intent(), customerId: `cust_${lone}` }, meta)).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'customer' },
+    });
+    expect(await countEvents(db)).toBe(before);
+  });
+
+  it('completePayment, failPayment, recordPaymentDispute and every stream command refuse one as schema.invalid_input', async () => {
+    const paymentId = await seed();
+    const before = await countEvents(db);
+
+    for (const refused of [
+      journal.run(db, commands.completePayment, { paymentId, receiptUrl: lone }, meta),
+      journal.run(db, commands.failPayment, { paymentId, failureReason: lone }, meta),
+      journal.run(db, commands.recordPaymentDispute, { paymentId, disputeId: lone, status: 'open' }, meta),
+      journal.run(db, commands.recordPaymentDispute, { paymentId, disputeId: 'dp_1', status: lone }, meta),
+      journal.run(db, commands.recordPaymentDispute, { paymentId, disputeId: 'dp_1', status: 'open', reason: lone }, meta),
+      journal.run(db, commands.cancelPayment, { paymentId: `pay_${lone}` }, meta),
+      journal.run(db, commands.markPaymentRequiresAction, { paymentId: `pay_${lone}` }, meta),
+    ]) {
+      expect(await refused).toMatchObject({ code: 'schema.invalid_input' });
+    }
+    expect(await countEvents(db)).toBe(before);
+  });
+
+  it('keeps a real surrogate pair (an emoji) in event text', async () => {
+    const paymentId = await seed();
+
+    expect(await journal.run(db, commands.failPayment, { paymentId, failureReason: 'declined \uD83D\uDE00' }, meta)).toMatchObject({
+      row: { failureReason: 'declined \uD83D\uDE00' },
+    });
   });
 });
 

@@ -26,6 +26,11 @@ import type { Payment, Plan } from './types.js';
 /**
  * `Money` as the whole minor units an amount column holds. Exact: an amount
  * the schemas accepted has no digits below the currency's minor unit.
+ *
+ * Precondition: `amount` passed one of the amount schemas below (or `@arki/money`
+ * built it from minor units). Anything else is a caller bug and throws:
+ * `RoundingNecessaryError` for digits below the minor unit (`1.001 EUR`), and
+ * `NumericRangeError` past 2^53 - 1 minor units.
  */
 export function toMinorColumn(amount: Money): number {
   return amount.toMinorNumber();
@@ -34,6 +39,12 @@ export function toMinorColumn(amount: Money): number {
 /**
  * An amount column read back as `Money`. Also takes the text Postgres sends
  * for `SUM(bigint)`.
+ *
+ * A builder over stored values, so it throws (callers pass a row this package
+ * wrote through its insert schemas, which allow only these): `NumericRangeError`
+ * for units that are not a safe whole number (a fraction, `NaN`, past 2^53 - 1),
+ * `NumberFormatError` for text that is not whole minor units, and
+ * `UnknownCurrencyError` for a code outside ISO 4217 (any case).
  */
 export function fromMinorColumn(units: number | string, currency: string): Money {
   return Money.fromMinor(units, currency.toUpperCase());
@@ -57,12 +68,19 @@ export function fromStoredNumber(value: number, currency: string): Money {
   return money(value, currency.toUpperCase(), { rounding: 'halfEven' });
 }
 
-/** A plan's price as `Money`. */
+/**
+ * A plan's price as `Money`. Precondition: a plan row as stored (whole `priceMinor`, an ISO 4217
+ * `currency`); anything else throws as `fromMinorColumn` does.
+ */
 export function planPrice(plan: Pick<Plan, 'priceMinor' | 'currency'>): Money {
   return fromMinorColumn(plan.priceMinor, plan.currency);
 }
 
-/** A payment's amount as `Money`. */
+/**
+ * A payment's amount as `Money`. Precondition: a payment row as stored (whole `amountMinor`, an ISO
+ * 4217 `currency`); anything else throws as `fromMinorColumn` does (`NumericRangeError`,
+ * `UnknownCurrencyError`).
+ */
 export function paymentAmount(payment: Pick<Payment, 'amountMinor' | 'currency'>): Money {
   return fromMinorColumn(payment.amountMinor, payment.currency);
 }

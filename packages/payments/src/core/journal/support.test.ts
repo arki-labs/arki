@@ -6,9 +6,18 @@ import { describe, expect, it } from 'vitest';
 
 import { FAILURE_ERROR_CODES, FailureError } from '@arki/failure';
 
-import { core, openDb, rejectionOf, userId } from '../../test-support.js';
+import { core, openDb, rejectionOf, userId, users } from '../../test-support.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
-import { lockReferences, writtenRow } from './support.js';
+import { lockReferences, sameJson, writtenRow } from './support.js';
+
+describe('sameJson', () => {
+  it('compares arrays item by item and objects by key, in any key order', () => {
+    expect(sameJson([1, { a: 'x', b: [2] }], [1, { b: [2], a: 'x' }])).toBe(true);
+    expect(sameJson([1, 2], [2, 1])).toBe(false);
+    expect(sameJson([1], { 0: 1 })).toBe(false);
+    expect(sameJson({ a: undefined }, {})).toBe(true);
+  });
+});
 
 describe('writtenRow', () => {
   it('throws the invariant failure when the journal returned no row', async () => {
@@ -40,5 +49,18 @@ describe('lockReferences', () => {
 
     expect(nul).toMatchObject({ code: 'payments.reference_not_found', data: { kind: 'user' } });
     expect(known).toBeUndefined();
+  });
+
+  it('returns missing() for a value with a lone surrogate, even when a row holds the U+FFFD the driver would send for it', async () => {
+    const { db, client } = await openDb();
+    // The host app's user row, written as the fixture writes its users: the text the driver sends for 'usr_\ud800buyer'
+    await db.insert(users).values({ id: 'usr_\uFFFDbuyer' });
+
+    const lone = await db.transaction(async tx =>
+      lockReferences(tx, core.customers, [userReference('usr_\uD800buyer')]),
+    );
+    await client.close();
+
+    expect(lone).toMatchObject({ code: 'payments.reference_not_found', data: { kind: 'user' } });
   });
 });

@@ -561,6 +561,14 @@ export class IntegrationTester<
   /**
    * Clear specific tables by deleting all rows
    *
+   * Throws (a test helper: a throw fails the test, the caller fixes the call): `Error('Tester not
+   * initialized')` before `setup()`; the invariant failure `ARKI_FAILURE_E008`, before any row is deleted,
+   * when a schema table left out of the set references a cleared one by a foreign key without
+   * `on delete cascade` / `set null`; and Postgres's own error (a `DrizzleQueryError` with the pg error as
+   * `cause`) for a table missing from the migrated database (42P01) or a connection fault. Every table of
+   * the set is emptied in one statement, so tables that reference each other, in a cycle or in any export
+   * order, clear together.
+   *
    * @param tables - Tables to clear
    *
    * @example
@@ -577,7 +585,15 @@ export class IntegrationTester<
   }
 
   /**
-   * Clear all tables in the schema
+   * Clear all tables in the schema (every `PgTable` export; relations and enums are skipped)
+   *
+   * Throws (a test helper: a throw fails the test, the caller fixes the call): `Error('Tester not
+   * initialized')` before `setup()`; the invariant failure `ARKI_FAILURE_E008`, before any row is deleted,
+   * when a schema table left out of the set references a cleared one by a foreign key without
+   * `on delete cascade` / `set null`; and Postgres's own error (a `DrizzleQueryError` with the pg error as
+   * `cause`) for a table missing from the migrated database (42P01) or a connection fault. Every table of
+   * the set is emptied in one statement, so tables that reference each other, in a cycle or in any export
+   * order, clear together.
    *
    * @example
    * ```typescript
@@ -599,6 +615,14 @@ export class IntegrationTester<
 
   /**
    * Clear tables matching a pattern
+   *
+   * Throws (a test helper: a throw fails the test, the caller fixes the call): `Error('Tester not
+   * initialized')` before `setup()`; the invariant failure `ARKI_FAILURE_E008`, before any row is deleted,
+   * when a schema table left out of the set references a cleared one by a foreign key without
+   * `on delete cascade` / `set null`; and Postgres's own error (a `DrizzleQueryError` with the pg error as
+   * `cause`) for a table missing from the migrated database (42P01) or a connection fault. Every table of
+   * the set is emptied in one statement, so tables that reference each other, in a cycle or in any export
+   * order, clear together.
    *
    * @param pattern - RegExp or string pattern to match the schema's export names. A RegExp's `g` and `y`
    *   flags are ignored (they would make `test` skip names). A string that is not a valid regular
@@ -628,6 +652,14 @@ export class IntegrationTester<
   /**
    * Clear all tables except specified ones
    *
+   * Throws (a test helper: a throw fails the test, the caller fixes the call): `Error('Tester not
+   * initialized')` before `setup()`; the invariant failure `ARKI_FAILURE_E008`, before any row is deleted,
+   * when a schema table left out of the set references a cleared one by a foreign key without
+   * `on delete cascade` / `set null`; and Postgres's own error (a `DrizzleQueryError` with the pg error as
+   * `cause`) for a table missing from the migrated database (42P01) or a connection fault. Every table of
+   * the set is emptied in one statement, so tables that reference each other, in a cycle or in any export
+   * order, clear together.
+   *
    * @param exceptTables - Tables to preserve
    *
    * @example
@@ -650,9 +682,10 @@ export class IntegrationTester<
   }
 
   /**
-   * Deletes every row of `tables`, a table before any table it references: a parent emptied before
-   * its child still holds rows would be refused by the foreign key (SQLSTATE 23503), whatever order
-   * the schema exports them in. Tables in a foreign-key cycle keep their given order.
+   * Deletes every row of `tables` in one statement (a data-modifying `WITH` per table). Postgres checks
+   * a non-deferrable foreign key at the end of the statement, so a parent and its child, or two tables
+   * that reference each other, clear together whatever order the schema exports them in; separate
+   * `DELETE`s would be refused (SQLSTATE 23503) by whichever table goes first in a cycle.
    *
    * A schema table left out that references one of `tables` (without `on delete cascade` or
    * `set null`) breaks the invariant `ARKI_FAILURE_E008` before any row is deleted: its rows would make
@@ -673,14 +706,22 @@ export class IntegrationTester<
           .map(table => getTableConfig(table).name)
           .join(', ')}: those tables reference them and are not cleared. Clear them too, or use clearAllTables().`,
     );
-    for (const table of childrenFirst(tables)) {
-      // eslint-disable-next-line drizzle/enforce-delete-with-where -- clearing every row is the point of this helper
-      await db.delete(table);
-    }
+    if (tables.length === 0) return;
+    const deletes = tables.map((table, index) => sql`${sql.identifier(`cleared_${index}`)} as (delete from ${table})`);
+    await db.execute(sql`with ${sql.join(deletes, sql`, `)} select 1`);
   }
 
   /**
-   * Seed the database with test data
+   * Seed the database with test data: one insert per table, in the key order of `data`.
+   *
+   * Throws (a test helper: a throw fails the test, the caller fixes the records): `Error('Tester not
+   * initialized')` before `setup()`; `Error("Table '<name>' not found in schema")` for a key that names no
+   * `PgTable` export; and Postgres's own error (a `DrizzleQueryError` with the pg error as `cause`) for
+   * records the table refuses: a reference to a row not inserted yet, so list a parent before the tables
+   * that reference it (23503), a repeated primary or unique key (23505), a missing NOT NULL column with no
+   * default (23502), a value the column type cannot hold (22P02, 22001, 22003, 22021), or a broken check
+   * constraint (23514). Two tables that reference each other need one side's reference left null here and
+   * set afterwards. Rows are typed `object`, so the compiler does not catch these.
    *
    * @param data - Object mapping table names to arrays of records
    *
@@ -1463,31 +1504,4 @@ function blockingParents(child: PgTable, cleared: readonly PgTable[]): PgTable[]
     .foreignKeys.filter(foreignKey => foreignKey.onDelete !== 'cascade' && foreignKey.onDelete !== 'set null')
     .map(foreignKey => foreignKey.reference().foreignTable)
     .filter(parent => parent !== child && cleared.includes(parent));
-}
-
-/**
- * `tables` ordered so each comes before every other listed table it references through a foreign
- * key. A self-reference is ignored (one `DELETE` clears it); a cycle keeps the given order.
- */
-function childrenFirst(tables: readonly PgTable[]): PgTable[] {
-  const parentsOf = new Map(
-    tables.map(table => [
-      table,
-      new Set(
-        getTableConfig(table)
-          .foreignKeys.map(foreignKey => foreignKey.reference().foreignTable)
-          .filter(parent => parent !== table && tables.includes(parent)),
-      ),
-    ]),
-  );
-  const ordered: PgTable[] = [];
-  let remaining = [...tables];
-  while (remaining.length > 0) {
-    // A table no remaining table references can go now.
-    const free = remaining.filter(table => !remaining.some(other => parentsOf.get(other)?.has(table)));
-    const next = free.length > 0 ? free : remaining;
-    ordered.push(...next);
-    remaining = remaining.filter(table => !next.includes(table));
-  }
-  return ordered;
 }

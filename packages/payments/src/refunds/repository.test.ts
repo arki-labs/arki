@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
 import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
+import { money } from '@arki/money';
 
 import type { RefundWrites } from './journal.js';
 import { runnerOn, seedPayment } from '../service-test-support.js';
@@ -111,5 +112,19 @@ describe('RefundRepository.getRefundMetrics', () => {
     expect(error).toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
     const searched = await rejectionOf(repo.searchRefunds({ startDate: instant('+010000-01-01T00:00:00Z') }));
     expect(searched).toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+  });
+
+  // `toMinorColumn` threw a raw RoundingNecessaryError (digits below the cent) or NumericRangeError (past 2^53) here
+  it('searchRefunds fails as an invariant for an amount bound the column cannot hold, before the query', async () => {
+    const thirdOfACent = money('1', 'USD').toScale(4).dividedBy(3, 'halfEven');
+    for (const bound of [thirdOfACent, money('100000000000000000', 'USD')]) {
+      expect(await rejectionOf(repo.searchRefunds({ minAmount: bound }))).toMatchObject({
+        code: FAILURE_ERROR_CODES.invariant,
+      });
+      expect(await rejectionOf(repo.searchRefunds({ maxAmount: bound }))).toMatchObject({
+        code: FAILURE_ERROR_CODES.invariant,
+      });
+    }
+    expect(await repo.searchRefunds({ minAmount: money('1000000', 'USD') })).toEqual([]);
   });
 });

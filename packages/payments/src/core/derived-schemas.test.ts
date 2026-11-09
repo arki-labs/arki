@@ -22,6 +22,7 @@ import type {
   planTierSchema,
   subscriptionStatusSchema,
 } from './contracts.js';
+import { createPlanInputSchema } from './contracts.js';
 import { createCoreDerivedSchemas } from './derived-schemas.js';
 import { toMinorColumn } from './money.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from './primitives.js';
@@ -189,6 +190,8 @@ describe('insert schemas refuse what the columns refuse', () => {
   it.each([
     ['U+0000 in the plan name', planInsertSchema, { ...planBase, name: 'P\u0000ro' }],
     ['U+0000 in a plan feature', planInsertSchema, { ...planBase, features: ['a\u0000'] }],
+    ['a lone surrogate in a plan feature (jsonb refuses it, 22P02)', planInsertSchema, { ...planBase, features: ['a\uD800'] }],
+    ['a lone surrogate in webhook data (jsonb refuses it, 22P02)', webhookEventInsertSchema, { provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_1', data: { a: '\uDC00' } }],
     ['a fractional interval count', planInsertSchema, { ...planBase, intervalCount: 1.5 }],
     ['fractional trial days', planInsertSchema, { ...planBase, trialPeriodDays: 1.5 }],
     ['a currency outside ISO 4217', planInsertSchema, { ...planBase, currency: 'ZZZ' }],
@@ -200,6 +203,13 @@ describe('insert schemas refuse what the columns refuse', () => {
     ['U+0000 in a webhook id', webhookEventInsertSchema, { id: 'wh_a\u0000b', provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_1', data: {} }],
   ] as const)('%s', (_what, schema, value) => {
     expect(schema.safeParse(value).success).toBe(false);
+  });
+
+  it('the plan input contract refuses a lone surrogate in a feature and keeps an emoji', () => {
+    const plan = { name: 'Pro', tier: 'pro', price: { amount: '10', currency: 'EUR' }, interval: 'monthly' } as const;
+
+    expect(createPlanInputSchema.safeParse({ ...plan, features: ['ok', 'a\uD800'] }).success).toBe(false);
+    expect(createPlanInputSchema.safeParse({ ...plan, features: ['\uD83D\uDE00'] }).success).toBe(true);
   });
 
   it('a free plan costs zero, and the update schema leaves out what the caller did not send', () => {

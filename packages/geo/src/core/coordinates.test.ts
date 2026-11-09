@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
+import { FAILURE_ERROR_CODES } from '@arki/failure';
+
+import { formatBounds } from './bounds';
+
 import { coordinatesFromUrl, toStandardCoordinates } from './conversions';
 import {
+  formatCoordinates,
   normalizeCoordinates,
   normalizeLatitude,
   normalizeLongitude,
   parseCoordinates,
+  roundCoordinates,
   validateCoordinates,
 } from './coordinates';
 import { InvalidCoordinates } from './failures';
@@ -79,5 +85,30 @@ describe('validateCoordinates', () => {
   it('returns the coordinates when valid and InvalidCoordinates otherwise', () => {
     expect(validateCoordinates({ lat: 1, lng: 2 })).toEqual({ lat: 1, lng: 2 });
     expect(InvalidCoordinates.is(validateCoordinates({ lat: 91, lng: 2 }))).toBe(true);
+  });
+});
+
+// Why (audit-4 #6): toFixed threw a raw RangeError for a precision outside 0 to 100, NaN silently meant 0
+// places, and roundCoordinates turned every coordinate into NaN past about 308 places. A precision is the
+// caller's constant, so a bad one is the documented invariant failure.
+describe('precision', () => {
+  const invariantBroken = expect.objectContaining({ code: FAILURE_ERROR_CODES.invariant });
+  const point = { lat: 40.712_76, lng: -74.006 };
+  const bounds = { north: 1, south: 0, east: 1, west: 0 };
+
+  it.each([-1, 101, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'precision %s throws the invariant failure from formatCoordinates, roundCoordinates and formatBounds',
+    precision => {
+      expect(() => formatCoordinates(point, precision)).toThrow(invariantBroken);
+      expect(() => roundCoordinates(point, precision)).toThrow(invariantBroken);
+      expect(() => formatBounds(bounds, precision)).toThrow(invariantBroken);
+    },
+  );
+
+  it('accepts the whole range 0 to 100', () => {
+    expect(formatCoordinates(point, 0)).toBe('41, -74');
+    expect(formatCoordinates(point, 100)).toContain('40.712');
+    expect(roundCoordinates(point, 2)).toEqual({ lat: 40.71, lng: -74.01 });
+    expect(formatBounds(bounds, 1)).toBe('N:1.0 S:0.0 E:1.0 W:0.0');
   });
 });

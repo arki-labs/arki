@@ -25,8 +25,12 @@ import { subscriptionStatusValues } from '../primitives.js';
 /** A Stripe object id as the `provider_*_id` columns hold it: 1 to 255 characters, no U+0000. */
 const stripeIdSchema = pgVarcharSchema(255).min(1);
 
-/** Unix seconds `fromUnix` accepts (±8.64e12, the Temporal range); a larger number would make it throw. */
-const unixSeconds = z.number().int().min(-8_640_000_000_000).max(8_640_000_000_000);
+/**
+ * Unix seconds an `instant` column can store: 0001-01-01T00:00:00Z to the last second of 9999 UTC
+ * (the range of `isPgInstant` in core/pg-values.ts). Postgres refuses an earlier or later time with
+ * SQLSTATE 22008 or 22009, and `fromUnix` throws past the Temporal range, so the parser refuses both.
+ */
+const unixSeconds = z.number().int().min(-62_135_596_800).max(253_402_300_799);
 
 const subscriptionItem = z.object({ current_period_start: unixSeconds, current_period_end: unixSeconds });
 

@@ -26,11 +26,21 @@ describe('checkMessage', () => {
     // Postgres cannot store U+0000 (the outbox row would fail with SQLSTATE 22P05), and no mail can carry it.
     ['a NUL character in the text', { ...base, text: 'Hello\u0000' }],
     ['a NUL character in a tag', { ...base, tags: { ref: 'a\u0000b' } }],
+    // A lone surrogate is not text: UTF-8 cannot encode it and the outbox's jsonb column refuses it (22P02).
+    ['a lone high surrogate in the subject', { ...base, subject: 'Hi \uD800' }],
+    ['a lone low surrogate in the html', { ...base, html: '<p>\uDC00</p>' }],
+    ['a lone surrogate in a header name', { ...base, headers: { 'X-\uD800': 'v' } }],
     // Recipients are usually typed by a user, so a bad one is an outcome to show, never a crash.
   ])('refuses %s with a returned MailInvalidMessage, and never throws', (_case, message) => {
     const refused = checkMessage(message);
     expect(MailInvalidMessage.is(refused)).toBe(true);
     expect(refused).toMatchObject({ code: 'mail.invalid_message', status: 422 });
+  });
+
+  it('accepts a real surrogate pair (an emoji) in every field', () => {
+    expect(
+      checkMessage({ ...base, subject: 'Hi \u{1F600}', text: '\u{1F600}', tags: { mood: '\u{1F600}' } }),
+    ).toBeUndefined();
   });
 
   it('accepts a message with only a Bcc recipient', () => {

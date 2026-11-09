@@ -15,6 +15,7 @@ import type { TaxJurisdiction } from './types.js';
 import { getCustomerTaxSummaryInputSchema, taxRecordRowSchema } from './contracts.js';
 import { TaxCurrencyMismatch, TaxLineCurrencyMismatch, TaxRefundSaleNotFound } from './failures.js';
 import { checkTaxIdFormat } from './tax-id.js';
+import { nonNegativeMoneySchema } from '../core/money.js';
 
 /** What `TaxService` reads. A `TaxExemptionRepository` and a `TaxJurisdictionRepository` fit. */
 export type TaxServiceReads = {
@@ -325,7 +326,8 @@ export class TaxService {
    * another currency (`TaxLineCurrencyMismatch`), a breakdown line in another currency
    * (`TaxCurrencyMismatch`), or a record a `tax_records` column cannot store (`InvalidInput`, from
    * `taxRecordRowSchema`: a reference or jurisdiction over 255 characters, U+0000, a negative amount,
-   * a rate of 10000 or more, an `occurredAt` outside the years 1 to 9999). So the provider and the records never disagree. A `reference` recorded
+   * a rate of 10000 or more, an `occurredAt` outside the years 1 to 9999; and a jurisdiction's tax that is
+   * not whole minor units or is past 2^53 - 1 of them, from `nonNegativeMoneySchema`). So the provider and the records never disagree. A `reference` recorded
    * earlier in another currency returns `TaxCurrencyMismatch` too.
    */
   async createTaxTransaction(params: {
@@ -373,6 +375,10 @@ export class TaxService {
       grouped.set(key, entry);
     }
     const lines = [...grouped.values()].map(entry => ({ ...entry, taxAmount: sum(entry.amounts, currency) }));
+    // A `Money` can hold digits below the currency's minor unit (`Money.fromJSON` keeps them) or more units than a
+    // number holds: the record stores whole minor units, so such a total is `InvalidInput`, never a raw throw below
+    const storableAmounts = parse(z.array(nonNegativeMoneySchema), lines.map(line => line.taxAmount.toJSON()));
+    if (isFailure(storableAmounts)) return storableAmounts;
     const taxAmount = sum(
       lines.map(line => line.taxAmount),
       currency,
@@ -465,7 +471,7 @@ export class TaxService {
 
     // The provider worked the tax out itself; the records are the caller's breakdown. They should agree.
     const recorded = transaction.taxAmountExclusive.plus(transaction.taxAmountInclusive).abs();
-    if (recorded.toMinorNumber() !== taxAmount.toMinorNumber()) {
+    if (recorded.toMinorBigInt() !== taxAmount.toMinorBigInt()) {
       logger.warn('Tax transaction {reference}: the provider recorded {recorded} tax, the breakdown says {breakdown}', {
         reference: params.reference,
         recorded: recorded.toString(),
@@ -612,7 +618,7 @@ export class TaxService {
 
     const breakdown = totals.map(total => ({
       jurisdiction: total.jurisdiction,
-      taxAmount: Money.fromMinor(total.saleTaxMinor - total.refundTaxMinor, total.currency),
+      taxAmount: Money.fromMinor(total.saleTaxMinor, total.currency).minus(Money.fromMinor(total.refundTaxMinor, total.currency)),
       transactionCount: total.saleCount,
     }));
 

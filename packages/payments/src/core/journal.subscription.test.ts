@@ -602,6 +602,43 @@ describe('what the caller sends that the tables cannot hold is a typed failure, 
   });
 });
 
+describe('a lone surrogate, which the jsonb event data refuses (22P02), is a typed failure and writes nothing', () => {
+  const lone = 'a\uD800';
+
+  it('syncSubscription and createSubscription refuse one in the provider subscription id or the stream id as schema.invalid_input', async () => {
+    const before = await countEvents(db);
+
+    expect(
+      await journal.run(db, commands.syncSubscription, delivery({ providerSubscriptionId: `sub_${lone}` }), meta),
+    ).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(
+      await journal.run(db, commands.syncSubscription, delivery({ metadata: { store: lone } }), meta),
+    ).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    for (const refused of [
+      journal.run(db, commands.createSubscription, { subscriptionId: `sub_${lone}`, ...delivery() }, meta),
+      journal.run(db, commands.cancelSubscription, { subscriptionId: `sub_${lone}` }, meta),
+      journal.run(db, commands.activateSubscription, { subscriptionId: `sub_${lone}` }, meta),
+    ]) {
+      expect(await refused).toMatchObject({ code: 'schema.invalid_input' });
+    }
+    expect(await countEvents(db)).toBe(before);
+  });
+
+  it('answers a plan id holding one as reference_not_found, as no row holds it', async () => {
+    const before = await countEvents(db);
+
+    expect(await journal.run(db, commands.syncSubscription, delivery({ planId: `plan_${lone}` }), meta)).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'plan' },
+    });
+    expect(await countEvents(db)).toBe(before);
+  });
+});
+
 describe('a whole subscription life', () => {
   it('replays from its events to the stored row, so the journal can rebuild or repair the table', async () => {
     const input = delivery({ status: 'trialing', trialStart: periodStart, trialEnd: periodEnd, metadata: { a: 1 } });

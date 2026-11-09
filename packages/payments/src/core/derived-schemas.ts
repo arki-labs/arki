@@ -11,7 +11,14 @@ import {
   planTierSchema,
   subscriptionStatusSchema,
 } from './contracts.js';
-import { INT4_MAX, pgInstantSchema, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from './pg-values.js';
+import {
+  holdsLoneSurrogate,
+  INT4_MAX,
+  pgInstantSchema,
+  pgJsonRecordSchema,
+  pgTextSchema,
+  pgVarcharSchema,
+} from './pg-values.js';
 import {
   customerIdSchema,
   paymentIdSchema,
@@ -28,6 +35,8 @@ function storedId<S extends z.ZodType<string>>(schema: S) {
     'An id cannot contain the NUL character (U+0000)',
   );
 }
+
+const loneSurrogateMessage = 'A feature cannot contain a lone surrogate (such as U+D800 alone)';
 
 /** A currency code as the columns store it: an ISO 4217 code, upper case, so `planPrice` and `paymentAmount` can read it back. */
 const storedCurrencySchema = z.string().toUpperCase().pipe(currencyCodeSchema);
@@ -103,7 +112,8 @@ function buildCoreDerivedSchemas({
     currency: () => storedCurrencySchema,
     intervalCount: () => z.number().int().positive().max(365),
     // No `.default`: the column's own default fills a new row, and an update schema (`.partial()`) must not reset it
-    features: () => z.array(pgTextSchema),
+    // A jsonb column: no U+0000 (22P05) and no lone surrogate (22P02) in any feature
+    features: () => z.array(pgTextSchema).refine(features => !holdsLoneSurrogate(features), loneSurrogateMessage),
     trialPeriodDays: () => z.number().int().positive().max(365),
     metadata: () => pgJsonRecordSchema,
   });

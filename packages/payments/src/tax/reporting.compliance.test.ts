@@ -302,6 +302,9 @@ describe('audit entries the table cannot store', () => {
     expect(await reporting.createAuditEntry({ ...entry, entityId: 'x'.repeat(256) })).toMatchObject({ code: InvalidInput.code });
     expect(await reporting.createAuditEntry({ ...entry, details: { reason: 'a\u0000b' } })).toMatchObject({ code: InvalidInput.code });
     expect(await reporting.createAuditEntry({ ...entry, details: { metadata: { count: 1n } } })).toMatchObject({ code: InvalidInput.code });
+    // A lone surrogate is refused by the jsonb column (raw 22P02)
+    expect(await reporting.createAuditEntry({ ...entry, details: { reason: 'a\uD800' } })).toMatchObject({ code: InvalidInput.code });
+    expect(await repos.audit.record({ ...entry, id: 'txa_a\u0000b' })).toMatchObject({ code: InvalidInput.code });
     expect(await reporting.getAuditTrail('customer', 'cust_audit')).toEqual([]);
 
     const stored = orThrow(await repos.audit.record(entry));
@@ -325,6 +328,8 @@ describe('getCustomerTaxSummary for a year the contract would refuse', () => {
     const error = await rejectionOf(reporting.getCustomerTaxSummary(customerId, Number.NaN));
 
     expect(error).toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+    // A fractional year used to pass and be read as the year below it
+    expect(await rejectionOf(reporting.getCustomerTaxSummary(customerId, 2024.5))).toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
   });
 });
 
@@ -342,6 +347,22 @@ describe('the average tax rate', () => {
 
     expect(report.summary.taxableTransactions).toBe(2);
     expect(report.summary.averageTaxRate).toBeCloseTo(0.1, 10);
+  });
+});
+
+describe('tax records that add up past 2^53 minor units', () => {
+  // The sums came back through `Number`, and `Money.fromMinor` of an unsafe number threw a raw NumericRangeError
+  it('are reported exactly by the compliance report and the export', async () => {
+    const paid = await payment({ amount: '10' });
+    const row = { type: 'sale' as const, jurisdiction: 'Hugeland', rate: '1', taxAmountMinor: Number.MAX_SAFE_INTEGER, currency: 'EUR', customerId, paymentId: paid };
+    orThrow(await repos.records.recordMany([{ ...row, reference: 'o_huge_1' }, { ...row, reference: 'o_huge_2' }]));
+
+    const report = orThrow(await reporting.generateComplianceReport({ reportType: 'vat', period: thisYearPeriod(), jurisdiction: 'hugeland' }));
+    expect(report.totalTaxCollected.map(total => total.toJSON())).toEqual([{ amount: '180143985094819.82', currency: 'EUR' }]);
+    // Tax above the amount leaves no taxable base: no rate
+    expect(report.summary.averageTaxRate).toBe(0);
+    const exported = orThrow(await reporting.exportTaxData({ format: 'csv', period: thisYearPeriod() }));
+    expect(exported.data).toContain('180143985094819.82');
   });
 });
 

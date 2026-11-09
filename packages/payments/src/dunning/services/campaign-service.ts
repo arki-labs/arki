@@ -9,13 +9,14 @@ import { getLogger } from '@arki/log';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure, orThrow } from '@arki/failure';
 import { Currency } from '@arki/money';
-import { ensure, parse } from '@arki/schema';
+import { ensure, is, parse } from '@arki/schema';
 
 import type { CoreTables } from '../../core/tables.js';
 import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types.js';
 import type { UserId } from '../../core/user-id.js';
 import { customerIdSchema, paymentIdSchema, subscriptionIdSchema } from '../../core/primitives.js';
+import { pgTextSchema } from '../../core/pg-values.js';
 import { ReferenceNotFound } from '../../core/providers/provider-error.js';
 import type {
   CreateDunningCampaignInput,
@@ -72,11 +73,17 @@ type EligibleCustomer = {
 
 const logger = getLogger('arki:payments:dunning');
 
-/** Narrows a cross-domain query to (or away from) the customers a caller named. */
+/**
+ * Narrows a cross-domain query to (or away from) the customers a caller named. An id no customer row can
+ * hold (U+0000, which Postgres refuses as a parameter) names nobody, so it is left out: a list of only such
+ * ids to include matches no customer.
+ */
 function customerFilters(column: SQL, filters?: CampaignExecutionFilters): SQL[] {
   const conditions: SQL[] = [];
-  if (filters?.customerIds?.length) conditions.push(sql`${column} IN ${valueList(filters.customerIds)}`);
-  if (filters?.excludeCustomerIds?.length) conditions.push(sql`${column} NOT IN ${valueList(filters.excludeCustomerIds)}`);
+  const storable = (ids: readonly CustomerId[]) => ids.filter(id => is(id, pgTextSchema));
+  if (filters?.customerIds?.length) conditions.push(sql`${column} IN ${valueList(storable(filters.customerIds))}`);
+  const excluded = storable(filters?.excludeCustomerIds ?? []);
+  if (excluded.length > 0) conditions.push(sql`${column} NOT IN ${valueList(excluded)}`);
 
   return conditions;
 }
@@ -170,8 +177,9 @@ export class DunningCampaignService {
 
   /**
    * Create a new dunning campaign with templates. The steps are parsed with `dunningCampaignTemplatesSchema`
-   * before any write; steps it refuses, or an actor id, text or JSON Postgres cannot store, return
-   * `schema.invalid_input` and write nothing.
+   * and the campaign with `createDunningCampaignInputSchema` before any write; a value they refuse (a setting
+   * or trigger count outside its range, NaN, a status no subscription has, an invalid spend range), or an
+   * actor id or JSON Postgres cannot store, returns `schema.invalid_input` and writes nothing.
    */
   async createCampaign(
     input: CreateDunningCampaignInput,
@@ -219,9 +227,10 @@ export class DunningCampaignService {
    * Steps are matched by `stepNumber`: a matching step is updated in place (its id, and so the history
    * that points at it, survives), a new number is inserted, and a number that is gone is deleted.
    * A step that already sent a communication cannot be deleted: the update returns
-   * `DunningTemplateInUse` and nothing changes. Returns `null` for an unknown campaign, and
-   * `schema.invalid_input` for steps `dunningCampaignTemplatesSchema` refuses or an actor id, text or JSON
-   * Postgres cannot store; nothing is written then. Omit `templates` to leave the steps alone.
+   * `DunningTemplateInUse` and nothing changes. Returns `null` for an unknown campaign (also an id no row
+   * can hold), and `schema.invalid_input` for steps `dunningCampaignTemplatesSchema` refuses, campaign
+   * fields `updateDunningCampaignInputSchema` refuses, or an actor id or JSON Postgres cannot store; nothing
+   * is written then. Omit `templates` to leave the steps alone.
    */
   async updateCampaign(
     campaignId: DunningCampaignId,
@@ -234,6 +243,8 @@ export class DunningCampaignService {
       const steps = parse(dunningCampaignTemplatesSchema, nextTemplates);
       if (isFailure(steps)) return steps;
     }
+    // No campaign has an id Postgres cannot take as a parameter (U+0000): unknown, before any query
+    if (!is(campaignId, pgTextSchema)) return null;
 
     return this.db.transaction(async tx => {
       const campaignRepo = createDunningCampaignRepository(tx, this.tables);

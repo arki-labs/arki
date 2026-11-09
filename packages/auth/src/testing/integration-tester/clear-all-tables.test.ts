@@ -10,8 +10,9 @@
 import { defineRelations } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { integer, pgEnum, pgTable, text } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { startPostgresContainer } from '@arki/testing/containers';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -49,8 +50,17 @@ const collars = pgTable('collars', {
     .notNull()
     .references(() => pets.id, { onDelete: 'cascade' }),
 });
-const relations = defineRelations({ widgets, owners, pets, visits, collars }, () => ({}));
-const schema = { widgets, widgetKind, owners, pets, visits, collars, relations };
+// Two tables that reference each other: no order of separate DELETEs can empty both while each holds a row.
+const leftNodes = pgTable('left_nodes', {
+  id: integer('id').primaryKey(),
+  rightId: integer('right_id').references((): AnyPgColumn => rightNodes.id),
+});
+const rightNodes = pgTable('right_nodes', {
+  id: integer('id').primaryKey(),
+  leftId: integer('left_id').references((): AnyPgColumn => leftNodes.id),
+});
+const relations = defineRelations({ widgets, owners, pets, visits, collars, leftNodes, rightNodes }, () => ({}));
+const schema = { widgets, widgetKind, owners, pets, visits, collars, leftNodes, rightNodes, relations };
 
 type AppDb = NodePgDatabase<typeof relations>;
 type Handle = AppDb | NodePgTransaction<typeof relations>;
@@ -91,6 +101,9 @@ describe('IntegrationTester.clearAllTables', () => {
     await db.execute(
       sql`create table collars (id integer primary key, pet_id integer not null references pets(id) on delete cascade)`,
     );
+    await db.execute(sql`create table left_nodes (id integer primary key, right_id integer)`);
+    await db.execute(sql`create table right_nodes (id integer primary key, left_id integer references left_nodes(id))`);
+    await db.execute(sql`alter table left_nodes add foreign key (right_id) references right_nodes(id)`);
   }, 120_000);
 
   afterAll(async () => {
@@ -106,6 +119,9 @@ describe('IntegrationTester.clearAllTables', () => {
     await database.insert(pets).values({ id: 1, ownerId: 1 });
     await database.insert(visits).values({ id: 1, petId: 1, ownerId: 1 });
     await database.insert(collars).values({ id: 1, petId: 1 });
+    await database.insert(leftNodes).values({ id: 1 });
+    await database.insert(rightNodes).values({ id: 1, leftId: 1 });
+    await database.update(leftNodes).set({ rightId: 1 }).where(eq(leftNodes.id, 1));
     const tester = new AttachedTester({
       schema,
       migrationsFolder: '',
@@ -149,6 +165,32 @@ describe('IntegrationTester.clearAllTables', () => {
     expect(await database.select().from(visits)).toEqual([]);
     expect(await database.select().from(collars)).toEqual([]);
     await tester.clearAllTables();
+  });
+
+  // Why (audit-4 #5): with separate DELETEs, whichever table of a foreign-key cycle went first was refused (raw
+  // 23503), so an app with two tables that reference each other could not reset its data between tests.
+  it.each([
+    ['left first', [leftNodes, rightNodes]],
+    ['right first', [rightNodes, leftNodes]],
+  ] as const)('clears two tables that reference each other, both holding rows (%s)', async (_order, cycle) => {
+    const { database, tester } = await seeded();
+
+    await tester.clearTables(...cycle);
+
+    expect(await database.select().from(leftNodes)).toEqual([]);
+    expect(await database.select().from(rightNodes)).toEqual([]);
+    expect(await database.select().from(owners)).toEqual([{ id: 1 }]);
+    await tester.clearAllTables();
+  });
+
+  it('clearAllTables empties a foreign-key cycle with the rest of the schema', async () => {
+    const { database, tester } = await seeded();
+
+    await tester.clearAllTables();
+
+    expect(await database.select().from(leftNodes)).toEqual([]);
+    expect(await database.select().from(rightNodes)).toEqual([]);
+    expect(await database.select().from(collars)).toEqual([]);
   });
 
   // Why (audit-3 #9): a set that leaves out a table referencing one it clears made Postgres refuse the parent's

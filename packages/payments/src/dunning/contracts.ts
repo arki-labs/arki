@@ -4,8 +4,14 @@ import { instantSchema } from '@arki/date/zod';
 
 import type { SpendRange } from './types.js';
 import { nonNegativeMoneySchema } from '../core/money.js';
-import { INT4_MAX, pgJsonRecordSchema as jsonRecord, pgTextSchema as pgText, pgVarcharSchema } from '../core/pg-values.js';
-import { customerIdSchema } from '../core/primitives.js';
+import {
+  INT4_MAX,
+  pgInstantSchema,
+  pgJsonRecordSchema as jsonRecord,
+  pgTextSchema as pgText,
+  pgVarcharSchema,
+} from '../core/pg-values.js';
+import { customerIdSchema, planTierValues, subscriptionStatusValues } from '../core/primitives.js';
 import {
   communicationChannelValues,
   communicationStatusValues,
@@ -73,8 +79,10 @@ const delayHoursSchema = z.number().int().min(0).max(MAX_DUNNING_HOURS);
 export const campaignTriggerSchema = z.object({
   type: z.enum(['payment_failure', 'subscription_status', 'time_based', 'manual']),
   conditions: z.object({
-    paymentFailureCount: z.number().int().min(1).optional(),
-    subscriptionStatus: z.array(pgText).optional(),
+    // Compared with a failure count in SQL: at most int4, as a count Postgres holds
+    paymentFailureCount: z.number().int().min(1).max(INT4_MAX).optional(),
+    // Compared with the subscriptions' status enum: a status no subscription has would be a raw SQLSTATE 22P02
+    subscriptionStatus: z.array(z.enum(subscriptionStatusValues)).optional(),
     daysSinceLastPayment: daysSchema(0).optional(),
     daysSinceFailure: daysSchema(0).optional(),
     trialEndingDays: daysSchema(0).optional(),
@@ -136,7 +144,8 @@ export const segmentCriteriaSchema = z.object({
       timeframe: daysSchema(1), // days
     })
     .optional(),
-  planTier: z.array(pgText).optional(),
+  // Compared with the plans' tier enum: a tier no plan has would be a raw SQLSTATE 22P02
+  planTier: z.array(z.enum(planTierValues)).optional(),
   lastPaymentDate: z
     .object({
       daysAgo: daysSchema(0),
@@ -302,10 +311,11 @@ export const updateExecutionStatusInputSchema = z.object({
 export const updateCommunicationStatusInputSchema = z.object({
   communicationId: dunningCommunicationIdSchema,
   status: communicationStatusSchema,
-  sentAt: instantSchema().optional(),
-  deliveredAt: instantSchema().optional(),
-  openedAt: instantSchema().optional(),
-  clickedAt: instantSchema().optional(),
+  // Stored in `instant` columns: years 1 to 9999
+  sentAt: pgInstantSchema().optional(),
+  deliveredAt: pgInstantSchema().optional(),
+  openedAt: pgInstantSchema().optional(),
+  clickedAt: pgInstantSchema().optional(),
   failureReason: pgText.optional(),
   providerMessageId: pgVarcharSchema(255).optional(),
   providerResponse: jsonRecord.optional(),
@@ -319,7 +329,8 @@ export const updateCommunicationStatusInputSchema = z.object({
 export const communicationWebhookSchema = z.object({
   providerMessageId: pgVarcharSchema(255),
   event: z.enum(['delivered', 'opened', 'clicked', 'bounced', 'complained']),
-  timestamp: instantSchema(),
+  // Stored in an `instant` column (`delivered_at`, …): years 1 to 9999
+  timestamp: pgInstantSchema(),
   metadata: jsonRecord.optional(),
 });
 
@@ -396,8 +407,9 @@ export const listExecutionsQuerySchema = z.object({
   campaignId: dunningCampaignIdSchema.optional(),
   customerId: customerIdSchema.optional(),
   status: executionStatusSchema.optional(),
-  scheduledAfter: instantSchema().optional(),
-  scheduledBefore: instantSchema().optional(),
+  // Compared with an `instant` column: years 1 to 9999
+  scheduledAfter: pgInstantSchema().optional(),
+  scheduledBefore: pgInstantSchema().optional(),
   sortBy: z.enum(['scheduledAt', 'startedAt', 'completedAt', 'createdAt']).default('scheduledAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
@@ -409,8 +421,9 @@ export const listCommunicationsQuerySchema = z.object({
   customerId: customerIdSchema.optional(),
   channel: communicationChannelSchema.optional(),
   status: communicationStatusSchema.optional(),
-  sentAfter: instantSchema().optional(),
-  sentBefore: instantSchema().optional(),
+  // Compared with an `instant` column: years 1 to 9999
+  sentAfter: pgInstantSchema().optional(),
+  sentBefore: pgInstantSchema().optional(),
   sortBy: z.enum(['sentAt', 'deliveredAt', 'createdAt']).default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });

@@ -39,6 +39,7 @@ import type {
 import type { UserId } from '../user-id.js';
 import type { PaymentProviderConfig, ProviderRefundResult } from './base-provider.js';
 import type { CardDeclined, IdempotencyConflict } from './provider-error.js';
+import { misconfigured } from '../failures.js';
 import { toMinorColumn } from '../money.js';
 import { pgJsonRecordSchema, pgTextSchema } from '../pg-values.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId, planIdSchema } from '../primitives.js';
@@ -75,7 +76,10 @@ export type StripeProviderOptions = {
   references?: StripeReferenceReads;
   /** Replaces Stripe's HTTP layer. Tests pass one that never leaves the process. */
   httpClient?: Stripe.HttpClient;
-  /** Retries of network failures and 5xx answers. Stripe's default is 1. */
+  /**
+   * Retries of network failures and 5xx answers: a whole number, 0 or more. Stripe's default is 1.
+   * Anything else throws `payments.configuration_invalid` when the provider is built.
+   */
   maxNetworkRetries?: number;
 };
 
@@ -141,6 +145,32 @@ function assertWholeCount(value: number | undefined, name: string, max: number):
   );
 }
 
+/**
+ * The preconditions of tax line items that the types cannot state: a `quantity`, when given, is a
+ * whole number of 1 or more (Stripe takes no other). Anything else throws an invariant failure
+ * before any request, where it used to throw a raw `RoundingNecessaryError` or `NumericRangeError`.
+ */
+function assertQuantities(lineItems: { quantity?: number }[]): void {
+  for (const item of lineItems) {
+    invariant(
+      item.quantity === undefined || (Number.isSafeInteger(item.quantity) && item.quantity >= 1),
+      '[@arki/payments] a tax line item quantity must be a whole number of 1 or more',
+    );
+  }
+}
+
+/**
+ * A line item's amount times its quantity, in the call's `currency`. A line item in another currency
+ * breaks the call's precondition (one calculation has one currency): it throws an invariant failure.
+ */
+function lineTotal(item: { amount: Money; quantity?: number }, currency: Currency): Money {
+  invariant(
+    item.amount.currency.code === currency.code,
+    () => `[@arki/payments] every tax line item must be in ${currency.code}, the currency of the call`,
+  );
+  return item.amount.times(item.quantity ?? 1);
+}
+
 /** Metadata Stripe accepts: strings only. Objects become JSON, null and undefined are left out. Run `checkMetadata` on caller metadata first. */
 function toStripeMetadata(metadata: Record<string, unknown> | undefined): Stripe.MetadataParam | undefined {
   if (!metadata) return undefined;
@@ -194,8 +224,8 @@ type TaxTransactionParams = {
  * The Stripe tax calculation params for line items in one currency. Shared by quotes and recorded transactions.
  * Returns `ProviderAmount` for a currency outside ISO 4217, `TaxAddressIncomplete` for an address with no
  * country (the package's `customerDetails` input schema allows one) and the money failure of a line amount
- * Stripe cannot take. A line item in another
- * currency than `currency`, or a fractional quantity, throws: both are the caller's own typed values.
+ * Stripe cannot take. A line item in another currency than `currency` breaks a precondition and throws
+ * an invariant failure (`lineTotal`); quantities were checked at the public door (`assertQuantities`).
  */
 function toTaxCalculationParams(params: {
   currency: string;
@@ -209,8 +239,8 @@ function toTaxCalculationParams(params: {
 
   const lineItems: Stripe.Tax.CalculationCreateParams.LineItem[] = [];
   for (const item of params.lineItems) {
-    // Throws CurrencyMismatchError for a line item in another currency. A whole quantity times an amount is exact.
-    const amount = stripeAmountOf(Money.of(item.amount, currency).times(item.quantity ?? 1));
+    // A whole quantity times an amount is exact
+    const amount = stripeAmountOf(lineTotal(item, currency));
     if (isFailure(amount)) return amount;
     lineItems.push({
       amount,
@@ -266,6 +296,10 @@ export class StripeProvider extends BasePaymentProvider {
 
   constructor(config: PaymentProviderConfig, options: StripeProviderOptions = {}) {
     super(config);
+    const retries = options.maxNetworkRetries;
+    if (retries !== undefined && !(Number.isSafeInteger(retries) && retries >= 0)) {
+      throw misconfigured('maxNetworkRetries', 'a whole number of retries, 0 or more');
+    }
     this.references = options.references;
     this.stripe = new Stripe(config.apiKey, {
       apiVersion: '2026-09-30.endive',
@@ -292,6 +326,15 @@ export class StripeProvider extends BasePaymentProvider {
       } catch (error) {
         const expected = answer?.(error);
         if (expected !== undefined) return expected;
+        // Stripe's form encoder throws a raw URIError for a lone surrogate (such as U+D800 alone) in a
+        // text parameter: caller input Stripe cannot take, thrown as the documented bad-input error
+        if (error instanceof URIError) {
+          throw new PaymentProviderError(
+            'invalid_request',
+            'A text parameter holds a lone surrogate (such as U+D800 alone), which Stripe cannot take',
+            { cause: error },
+          );
+        }
         throw mapStripeError(error);
       }
     });
@@ -1411,6 +1454,11 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   // Tax-related methods
+
+  /**
+   * The tax Stripe calculates for the line items. Precondition: every line item is in `currency` (one
+   * calculation has one currency); one in another currency throws an invariant failure before any request.
+   */
   async calculateTax(params: {
     customerId: CustomerId;
     /** Every line item is in `currency`: one calculation has one currency. */
@@ -1500,8 +1548,12 @@ export class StripeProvider extends BasePaymentProvider {
    *   the whole transaction is reversed. With them, the refunded total (tax included) is reversed.
    *
    * The totals are read from the line items of the recorded transaction: negative for a refund.
+   *
+   * Preconditions (an invariant failure before any request): every line item is in `currency`, and a
+   * `quantity`, when given, is a whole number of 1 or more.
    */
   async createTaxTransaction(params: TaxTransactionParams) {
+    assertQuantities(params.lineItems);
     const transaction =
       params.type === 'refund' ? await this.reverseTaxTransaction(params) : await this.recordTaxSale(params);
     if (isFailure(transaction)) return transaction;
@@ -1588,7 +1640,7 @@ export class StripeProvider extends BasePaymentProvider {
       // Stripe wants the refunded total, tax included, as a negative integer
       const refunded = stripeAmountOf(
         sum(
-          params.lineItems.map(item => Money.of(item.amount, currency).times(item.quantity ?? 1)),
+          params.lineItems.map(item => lineTotal(item, currency)),
           currency,
         ),
       );

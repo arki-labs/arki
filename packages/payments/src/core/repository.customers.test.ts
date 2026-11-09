@@ -23,6 +23,7 @@ import { adminId, core, meta, openDb, plain, rejectionOf, typed, userId, users }
 import { CustomerConflict, WebhookEventNotFound } from './failures.js';
 import { createCustomerId, createPlanId, createWebhookId } from './primitives.js';
 import { ReferenceNotFound } from './providers/provider-error.js';
+import { pgJsonRecordSchema, pgJsonSchema } from './pg-values.js';
 import { PaymentRepository } from './repository.js';
 
 const relations = defineRelations(
@@ -295,6 +296,33 @@ describe('PaymentRepository writes refuse what the columns cannot hold, as typed
     expect(
       await repo.createWebhookEvent({ provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_nul', data: { n: '\u0000' } }),
     ).toMatchObject({ code: 'schema.invalid_input' });
+  });
+});
+
+describe('jsonb values refuse a lone surrogate, which Postgres refuses with 22P02', () => {
+  const lone = ['\uD800', 'a\uDC00', 'x\uD83D', '\uDFFF\uD800'];
+
+  it('pgJsonSchema and pgJsonRecordSchema refuse a lone surrogate in a string or key, and keep a real pair', () => {
+    for (const text of lone) {
+      expect(pgJsonSchema.safeParse(text).success).toBe(false);
+      expect(pgJsonSchema.safeParse([{ deep: text }]).success).toBe(false);
+      expect(pgJsonRecordSchema.safeParse({ note: text }).success).toBe(false);
+      expect(pgJsonRecordSchema.safeParse({ [text]: 1 }).success).toBe(false);
+    }
+    expect(pgJsonRecordSchema.safeParse({ emoji: '\uD83D\uDE00', key: 'plain' }).success).toBe(true);
+    expect(pgJsonSchema.safeParse('\uD83D\uDE00').success).toBe(true);
+  });
+
+  it('createWebhookEvent refuses it as schema.invalid_input and store nothing; a real pair is stored', async () => {
+    expect(
+      await repo.createWebhookEvent({ provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_lone', data: { n: '\uD800' } }),
+    ).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await repo.findWebhookEventByProviderEventId('evt_lone', 'stripe')).toBeNull();
+
+    const kept = orThrow(
+      await repo.createWebhookEvent({ provider: 'stripe', eventType: 'customer.created', providerEventId: 'evt_pair', data: { n: '\uD83D\uDE00' } }),
+    );
+    expect(kept.data).toEqual({ n: '\uD83D\uDE00' });
   });
 });
 

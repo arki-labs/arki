@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { now } from '@arki/date';
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 import { Currency, money, UnknownCurrency, UnknownCurrencyError } from '@arki/money';
 
 import type { Customer } from '../types.js';
@@ -277,6 +277,54 @@ describe('createTaxTransaction', () => {
     });
 
     expect(sale).toMatchObject({ code: 'payments.reference_not_found' });
+    expect(requests).toHaveLength(0);
+  });
+
+  it.each([1.5, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53])(
+    'a line quantity of %s breaks the stated precondition: an invariant failure before calling Stripe',
+    async quantity => {
+      const { stripe, requests } = provider(() => ({ body: {} }));
+      const lineItems = [{ amount: money('10.99', 'USD'), quantity, reference: 'a' }];
+
+      await expect(
+        stripe.createTaxTransaction({ reference: 'r', type: 'sale', currency: 'USD', lineItems }),
+      ).rejects.toMatchObject({
+        code: FAILURE_ERROR_CODES.invariant,
+      });
+      await expect(
+        stripe.createTaxTransaction({
+          reference: 'r',
+          type: 'refund',
+          originalTransactionId: 'tax_1',
+          currency: 'USD',
+          lineItems,
+        }),
+      ).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+      expect(requests).toHaveLength(0);
+    },
+  );
+
+  it('a line item in another currency than the call breaks the stated precondition, before calling Stripe', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+    const lineItems = [{ amount: money('10.99', 'EUR'), reference: 'a' }];
+
+    await expect(
+      stripe.createTaxTransaction({ reference: 'r', type: 'sale', currency: 'USD', lineItems }),
+    ).rejects.toMatchObject({
+      code: FAILURE_ERROR_CODES.invariant,
+    });
+    await expect(
+      stripe.createTaxTransaction({
+        reference: 'r',
+        type: 'refund',
+        originalTransactionId: 'tax_1',
+        currency: 'USD',
+        lineItems,
+      }),
+    ).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+    await expect(stripe.calculateTax({ customerId: customer.id, currency: 'USD', lineItems })).rejects.toMatchObject({
+      code: FAILURE_ERROR_CODES.invariant,
+    });
     expect(requests).toHaveLength(0);
   });
 

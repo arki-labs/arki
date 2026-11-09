@@ -729,4 +729,46 @@ describe('refund command text Postgres cannot store', () => {
     expect(await countEvents(db)).toBe(afterSeed);
     expect(await rowOf(refundId)).toMatchObject({ status: 'pending' });
   });
+  // Event data is jsonb: a lone surrogate passed the command schema and failed the event insert as
+  // db.transaction_rejected (22P02); in a refund id the journal threw ID_MISMATCH as db.transaction_defect
+  it('refuses a lone surrogate in any text or id an event keeps as schema.invalid_input, and writes nothing', async () => {
+    const lone = 'a\uD800';
+    const eventsBefore = await countEvents(db);
+    for (const field of ['customerNote', 'internalNotes', 'metadata', 'paymentId', 'refundId'] as const) {
+      const refused = await journal.run(db, commands.requestRefund, { ...request(), [field]: `${field === 'refundId' ? 'rfnd' : field === 'paymentId' ? 'pay' : ''}${lone}` }, meta);
+      expect(InvalidInput.is(refused) && refused.data.issues[0]?.path).toEqual([field]);
+    }
+    expect(await countEvents(db)).toBe(eventsBefore);
+
+    // One pending refund per payment: the processing one first
+    const processing = await seed('processing');
+    const pending = await seed('pending');
+    const afterSeed = await countEvents(db);
+    const refusals = [
+      await journal.run(db, commands.approveRefund, { refundId: pending, approvedBy: adminId, notes: lone }, meta),
+      await journal.run(db, commands.rejectRefund, { refundId: pending, rejectedBy: adminId, rejectionReason: lone }, meta),
+      await journal.run(db, commands.approveRefund, { refundId: `rfnd${lone}`, approvedBy: adminId }, meta),
+      await journal.run(db, commands.processRefund, { refundId: 'rfnd\u0000' }, meta),
+      await journal.run(db, commands.failRefund, { refundId: processing, errorMessage: lone }, meta),
+      await journal.run(db, commands.completeRefund, { refundId: processing, providerRefundId: `re_${lone}` }, meta),
+      await journal.run(db, commands.completeRefund, { refundId: processing, providerRefundId: 're_1', providerResponse: lone }, meta),
+    ];
+    for (const refused of refusals) expect(refused).toMatchObject({ code: InvalidInput.code });
+    expect(await countEvents(db)).toBe(afterSeed);
+    expect(await rowOf(pending)).toMatchObject({ status: 'pending' });
+    expect(await rowOf(processing)).toMatchObject({ status: 'processing' });
+  });
+
+  // `toMinorColumn` threw NumericRangeError inside the transaction (db.transaction_defect) past 2^53 minor units
+  it('refuses an amount past 2^53 - 1 minor units as schema.invalid_input, and writes nothing', async () => {
+    const eventsBefore = await countEvents(db);
+    const refused = await journal.run(
+      db,
+      commands.requestRefund,
+      request({ originalAmount: usd('100000000000000000'), refundAmount: usd('1') }),
+      meta,
+    );
+    expect(InvalidInput.is(refused) && refused.data.issues[0]?.path).toEqual(['originalAmount']);
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
 });

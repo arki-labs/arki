@@ -1,12 +1,23 @@
 import type { IdOf } from '@arki/contracts';
 import { defineId } from '@arki/contracts';
+import { is } from '@arki/schema';
+
+import { holdsLoneSurrogate, pgTextSchema } from '../core/pg-values.js';
 
 export type RefundId = IdOf<typeof refundIdFactoryInstance>;
 
 const refundIdFactoryInstance = defineId('rfnd');
 
 export const createRefundId = refundIdFactoryInstance.create;
-export const refundIdSchema = refundIdFactoryInstance.schema;
+/**
+ * A refund id a command can store. Beyond the `rfnd` prefix it holds no U+0000 (the `refunds` row refuses it with
+ * SQLSTATE 22021) and no lone surrogate (the journal refuses an unpaired one in an entity id), so such an id is
+ * `schema.invalid_input` before any query.
+ */
+export const refundIdSchema = refundIdFactoryInstance.schema.refine(
+  id => is(id, pgTextSchema) && !holdsLoneSurrogate(id),
+  'A refund id cannot contain U+0000 or a lone surrogate',
+);
 export const refundIdFactory = refundIdFactoryInstance;
 
 export const refundReasonValues = [

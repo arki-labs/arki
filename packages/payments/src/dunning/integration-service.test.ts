@@ -585,3 +585,46 @@ describe('an event handler names what the event refers to and has no row', () =>
     }
   });
 });
+
+describe('the event handlers answer an id holding U+0000 without a raw SQLSTATE 22021 (audit 4)', () => {
+  const NUL = '\u0000';
+
+  it('a customer id is unknown (payments.reference_not_found or no campaign), a subscription id stops nothing', async () => {
+    const { client, db, service, customerId } = await plainDatabase();
+    try {
+      const subscriptionId = orThrow(createSubscriptionId());
+      const paymentId = orThrow(createPaymentId());
+      const customerNotFound = { code: 'payments.reference_not_found', data: { kind: 'customer' } };
+      // A trial-ending campaign with no condition would run for any customer the event names
+      await campaignWithStep(db, true, { type: 'time_based', conditions: {} });
+
+      expect(await service.handlePaymentFailure({ ...event, paymentId, customerId: `cust${NUL}` })).toMatchObject(customerNotFound);
+      expect(await service.handlePaymentSuccess({ paymentId, customerId: `cust${NUL}`, amount: money('5', 'EUR') })).toMatchObject(
+        customerNotFound,
+      );
+      expect(
+        await service.handleTrialEnding({
+          subscriptionId,
+          customerId: `cust${NUL}`,
+          trialEndDate: add(now(), { hours: 72 }),
+          daysUntilEnd: 3,
+        }),
+      ).toBeUndefined();
+      // The recovery path stops executions by customer and subscription before anything else
+      expect(
+        await service.handleSubscriptionStatusChange({
+          subscriptionId: `sub_${NUL}`,
+          customerId,
+          oldStatus: 'past_due',
+          newStatus: 'active',
+        }),
+      ).toBeUndefined();
+      expect(
+        await service.handlePaymentSuccess({ paymentId, customerId, subscriptionId: `sub_${NUL}`, amount: money('5', 'EUR') }),
+      ).toBeUndefined();
+      expect(await db.select().from(dunning.dunningExecutions)).toEqual([]);
+    } finally {
+      await client.close();
+    }
+  });
+});

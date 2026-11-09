@@ -253,7 +253,7 @@ describe('a jurisdiction id that names no jurisdiction', () => {
 
 describe('the exemptions about to expire', () => {
   // `days` is typed, so NaN or a huge count is the caller's bug: it must fail as an invariant before the query, never as `RangeError: Invalid Date`
-  it.each([Number.NaN, 0, 366, 1e15])('refuses %s days with the invariant failure code', async days => {
+  it.each([Number.NaN, 0, 366, 1e15, 1.5])('refuses %s days with the invariant failure code', async days => {
     const error = await rejectionOf(repos.exemptions.findExpiringExemptions(days));
 
     expect(error).toBeInstanceOf(FailureError);
@@ -636,6 +636,52 @@ describe('a value a tax column cannot store', () => {
     const exemption = { type: 'jurisdiction' as const, jurisdictionId, exemptionCode: 'NUL', reason: 'Nul', validFrom: past };
     expect(await repos.exemptions.createExemption(exemption)).toMatchObject(notFound('jurisdiction', jurisdictionId));
     expect(await repos.exemptions.findJurisdictionExemptions(jurisdictionId)).toEqual([]);
+  });
+
+  // Every time column takes the years 1 to 9999 only: a time outside them used to reach Postgres as a raw 22008 or 22009
+  // through createdAt, updatedAt or approvedAt, which the row schemas did not check
+  it('returns schema.invalid_input for a time outside the years 1 to 9999 in any time column, and nothing is written', async () => {
+    const far = instant('+010000-01-01T00:00:00Z');
+    const early = instant('0000-06-01T00:00:00Z');
+    const config = orThrow(await repos.configurations.createConfiguration({ name: 'Timed config' }));
+    const place = orThrow(await repos.jurisdictions.createJurisdiction({ name: 'Timeland', code: 'TL', type: 'country', countryCode: 'TL' }));
+    const exemption = { type: 'customer' as const, customerId: 'cus_timed', exemptionCode: 'TIME', reason: 'Timed', validFrom: past };
+    const created = orThrow(await repos.exemptions.createExemption(exemption));
+
+    for (const time of [far, early]) {
+      expect(await repos.configurations.createConfiguration({ name: 'Bad time', createdAt: time })).toMatchObject(invalid);
+      expect(await repos.configurations.updateConfiguration(config.id, { createdAt: time })).toMatchObject(invalid);
+      expect(await repos.configurations.updateConfiguration(config.id, { updatedAt: time })).toMatchObject(invalid);
+      expect(await repos.jurisdictions.createJurisdiction({ name: 'Bad', code: 'BT', type: 'country', countryCode: 'BT', updatedAt: time })).toMatchObject(invalid);
+      expect(await repos.jurisdictions.updateJurisdiction(place.id, { createdAt: time })).toMatchObject(invalid);
+      expect(await repos.exemptions.createExemption({ ...exemption, approvedAt: time })).toMatchObject(invalid);
+      expect(await repos.exemptions.updateExemption(created.id, { approvedAt: time })).toMatchObject(invalid);
+      expect(await repos.exemptions.updateExemption(created.id, { createdAt: time })).toMatchObject(invalid);
+    }
+
+    expect(await repos.configurations.findConfigurationById(config.id)).toMatchObject({ createdAt: config.createdAt });
+    expect(await repos.jurisdictions.findJurisdictionById(place.id)).toMatchObject({ createdAt: place.createdAt });
+    expect(await repos.exemptions.findExemptionById(created.id)).toMatchObject({ createdAt: created.createdAt, approvedAt: null });
+    expect(await repos.jurisdictions.findJurisdictionByCode('BT', 'BT')).toBeNull();
+    await repos.configurations.deleteConfiguration(config.id);
+    await repos.exemptions.deleteExemption(created.id);
+    expect(await repos.jurisdictions.deleteJurisdiction(place.id)).toBeUndefined();
+  });
+
+  // A typed id (`txc_${string}`) can hold U+0000 or pass the 256 characters of the id column: a new row used to send it as a raw 22021 or 22001
+  it('returns schema.invalid_input for a new row whose id the id column cannot store, and nothing is written', async () => {
+    const tooLong = 'x'.repeat(256);
+    expect(await repos.configurations.createConfiguration({ id: 'txc_a\u0000b', name: 'Nul id' })).toMatchObject(invalid);
+    expect(await repos.configurations.createConfiguration({ id: `txc_${tooLong}`, name: 'Long id' })).toMatchObject(invalid);
+    expect(await repos.jurisdictions.createJurisdiction({ id: 'txj_a\u0000b', name: 'Nul id', code: 'NI', type: 'country', countryCode: 'NI' })).toMatchObject(invalid);
+    expect(await repos.jurisdictions.createJurisdiction({ id: `txj_${tooLong}`, name: 'Long id', code: 'LI', type: 'country', countryCode: 'LI' })).toMatchObject(invalid);
+    const exemption = { type: 'customer' as const, customerId: 'cus_ids', exemptionCode: 'ID', reason: 'Ids', validFrom: past };
+    expect(await repos.exemptions.createExemption({ ...exemption, id: 'txe_a\u0000b' })).toMatchObject(invalid);
+    expect(await repos.exemptions.createExemption({ ...exemption, id: `txe_${tooLong}` })).toMatchObject(invalid);
+
+    expect(await repos.jurisdictions.findJurisdictionByCode('NI', 'NI')).toBeNull();
+    expect(await repos.jurisdictions.findJurisdictionByCode('LI', 'LI')).toBeNull();
+    expect(await db.select().from(tax.taxExemptions).where(eq(tax.taxExemptions.customerId, 'cus_ids'))).toEqual([]);
   });
 
   it('is refused by the request contracts first', () => {

@@ -35,7 +35,7 @@ import {
   MailTooLarge,
   MailUncertain,
 } from '../failures.js';
-import { holdsNul, listOf } from '../message.js';
+import { holdsLoneSurrogate, holdsNul, listOf } from '../message.js';
 import { MAIL_JOB, queuedArgs } from './args.js';
 
 export { MAIL_JOB } from './args.js';
@@ -62,7 +62,7 @@ export type MailOutboxOptions = {
 };
 
 export type EnqueueOptions = Omit<SendOptions, 'signal'> & {
-  /** After this moment the mail is not sent; the job is dead with `MailExpired`. */
+  /** After this moment the mail is not sent; the job is dead with `MailExpired`. An Invalid Date is a returned `MailInvalidMessage`. */
   readonly expiresAt?: Date;
 };
 
@@ -70,8 +70,9 @@ export type MailOutbox = {
   /**
    * Queues one mail inside `tx`. Returns `MailInvalidInput` when the template's schema refuses
    * the input, `MailInvalidMessage` when the message cannot be sent as written (an empty address,
-   * a line break, a NUL character, an `idempotencyKey` that is empty, holds NUL or is over 256
-   * characters), `MailTooLarge` when it is over `maxBytes`, and `MailEnqueueContended` when other
+   * a line break, a NUL character or a lone surrogate in any field, an `idempotencyKey` that is empty,
+   * holds NUL or a lone surrogate or is over 256 characters, an `expiresAt` that is an Invalid Date),
+   * `MailTooLarge` when it is over `maxBytes`, and `MailEnqueueContended` when other
    * writers kept taking its `idempotencyKey` while it queued; nothing is queued. Throws
    * {@link MailError}: `E009` for the root database, `E002` unless there is exactly one `to`
    * recipient. The same `idempotencyKey` while a job is still queued returns that job (`deduped: true`).
@@ -112,6 +113,8 @@ function idempotencyKeyProblem(key: string | undefined): string | undefined {
   if (key === undefined) return undefined;
   if (key === '') return 'The idempotencyKey is empty.';
   if (holdsNul(key)) return 'The idempotencyKey contains the NUL character (U+0000).';
+  // The driver writes a lone surrogate as U+FFFD, so two different keys would share one dedupe slot.
+  if (holdsLoneSurrogate(key)) return 'The idempotencyKey contains a lone surrogate (such as U+D800 alone).';
   const characters = [...key].length;
   if (characters > MAX_IDEMPOTENCY_KEY) {
     return `The idempotencyKey is ${characters} characters; the limit is ${MAX_IDEMPOTENCY_KEY}.`;
@@ -149,13 +152,17 @@ export function mailOutbox(options: MailOutboxOptions): MailOutbox {
     }
     const badKey = idempotencyKeyProblem(enqueueOptions.idempotencyKey);
     if (badKey !== undefined) return MailInvalidMessage({ problem: badKey });
+    const { expiresAt } = enqueueOptions;
+    if (expiresAt !== undefined && Number.isNaN(expiresAt.getTime())) {
+      return MailInvalidMessage({ problem: 'The expiresAt is an Invalid Date.' });
+    }
     const composed = await mailer.compose(template, input, enqueueOptions);
     if (isFailure(composed)) return composed;
 
     const args: QueuedArgs = {
       version: 1,
       message: composed,
-      ...(enqueueOptions.expiresAt === undefined ? {} : { expiresAt: enqueueOptions.expiresAt.toISOString() }),
+      ...(expiresAt === undefined ? {} : { expiresAt: expiresAt.toISOString() }),
     };
     const bytes = new TextEncoder().encode(JSON.stringify(args)).byteLength;
     if (bytes > maxBytes) return MailTooLarge({ bytes, maxBytes });

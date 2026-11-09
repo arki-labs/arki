@@ -12,6 +12,7 @@ import { InvalidInput, invariant, orThrow } from '@arki/failure';
 import { formatIssues, is, parse, recordSchema } from '@arki/schema';
 
 import type { Timestamp } from './timestamps.js';
+import { formatValue } from './format-value.js';
 import { describeKind, epochNanoseconds, isTimestamp } from './timestamps.js';
 
 /** The page shape `assertPaginationValid` checks: an `items` array, and `total`, `nextCursor` and `hasMore` when present. */
@@ -346,13 +347,13 @@ export function assertDeepPartialMatch(
 
     if (expectedValue === null) {
       if (actualValue !== null) {
-        throw new Error(`Expected ${label}.${pathStr} to be null, got ${JSON.stringify(actualValue)}`);
+        throw new Error(`Expected ${label}.${pathStr} to be null, got ${formatValue(actualValue)}`);
       }
     } else if (is(expectedValue, recordSchema)) {
       assertDeepPartialMatch(actualValue, expectedValue, label, currentPath);
     } else if (actualValue !== expectedValue) {
       throw new Error(
-        `Expected ${label}.${pathStr} to be ${JSON.stringify(expectedValue)}, got ${JSON.stringify(actualValue)}`,
+        `Expected ${label}.${pathStr} to be ${formatValue(expectedValue)}, got ${formatValue(actualValue)}`,
       );
     }
   }

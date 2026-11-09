@@ -19,7 +19,7 @@ import type {
 import type { ExportTaxDataInput } from './contracts.js';
 import { getCustomerAnnualSummaryInputSchema } from './contracts.js';
 import type { TaxExemption } from './types.js';
-import { moneyJsonSchema } from '../core/money.js';
+import { moneyJsonSchema, nonNegativeMoneySchema } from '../core/money.js';
 import { StoredTaxInvalid } from './failures.js';
 
 /**
@@ -155,10 +155,11 @@ function totalsByCurrency(amounts: readonly Money[]): Money[] {
 /**
  * The tax a payment recorded in its metadata at checkout (`taxAmount`, `Money` JSON), as `Money`
  * in the payment's currency. No `taxAmount` means no tax was recorded: zero. One that is not
- * `Money` JSON, or is in another currency than the payment, is returned as `StoredTaxInvalid`: a wrong
+ * `Money` JSON, is in another currency than the payment, or is not whole minor units from 0 to 2^53 - 1
+ * (`nonNegativeMoneySchema`; `0.001` EUR, a negative tax) is returned as `StoredTaxInvalid`: a wrong
  * total must not pass.
- * `Money` JSON that `@arki/money` refuses (an unknown currency, too many decimals) is a stored value
- * from outside: it is returned as that `MoneyFailure`.
+ * `Money` JSON that `@arki/money` refuses (an unknown currency) is a stored value from outside: it is
+ * returned as that `MoneyFailure`.
  */
 function recordedTax(paymentId: string, metadata: Record<string, unknown> | null, currency: string) {
   const recorded = metadata?.taxAmount;
@@ -172,6 +173,11 @@ function recordedTax(paymentId: string, metadata: Record<string, unknown> | null
   if (isFailure(tax)) return tax;
   if (tax.currency.code !== currency) {
     return StoredTaxInvalid({ paymentId, problem: 'other_currency', paymentCurrency: currency, taxCurrency: tax.currency.code });
+  }
+  // `Money.fromJSON` keeps digits below the minor unit and any size: tax is whole minor units, zero or more, within 2^53 - 1
+  const bounded = nonNegativeMoneySchema.safeParse(parsed.data);
+  if (!bounded.success) {
+    return StoredTaxInvalid({ paymentId, problem: 'not_money', paymentCurrency: currency, taxCurrency: null }, { cause: bounded.error });
   }
 
   return tax;
@@ -550,7 +556,7 @@ export class TaxReportingService {
     const taxByPayment = new Map<string, Money[]>();
     const paymentTotals = await this.reads.records.totalsByPayment({ start, end, jurisdiction });
     for (const row of paymentTotals) {
-      const tax = Money.fromMinor(row.saleTaxMinor - row.refundTaxMinor, row.currency);
+      const tax = Money.fromMinor(row.saleTaxMinor, row.currency).minus(Money.fromMinor(row.refundTaxMinor, row.currency));
       taxByPayment.set(row.paymentId, [...(taxByPayment.get(row.paymentId) ?? []), tax]);
     }
 
@@ -628,7 +634,9 @@ export class TaxReportingService {
     return {
       rows,
       totalSales: totalsByCurrency(rows.map(row => row.amount)),
-      totalTax: totalsByCurrency(collected.map(row => Money.fromMinor(row.saleTaxMinor - row.refundTaxMinor, row.currency))),
+      totalTax: totalsByCurrency(
+        collected.map(row => Money.fromMinor(row.saleTaxMinor, row.currency).minus(Money.fromMinor(row.refundTaxMinor, row.currency))),
+      ),
       exemptSales: totalsByCurrency(rows.filter(row => row.exempt).map(row => row.amount)),
       taxableCount: taxable.length,
       exemptCount: rows.filter(row => row.exempt).length,
@@ -653,9 +661,10 @@ export class TaxReportingService {
  */
 function averageRate(taxable: readonly TaxExportRow[]): number {
   const rates = taxable
-    .map(row => ({ tax: row.tax.toMinorNumber(), base: row.amount.toMinorNumber() - row.tax.toMinorNumber() }))
-    .filter(({ base }) => base > 0)
-    .map(({ tax, base }) => tax / base);
+    // Bigints: the tax of a payment is a sum of records and can pass 2^53 minor units; the ratio is a float anyway
+    .map(row => ({ tax: row.tax.toMinorBigInt(), base: row.amount.toMinorBigInt() - row.tax.toMinorBigInt() }))
+    .filter(({ base }) => base > 0n)
+    .map(({ tax, base }) => Number(tax) / Number(base));
   return rates.length === 0 ? 0 : rates.reduce((total, rate) => total + rate, 0) / rates.length;
 }
 

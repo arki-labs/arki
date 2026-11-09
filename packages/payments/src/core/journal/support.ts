@@ -13,11 +13,28 @@ import type { Instant } from '@arki/date';
 import type { IdGenerationFailure } from '@arki/contracts';
 import type { Failure, SchemaFailure } from '@arki/failure';
 import type { CommandFailure, DbHandle } from '@arki/journal';
+import { z } from '@arki/contracts';
 import { instant } from '@arki/date';
 import { invariant, isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
-import { pgTextSchema } from '../pg-values.js';
+import { holdsLoneSurrogate, pgTextSchema } from '../pg-values.js';
+
+/**
+ * Text a journal event carries. Event data is stored in a jsonb column, which refuses U+0000
+ * (SQLSTATE 22P05) and a lone surrogate such as `'\ud800'` (22P02); a `text` column refuses only
+ * U+0000. A command input schema builds its text fields and stream ids from this, so such a value is
+ * `schema.invalid_input` before any write.
+ */
+export const eventTextSchema = pgTextSchema.refine(
+  text => !holdsLoneSurrogate(text),
+  'Text cannot contain a lone surrogate (such as U+D800 alone)',
+);
+
+/** Event text with at most `max` characters, for a value that also fills a `varchar(max)` column. */
+export function eventVarcharSchema(max: number) {
+  return eventTextSchema.max(max);
+}
 
 /** Event data is stored as JSON, so a time travels as an ISO string. */
 export function toIso(value: Instant): string {
@@ -56,6 +73,9 @@ export function storedReal(value: number): number {
   return stored;
 }
 
+/** Any array, as `sameJson` compares one item by item (A-39: a schema, not a hand-written guard). */
+const jsonArraySchema = z.array(z.unknown());
+
 /**
  * Deep equality for JSON values. Key order does not matter: a `jsonb` column
  * returns object keys in its own order. A key holding `undefined` equals a
@@ -66,7 +86,7 @@ export function sameJson(left: unknown, right: unknown): boolean {
     return true;
   }
 
-  if (Array.isArray(left) && Array.isArray(right)) {
+  if (is(left, jsonArraySchema) && is(right, jsonArraySchema)) {
     return left.length === right.length && left.every((item, index) => sameJson(item, right[index]));
   }
 
@@ -126,7 +146,8 @@ export type RowReference<Missing> = {
  * it (`FOR KEY SHARE`) until the transaction ends, so the write that follows cannot meet a missing or
  * just-deleted row (a raw Postgres 23503). Returns the first `missing()` for a value no row holds, or
  * `undefined` when every row is there. A value Postgres cannot store (U+0000) is held by no row, so it
- * returns its `missing()` without a query (the lookup would fail with a raw 22021). A `null` or
+ * returns its `missing()` without a query (the lookup would fail with a raw 22021); so does a value with a
+ * lone surrogate, which no row holds as given (the driver writes U+FFFD in its place). A `null` or
  * `undefined` value names nothing to check. Run it in the transaction that writes.
  */
 export async function lockReferences<Missing>(
@@ -137,7 +158,7 @@ export async function lockReferences<Missing>(
   const keys = getTableConfig(table).foreignKeys.map(key => key.reference());
   for (const { column, value, missing } of references) {
     if (value === null || value === undefined) continue;
-    if (!pgTextSchema.safeParse(value).success) return missing();
+    if (!is(value, eventTextSchema)) return missing();
     const key = keys.find(candidate => candidate.columns[0] === column);
     const target = key?.foreignColumns[0];
     invariant(key && target, () => `[@arki/payments] ${column.name} has no foreign key to look the row up by`);

@@ -657,6 +657,40 @@ describe('caller input refused before any request', () => {
     expect(requests).toHaveLength(0);
   });
 
+  it('metadata holding a lone surrogate is schema.invalid_input before any request: the row keeps it in jsonb (22P02)', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    expect(await stripe.updateSubscription(subscriptionRow.id, { metadata: { note: 'a\uD800b' } })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await stripe.updateCustomer(customer.id, { metadata: { ['k\uDC00']: 'v' } })).toMatchObject({ code: 'schema.invalid_input' });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('text with a lone surrogate, which the Stripe form encoding cannot take, throws PaymentProviderError invalid_request before any request', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    await expect(stripe.detachPaymentMethod('pm_\uD800')).rejects.toMatchObject({ name: 'PaymentProviderError', code: 'invalid_request' });
+    await expect(stripe.createCustomer({ userId: 'usr_alice', email: 'a@example.com', name: 'A\uDC00' })).rejects.toMatchObject({
+      name: 'PaymentProviderError',
+      code: 'invalid_request',
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'maxNetworkRetries %s is payments.configuration_invalid when the provider is built',
+    retries => {
+      expect(
+        () =>
+          new StripeProvider(
+            { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
+            { maxNetworkRetries: retries },
+          ),
+      ).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
+    },
+  );
+
   it('answers an id holding U+0000 as missing without asking the references or Stripe', async () => {
     let lookups = 0;
     const counted = {

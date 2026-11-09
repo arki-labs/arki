@@ -132,6 +132,7 @@ Failures are returned as values. Check them with `.is(value)`.
   (`geo.no_address_at_location`, status 404) when no provider finds an address, such as a point at sea.
 - `batchGeocode(addresses, concurrency)` maps each address to what `geocode` returned for it.
 - Coordinate helpers return `InvalidCoordinates` for a value out of range or not a number.
+- Arguments that are the caller's own constants throw the invariant failure `ARKI_FAILURE_E008` (a bug to fix, not an outcome to handle): a `precision` that is not a finite number from 0 to 100 (`formatCoordinates`, `formatCoordinatesWithCardinals`, `roundCoordinates`, `formatBounds`), a bearing that is not finite (`bearingToDirection`), and a marker index that is not a whole number of at least 0 (`getMarkerColor`).
 
 Import every failure from `@arki/geo`.
 

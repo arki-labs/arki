@@ -15,8 +15,10 @@ import {
   taxCalculationModeValues,
   taxConfigIdSchema,
   taxConfigStatusValues,
+  taxAuditEntryIdFactory,
   taxExemptionIdSchema,
   taxJurisdictionIdSchema,
+  taxRecordIdFactory,
 } from './primitives.js';
 
 // Enum schemas
@@ -197,7 +199,7 @@ export const getCustomerExemptionsInputSchema = z.object({
 });
 
 export const getExpiringExemptionsInputSchema = z.object({
-  days: z.number().min(1).max(365).default(30),
+  days: z.number().int().min(1).max(365).default(30),
 });
 
 export const approveExemptionInputSchema = z.object({
@@ -210,11 +212,18 @@ export const revokeExemptionInputSchema = z.object({
 
 // What each table can store. The tax repositories check every row they write with one of these, so a
 // value a column would refuse (U+0000 in text or JSON, text over the column's length, a bigint in JSON,
-// a rate `numeric(8,4)` cannot hold, a negative tax amount, a time outside the years 1 to 9999) returns `InvalidInput`
-// (`schema.invalid_input`) and nothing is written, never a raw Postgres error.
+// a rate `numeric(8,4)` cannot hold, a negative tax amount, an id with U+0000 or over 256 characters, a time
+// outside the years 1 to 9999 in any time column) returns `InvalidInput` (`schema.invalid_input`) and nothing
+// is written, never a raw Postgres error.
+
+/** A row's own id: the id schema, and what the `varchar(256)` id column can store (no U+0000). */
+function storedId<S extends z.ZodType<string>>(schema: S) {
+  return schema.refine(value => pgVarchar(256).safeParse(value).success, 'An id holds at most 256 characters and no U+0000');
+}
 
 /** A `tax_configurations` row. `TaxConfigurationRepository` checks inserts with it, updates with `.partial()`. */
 export const taxConfigurationRowSchema = z.object({
+  id: storedId(taxConfigIdSchema).optional(),
   name: pgVarchar(255),
   description: pgText.nullish(),
   defaultTaxCode: pgVarchar(50).optional(),
@@ -225,10 +234,13 @@ export const taxConfigurationRowSchema = z.object({
   features: pgJsonSchema.optional(),
   createdBy: pgVarchar(255).nullish(),
   updatedBy: pgVarchar(255).nullish(),
+  createdAt: pgInstantSchema().optional(),
+  updatedAt: pgInstantSchema().optional(),
 });
 
 /** A `tax_jurisdictions` row. `TaxJurisdictionRepository` checks inserts with it, updates with `.partial()`. */
 export const taxJurisdictionRowSchema = z.object({
+  id: storedId(taxJurisdictionIdSchema).optional(),
   name: pgVarchar(255),
   code: pgVarchar(20),
   countryCode: pgVarchar(2),
@@ -238,10 +250,13 @@ export const taxJurisdictionRowSchema = z.object({
   filingFrequency: pgVarchar(50).nullish(),
   effectiveFrom: pgInstantSchema().nullish(),
   effectiveTo: pgInstantSchema().nullish(),
+  createdAt: pgInstantSchema().optional(),
+  updatedAt: pgInstantSchema().optional(),
 });
 
 /** A `tax_exemptions` row. `TaxExemptionRepository` checks inserts with it, updates and approvals with `.partial()`. */
 export const taxExemptionRowSchema = z.object({
+  id: storedId(taxExemptionIdSchema).optional(),
   customerId: pgVarchar(255).nullish(),
   productCode: pgVarchar(100).nullish(),
   exemptionCode: pgVarchar(50),
@@ -252,10 +267,14 @@ export const taxExemptionRowSchema = z.object({
   documents: pgJsonSchema.optional(),
   createdBy: pgVarchar(255).nullish(),
   approvedBy: pgVarchar(255).nullish(),
+  approvedAt: pgInstantSchema().nullish(),
+  createdAt: pgInstantSchema().optional(),
+  updatedAt: pgInstantSchema().optional(),
 });
 
 /** A `tax_audit_entries` row. `TaxAuditRepository.record` checks every entry with it. */
 export const taxAuditRowSchema = z.object({
+  id: storedId(taxAuditEntryIdFactory.schema).optional(),
   entityId: pgVarchar(255),
   details: pgJsonSchema,
   occurredAt: pgInstantSchema().optional(),
@@ -263,6 +282,7 @@ export const taxAuditRowSchema = z.object({
 
 /** A `tax_records` row. `TaxRecordRepository.recordMany` checks every row with it, and `createTaxTransaction` before it asks the provider. */
 export const taxRecordRowSchema = z.object({
+  id: storedId(taxRecordIdFactory.schema).optional(),
   reference: pgVarchar(255),
   jurisdiction: pgVarchar(255),
   /** Percent as decimal text; the column is `numeric(8,4)`, so 10000 or more cannot be stored */
@@ -343,29 +363,29 @@ export const taxIdValidationSchema = z.object({
 
 export const getCustomerTaxSummaryInputSchema = z.object({
   customerId: pgText,
-  year: z.number().min(2000).max(2100),
+  year: z.number().int().min(2000).max(2100),
 });
 
 // Reporting & compliance
 export const generateComplianceReportInputSchema = z.object({
   reportType: z.enum(['sales_and_use_tax', 'vat', 'gst']),
-  year: z.number().min(2000).max(2100),
-  quarter: z.number().min(1).max(4).optional(),
-  month: z.number().min(1).max(12).optional(),
+  year: z.number().int().min(2000).max(2100),
+  quarter: z.number().int().min(1).max(4).optional(),
+  month: z.number().int().min(1).max(12).optional(),
   jurisdiction: pgText.optional(),
 });
 
 export const exportTaxDataInputSchema = z.object({
   format: z.enum(['csv', 'json', 'xml']),
-  year: z.number().min(2000).max(2100),
-  quarter: z.number().min(1).max(4).optional(),
-  month: z.number().min(1).max(12).optional(),
+  year: z.number().int().min(2000).max(2100),
+  quarter: z.number().int().min(1).max(4).optional(),
+  month: z.number().int().min(1).max(12).optional(),
   includeExemptions: z.boolean().default(false),
 });
 
 export const getCustomerAnnualSummaryInputSchema = z.object({
   customerId: pgText,
-  year: z.number().min(2000).max(2100),
+  year: z.number().int().min(2000).max(2100),
 });
 
 // Responses. Amounts go out as `Money` JSON (`{ amount: '19.99', currency: 'EUR' }`), so each

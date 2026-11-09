@@ -37,6 +37,12 @@ function findable(...texts: (string | undefined)[]): boolean {
   return texts.every(text => text === undefined || is(text, pgTextSchema));
 }
 
+/** Whether an amount column holds `amount` exactly: no digits below the minor unit, at most 2^53 - 1 minor units either way. */
+function fitsAmountColumn(amount: Money): boolean {
+  const whole = amount.toScale(amount.currency.scale, 'halfEven');
+  return whole.eq(amount) && whole.abs().toMinorBigInt() <= BigInt(Number.MAX_SAFE_INTEGER);
+}
+
 export type RefundsDatabase =
   | NodePgDatabase<AnyRelations>
   | NodePgTransaction<AnyRelations>
@@ -206,7 +212,9 @@ export class RefundRepository {
 
   /**
    * The refunds that match every filter given, newest first. `startDate` and `endDate` fall in the years
-   * 1 to 9999, or it throws `FailureError` (`invariant`). A `userId` no row can hold (U+0000) matches none.
+   * 1 to 9999, and `minAmount` and `maxAmount` are whole minor units of their currency, at most 2^53 - 1 of
+   * them, as the amount column holds; anything else throws `FailureError` (`invariant`) before a query.
+   * A `userId` no row can hold (U+0000) matches none.
    */
   async searchRefunds(filters: {
     status?: RefundStatus;
@@ -221,6 +229,11 @@ export class RefundRepository {
     invariant(
       [filters.startDate, filters.endDate].every(time => time === undefined || isPgInstant(time)),
       'searchRefunds needs times in the years 1 to 9999 (UTC)',
+    );
+    // A bound the column cannot hold made `toMinorColumn` throw a raw RoundingNecessaryError or NumericRangeError
+    invariant(
+      [filters.minAmount, filters.maxAmount].every(amount => amount === undefined || fitsAmountColumn(amount)),
+      'searchRefunds needs amount bounds in whole minor units, at most 2^53 - 1 of them',
     );
     if (!findable(filters.userId)) return [];
     const conditions = [];

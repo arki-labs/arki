@@ -29,7 +29,7 @@ import { CommandConflict, CommandInvalid, CommandNotFound } from '@arki/journal'
 import { Money } from '@arki/money';
 
 import type { CoreTables } from '../tables.js';
-import { pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from '../pg-values.js';
+import { pgJsonRecordSchema } from '../pg-values.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
 import { fromStoredNumber, moneyJsonSchema, nonNegativeMoneySchema, toMinorColumn } from '../money.js';
 import {
@@ -39,16 +39,16 @@ import {
   paymentMethodTypeValues,
   subscriptionIdSchema,
 } from '../primitives.js';
-import { lockReferences, storedReal } from './support.js';
+import { eventTextSchema, eventVarcharSchema, lockReferences, storedReal } from './support.js';
 
 type PaymentRow = CoreTables['payments']['$inferSelect'];
 
 const paymentMethodSchema = z.enum(paymentMethodTypeValues);
 const metadataSchema = pgJsonRecordSchema;
-/** The id a command reads its payment stream by: one a text column can hold. */
+/** The id a command reads its payment stream by: one a text column and the event's jsonb can hold. */
 const paymentRefSchema = paymentIdSchema.refine(
-  id => pgTextSchema.safeParse(id).success,
-  'An id cannot contain the NUL character (U+0000)',
+  id => eventTextSchema.safeParse(id).success,
+  'An id cannot contain the NUL character (U+0000) or a lone surrogate',
 );
 
 export const initiatePaymentInputSchema = z.object({
@@ -57,19 +57,19 @@ export const initiatePaymentInputSchema = z.object({
   subscriptionId: subscriptionIdSchema.nullable().optional(),
   userId: userIdSchema,
   customerId: customerIdSchema,
-  providerPaymentId: pgVarcharSchema(255).min(1),
+  providerPaymentId: eventVarcharSchema(255).min(1),
   amount: nonNegativeMoneySchema,
   paymentMethod: paymentMethodSchema.default('card'),
-  description: pgTextSchema.nullable().optional(),
+  description: eventTextSchema.nullable().optional(),
   metadata: metadataSchema.nullable().optional(),
 });
 
 export const completePaymentInputSchema = z.object({
   paymentId: paymentRefSchema,
-  receiptUrl: pgTextSchema.nullable().optional(),
+  receiptUrl: eventTextSchema.nullable().optional(),
 });
 
-export const failPaymentInputSchema = z.object({ paymentId: paymentRefSchema, failureReason: pgTextSchema });
+export const failPaymentInputSchema = z.object({ paymentId: paymentRefSchema, failureReason: eventTextSchema });
 
 export const cancelPaymentInputSchema = z.object({ paymentId: paymentRefSchema });
 
@@ -83,9 +83,9 @@ export const recordPaymentRefundInputSchema = z.object({
 
 export const recordPaymentDisputeInputSchema = z.object({
   paymentId: paymentRefSchema,
-  disputeId: pgVarcharSchema(255).min(1),
-  status: pgVarcharSchema(64).min(1),
-  reason: pgTextSchema.nullable().optional(),
+  disputeId: eventVarcharSchema(255).min(1),
+  status: eventVarcharSchema(64).min(1),
+  reason: eventTextSchema.nullable().optional(),
 });
 
 export type InitiatePaymentInput = z.input<typeof initiatePaymentInputSchema>;

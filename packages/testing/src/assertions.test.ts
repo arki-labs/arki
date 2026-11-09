@@ -137,6 +137,19 @@ describe('assertPaginationValid shape', () => {
 });
 
 describe('assertDeepPartialMatch walks objects and arrays', () => {
+  // Why: the mismatch message used JSON.stringify, so a bigint column (or a cycle) turned the path-naming
+  // assertion into a bare TypeError that hid which field differed.
+  it('names the differing path for a bigint or circular value instead of a TypeError from JSON.stringify', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(() => assertDeepPartialMatch({ count: 2n }, { count: 1n })).toThrow(
+      'Expected object.count to be "1n", got "2n"',
+    );
+    expect(() => assertDeepPartialMatch({ owner: circular }, { owner: null })).toThrow(
+      'Expected object.owner to be null, got [object Object]',
+    );
+  });
+
   it('matches nested objects and array entries, and reports the path of a miss', () => {
     expect(() => assertDeepPartialMatch({ a: { b: 1, c: 2 }, list: [1] }, { a: { b: 1 } })).not.toThrow();
     expect(() => assertDeepPartialMatch([{ id: 1 }], [{ id: 1 }])).not.toThrow();

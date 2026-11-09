@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant, now } from '@arki/date';
 import { FAILURE_ERROR_CODES, InvalidInput, orThrow } from '@arki/failure';
-import { money } from '@arki/money';
+import { Money, money } from '@arki/money';
 
 import type { Customer } from '../core/types.js';
 import { createCustomerId } from '../core/primitives.js';
@@ -342,7 +342,43 @@ describe('a tax record a column cannot store', () => {
 
     expect(await repos.records.recordMany([row, { ...row, jurisdiction: 'Berlin', rate: '10000' }])).toMatchObject({ code: InvalidInput.code });
     expect(await repos.records.recordMany([{ ...row, taxAmountMinor: -1 }])).toMatchObject({ code: InvalidInput.code });
+    // An id the `varchar(256)` id column cannot store used to reach Postgres as a raw 22021 or 22001
+    expect(await repos.records.recordMany([{ ...row, id: 'txr_a\u0000b' }])).toMatchObject({ code: InvalidInput.code });
+    expect(await repos.records.recordMany([{ ...row, id: `txr_${'x'.repeat(256)}` }])).toMatchObject({ code: InvalidInput.code });
     expect(await repos.records.findByReference('sale', 'direct_1')).toEqual([]);
+  });
+
+  // A `Money` can carry digits below the cent (`Money.fromJSON` keeps them) or more units than a number holds:
+  // `toMinorNumber` used to throw a raw RoundingNecessaryError or NumericRangeError out of createTaxTransaction
+  it('is refused as schema.invalid_input for tax that is not whole minor units or past 2^53 of them, before Stripe is asked', async () => {
+    const before = requests.length;
+    const sale = { type: 'sale' as const, customerId, lineItems, currency: 'EUR' };
+    for (const [reference, amount] of [
+      ['pay_sub_cent', orThrow(Money.fromJSON({ amount: '0.001', currency: 'EUR' }))],
+      ['pay_past_number', orThrow(Money.fromJSON({ amount: '123456789012345678901234567890', currency: 'EUR' }))],
+    ] as const) {
+      const refused = await service.createTaxTransaction({ ...sale, reference, breakdown: [{ ...germany, amount }] });
+      expect(refused).toMatchObject({ code: InvalidInput.code });
+      expect(await repos.records.findByReference('sale', reference)).toEqual([]);
+    }
+    expect(requests).toHaveLength(before);
+  });
+});
+
+describe('tax records that add up past 2^53 minor units', () => {
+  // Sums came back through `Number`, and `Money.fromMinor` of an unsafe number threw a raw NumericRangeError
+  it('are summed exactly by the repository and the customer summary', async () => {
+    const largest = Number.MAX_SAFE_INTEGER;
+    const at = instant('2033-06-01T00:00:00Z');
+    const row = { type: 'sale' as const, jurisdiction: 'Bigland', rate: '1', taxAmountMinor: largest, currency: 'EUR', customerId: otherCustomer, occurredAt: at };
+    expect(await repos.records.recordMany([{ ...row, reference: 'big_1' }, { ...row, reference: 'big_2' }])).toBeUndefined();
+
+    const totals = await repos.records.totalsByJurisdiction({ start: instant('2033-01-01T00:00:00Z'), end: instant('2034-01-01T00:00:00Z'), customerId: otherCustomer });
+    expect(totals).toEqual([
+      { jurisdiction: 'Bigland', currency: 'EUR', saleTaxMinor: '18014398509481982', refundTaxMinor: '0', saleCount: 2, refundCount: 0 },
+    ]);
+    const summary = await service.getCustomerTaxSummary({ customerId: otherCustomer, year: 2033 });
+    expect(summary.totalTaxPaid.map(total => total.toJSON())).toEqual([{ amount: '180143985094819.82', currency: 'EUR' }]);
   });
 });
 
@@ -380,5 +416,9 @@ describe('getCustomerTaxSummary for a year the contract would refuse', () => {
     const error = await rejectionOf(service.getCustomerTaxSummary({ customerId, year: Number.NaN }));
 
     expect(error).toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+    // A fractional year used to pass and be read as the year below it
+    expect(await rejectionOf(service.getCustomerTaxSummary({ customerId, year: 2024.5 }))).toMatchObject({
+      code: FAILURE_ERROR_CODES.invariant,
+    });
   });
 });

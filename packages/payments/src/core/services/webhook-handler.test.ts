@@ -986,6 +986,12 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
   it.each([
     ['subscription.updated', stripeSubscription('psub_no_items', { items: { data: [] } })],
     ['subscription.updated', stripeSubscription('psub_far', { canceled_at: 9_000_000_000_000 })],
+    // Past the years 1 to 9999 an `instant` column refuses (22008/22009): refused here, before the journal write
+    [
+      'subscription.updated',
+      stripeSubscription('psub_year_10000', { items: { data: [{ current_period_start: 1_760_000_000, current_period_end: 253_402_300_800 }] } }),
+    ],
+    ['subscription.updated', stripeSubscription('psub_year_0', { trial_start: -62_135_596_801 })],
     ['payment.refunded', { id: 'ch_bad', object: 'charge', amount_refunded: -1, currency: 'usd' }],
     ['refund.updated', { object: 'refund' }],
     ['payment.dispute_created', { id: 'dp_bad', object: 'dispute' }],
@@ -1113,6 +1119,14 @@ describe('WebhookHandler: what the webhook_events row cannot hold is refused bef
     const { handler, counter } = countingHandler({ result: { ...valid, data: { object: 'subscription', note: 'a\u0000b' } } });
 
     expect(await deliver(handler, 'evt_nul_body')).toMatchObject({ code: 'payments.webhook_payload_invalid' });
+    expect(counter.runs).toBe(0);
+    expect(await db.select().from(webhookEvents)).toHaveLength(0);
+  });
+
+  it('a body holding a lone surrogate is a final payload failure: the jsonb column refuses it (22P02)', async () => {
+    const { handler, counter } = countingHandler({ result: { ...valid, data: { object: 'subscription', note: 'a\uD800b' } } });
+
+    expect(await deliver(handler, 'evt_lone_body')).toMatchObject({ code: 'payments.webhook_payload_invalid', data: { retryable: false } });
     expect(counter.runs).toBe(0);
     expect(await db.select().from(webhookEvents)).toHaveLength(0);
   });

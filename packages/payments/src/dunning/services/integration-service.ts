@@ -7,8 +7,10 @@ import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
 import { Money } from '@arki/money';
+import { is } from '@arki/schema';
 
 import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
+import { pgTextSchema } from '../../core/pg-values.js';
 import { ReferenceNotFound } from '../../core/providers/provider-error.js';
 import type { CoreTables } from '../../core/tables.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types.js';
@@ -411,11 +413,13 @@ export class DunningIntegrationService {
   /**
    * Stop active dunning campaigns when payment succeeds (if configured). The executions are cancelled
    * in one statement: a database error is thrown, so a caller never sees success while dunning goes on.
+   * An id no row can hold (U+0000) has no executions to stop, answered without a query.
    */
   private async stopDunningCampaignsOnPaymentSuccess(
     customerId: CustomerId,
     subscriptionId?: SubscriptionId,
   ): Promise<void> {
+    if (!is(customerId, pgTextSchema) || (subscriptionId !== undefined && !is(subscriptionId, pgTextSchema))) return;
     // The customer's active executions, each with the campaign that decides whether payment stops it
     const executions = this.dunningExecutions;
     const activeExecutions = await this.db

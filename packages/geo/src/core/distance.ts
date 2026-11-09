@@ -1,3 +1,5 @@
+import { invariant } from '@arki/failure';
+
 import type { Coordinates, Direction, DistanceUnit } from './types.js';
 import { CONVERSION_FACTORS, EARTH_RADIUS_KM } from './types.js';
 
@@ -96,10 +98,12 @@ export function calculateBearing(point1: Coordinates, point2: Coordinates): numb
 
 /**
  * Get compass direction from bearing
- * @param bearing - Bearing in degrees (0-360)
+ * @param bearing - Bearing in degrees (0-360; any finite number is wrapped into that range). `NaN` or an
+ *   infinity throws the invariant failure `ARKI_FAILURE_E008`, a caller bug (it returned `undefined`).
  * @returns Cardinal or intercardinal direction
  */
 export function bearingToDirection(bearing: number): Direction {
+  invariant(Number.isFinite(bearing), () => `bearingToDirection: bearing must be a finite number, got ${bearing}.`);
   const normalized = ((bearing % 360) + 360) % 360;
   const index = Math.round(normalized / 22.5) % 16;
 

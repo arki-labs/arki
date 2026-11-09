@@ -770,8 +770,10 @@ export class TaxAuditRepository {
 export type TaxRecordTotal = {
   jurisdiction: string;
   currency: string;
-  saleTaxMinor: number;
-  refundTaxMinor: number;
+  /** Whole minor units as decimal text, exact: a sum of many records can pass 2^53 (`Money.fromMinor` takes it) */
+  saleTaxMinor: string;
+  /** Whole minor units as decimal text, exact, as `saleTaxMinor` */
+  refundTaxMinor: string;
   /** Distinct sale transactions that carried tax here */
   saleCount: number;
   /** Distinct refund transactions that carried tax here */
@@ -852,8 +854,8 @@ export class TaxRecordRepository {
       .select({
         paymentId: sql<string>`${this.taxRecords.paymentId}`,
         currency: this.taxRecords.currency,
-        saleTaxMinor: sql<number>`coalesce(sum(${taxAmountMinor}) filter (where ${type} = 'sale'), 0)`.mapWith(Number),
-        refundTaxMinor: sql<number>`coalesce(sum(${taxAmountMinor}) filter (where ${type} = 'refund'), 0)`.mapWith(Number),
+        saleTaxMinor: sql<string>`coalesce(sum(${taxAmountMinor}) filter (where ${type} = 'sale'), 0)::text`,
+        refundTaxMinor: sql<string>`coalesce(sum(${taxAmountMinor}) filter (where ${type} = 'refund'), 0)::text`,
       })
       .from(this.taxRecords)
       .where(
@@ -883,8 +885,8 @@ export class TaxRecordRepository {
       .select({
         jurisdiction: this.taxRecords.jurisdiction,
         currency: this.taxRecords.currency,
-        saleTaxMinor: sql<number>`coalesce(sum(${taxAmountMinor}) filter (where ${type} = 'sale'), 0)`.mapWith(Number),
-        refundTaxMinor: sql<number>`coalesce(sum(${taxAmountMinor}) filter (where ${type} = 'refund'), 0)`.mapWith(Number),
+        saleTaxMinor: sql<string>`coalesce(sum(${taxAmountMinor}) filter (where ${type} = 'sale'), 0)::text`,
+        refundTaxMinor: sql<string>`coalesce(sum(${taxAmountMinor}) filter (where ${type} = 'refund'), 0)::text`,
         saleCount: sql<number>`count(distinct ${reference}) filter (where ${type} = 'sale')`.mapWith(Number),
         refundCount: sql<number>`count(distinct ${reference}) filter (where ${type} = 'refund')`.mapWith(Number),
       })
@@ -908,8 +910,10 @@ export class TaxRecordRepository {
 export type TaxRecordPaymentTotal = {
   paymentId: string;
   currency: string;
-  saleTaxMinor: number;
-  refundTaxMinor: number;
+  /** Whole minor units as decimal text, exact: a sum can pass 2^53 */
+  saleTaxMinor: string;
+  /** Whole minor units as decimal text, exact */
+  refundTaxMinor: string;
 };
 
 export type TaxRepositoryTables = Pick<

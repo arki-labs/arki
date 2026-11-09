@@ -317,9 +317,31 @@ describe('what is accepted into the queue', () => {
     expect(await queue().queued()).toEqual([]);
   });
 
+  // Postgres refuses a lone surrogate's \ud800 escape in the jsonb args column with SQLSTATE 22P02 (audit-4 #7).
+  it('a lone surrogate in the template input is a returned MailInvalidMessage, not a Postgres error', async () => {
+    const outbox = outboxWith(provider('ok').transport);
+    const result = await db.transaction(tx =>
+      outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/\uD800' }, { to }),
+    );
+    expect(result).toMatchObject({ code: 'mail.invalid_message', status: 422 });
+    expect(await queue().queued()).toEqual([]);
+  });
+
+  // toISOString throws a RangeError on an Invalid Date (audit-4 #7); the caller gets a failure to show instead.
+  it('an expiresAt that is an Invalid Date is a returned MailInvalidMessage and queues nothing', async () => {
+    const outbox = outboxWith(provider('ok').transport);
+    const result = await db.transaction(tx =>
+      outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to, expiresAt: new Date(Number.NaN) }),
+    );
+    expect(result).toMatchObject({ code: 'mail.invalid_message', status: 422 });
+    expect(await queue().queued()).toEqual([]);
+  });
+
   it.each([
     ['empty', ''],
     ['holding a NUL character', 'order\u00001'],
+    // The driver writes a lone surrogate as U+FFFD, so 'k\uD800' and 'k\uDC00' would share one dedupe slot.
+    ['holding a lone surrogate', 'order\uD800'],
     ['over 256 characters', 'k'.repeat(257)],
   ])('an idempotencyKey %s is a returned MailInvalidMessage and queues nothing', async (_case, idempotencyKey) => {
     const outbox = outboxWith(provider('ok').transport);

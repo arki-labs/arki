@@ -109,13 +109,15 @@ export const MailExpired = defineFailure('mail.expired', {
 /**
  * The message cannot be sent as written: no recipient, an empty address, a line break in an address,
  * the subject or a header (header injection), a header the message owns, or a NUL character (U+0000)
- * in any field. `send` and `sendRaw` also return it for an `idempotencyKey` holding a line break, a NUL
- * character or a character above U+00FF (it travels as an HTTP header). `enqueue` also returns it for an
- * `idempotencyKey` that is empty, holds NUL or is over 256 characters (the journal's dedupe column).
+ * or a lone surrogate (such as U+D800 alone) in any field. `send` and `sendRaw` also return it for an
+ * `idempotencyKey` holding a line break, a NUL character or a character above U+00FF (it travels as an
+ * HTTP header). `enqueue` also returns it for an `idempotencyKey` that is empty, holds NUL or a lone
+ * surrogate, or is over 256 characters (the journal's dedupe column), and for an `expiresAt` that is an
+ * Invalid Date.
  * Nothing was sent or queued.
  * Recipients are usually typed by a user, so this is an expected outcome, not a bug.
  *
- * @fix Show the user what is wrong with the address, or remove the line break, NUL character or reserved header. The same message fails again.
+ * @fix Show the user what is wrong with the address, or remove the line break, NUL character, lone surrogate or reserved header. The same message fails again.
  * @verify bun run test -- src/message.spec.ts
  */
 export const MailInvalidMessage = defineFailure('mail.invalid_message', {

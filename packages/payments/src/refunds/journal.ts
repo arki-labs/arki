@@ -26,6 +26,7 @@
 import type { Instant } from '@arki/date';
 import type { CommandRunner, EventDef, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import { is } from '@arki/schema';
 import { userIdSchema } from '../core/user-id.js';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getTableConfig } from 'drizzle-orm/pg-core';
@@ -41,9 +42,8 @@ import type { CoreTables } from '../core/tables.js';
 import type { RefundsTables } from './tables.js';
 import type { Refund } from './types.js';
 import type { JournalWriteFailure } from '../core/journal/support.js';
-import { writtenRow } from '../core/journal/support.js';
+import { eventTextSchema, eventVarcharSchema, writtenRow } from '../core/journal/support.js';
 import { fromStoredNumber, moneyJsonSchema, toMinorColumn } from '../core/money.js';
-import { pgTextSchema, pgVarcharSchema } from '../core/pg-values.js';
 import { paymentIdSchema } from '../core/primitives.js';
 import { refundRejectionReasonSchema } from './contracts.js';
 import { RefundCurrencyMismatch } from './failures.js';
@@ -53,26 +53,40 @@ type RefundRow = RefundsTables['refunds']['$inferSelect'];
 
 const reasonSchema = z.enum(refundReasonValues);
 
+/** The most minor units an amount column holds exactly: 2^53 - 1, what `toMinorColumn` can return. */
+const MAX_COLUMN_MINOR_UNITS = BigInt(Number.MAX_SAFE_INTEGER);
+
+/**
+ * An amount a refund command stores: `Money` JSON in whole minor units of its currency (the schema refuses finer
+ * digits) and at most 2^53 - 1 minor units either way, so `toMinorColumn` never throws `NumericRangeError`.
+ * Its sign is a rule of the command (`journal.invalid`), not of this schema.
+ */
+const refundMoneySchema = anyMoneySchema().refine(
+  amount => amount.abs().toMinorBigInt() <= MAX_COLUMN_MINOR_UNITS,
+  'Amount is larger than 9,007,199,254,740,991 minor units',
+);
+
 export const requestRefundInputSchema = z.object({
   /** Left out: the command makes a new id */
   refundId: refundIdSchema.optional(),
-  paymentId: paymentIdSchema,
+  /** Kept in the event: no U+0000, no lone surrogate */
+  paymentId: paymentIdSchema.refine(id => is(id, eventTextSchema), 'A payment id cannot contain U+0000 or a lone surrogate'),
   /** The two amounts share one currency, which is the refund's */
-  originalAmount: anyMoneySchema(),
-  refundAmount: anyMoneySchema(),
+  originalAmount: refundMoneySchema,
+  refundAmount: refundMoneySchema,
   reason: reasonSchema,
-  customerNote: pgTextSchema.nullable().optional(),
-  internalNotes: pgTextSchema.nullable().optional(),
+  customerNote: eventTextSchema.nullable().optional(),
+  internalNotes: eventTextSchema.nullable().optional(),
   requestedBy: userIdSchema,
-  /** A JSON string: the column is `text` */
-  metadata: pgTextSchema.nullable().optional(),
+  /** A JSON string: the column is `text`, and the event keeps it too */
+  metadata: eventTextSchema.nullable().optional(),
 });
 
 export const approveRefundInputSchema = z.object({
   refundId: refundIdSchema,
   approvedBy: userIdSchema,
   /** The approver's notes. Left out or null: none. */
-  notes: pgTextSchema.nullable().optional(),
+  notes: eventTextSchema.nullable().optional(),
 });
 
 export const rejectRefundInputSchema = z.object({
@@ -87,11 +101,11 @@ export const processRefundInputSchema = z.object({ refundId: refundIdSchema });
 export const completeRefundInputSchema = z.object({
   refundId: refundIdSchema,
   /** The provider's id of the refund. It is known only when the provider answered. */
-  providerRefundId: pgVarcharSchema(255).min(1),
-  providerResponse: pgTextSchema.nullable().optional(),
+  providerRefundId: eventVarcharSchema(255).min(1),
+  providerResponse: eventTextSchema.nullable().optional(),
 });
 
-export const failRefundInputSchema = z.object({ refundId: refundIdSchema, errorMessage: pgTextSchema });
+export const failRefundInputSchema = z.object({ refundId: refundIdSchema, errorMessage: eventTextSchema });
 
 export type RequestRefundInput = z.input<typeof requestRefundInputSchema>;
 export type ApproveRefundInput = z.input<typeof approveRefundInputSchema>;

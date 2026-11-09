@@ -220,4 +220,21 @@ describe('getCustomerTaxSummary', () => {
       taxCurrency: 'EUR',
     });
   });
+
+  // `Money.fromJSON` keeps digits below the cent and a negative amount: either used to pass into the totals as tax
+  it.each(['0.001', '-2'])('refuses recorded tax of %s USD, which is not whole cents of zero or more', async amount => {
+    const broken = await payment({
+      customer: otherCustomerId,
+      amount: '40',
+      metadata: { taxAmount: { amount, currency: 'USD' } },
+    });
+
+    const refused = await reporting.getCustomerTaxSummary(otherCustomerId, thisYear);
+    expect(StoredTaxInvalid.is(refused) && refused.data).toEqual({
+      paymentId: broken,
+      problem: 'not_money',
+      paymentCurrency: 'USD',
+      taxCurrency: null,
+    });
+  });
 });

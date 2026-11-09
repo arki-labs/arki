@@ -17,7 +17,8 @@ import type { PaymentRepository } from '../core/repository.js';
 import type { PlanId, SubscriptionStatus } from '../core/types.js';
 import { subscriptionStatusSchema } from '../core/contracts.js';
 import { misconfigured } from '../core/failures.js';
-import { pgTextSchema, pgVarcharSchema } from '../core/pg-values.js';
+import { holdsLoneSurrogate, pgTextSchema, pgVarcharSchema } from '../core/pg-values.js';
+import { userIdSchema } from '../core/user-id.js';
 import {
   PriceNotConfigured,
   SubscriptionWithoutItems,
@@ -64,6 +65,12 @@ const stripeSubscriptionSchema = z.object({
   metadata: z.record(pgTextSchema, pgTextSchema),
 });
 type StripeSubscriptionFields = z.output<typeof stripeSubscriptionSchema>;
+
+/**
+ * The user a checkout is for. It goes to Stripe (customer metadata, `client_reference_id`) and to the
+ * `customers` row, so it holds no U+0000 (the row refuses it) and no lone surrogate (Stripe refuses it).
+ */
+const checkoutUserIdSchema = userIdSchema.refine(id => !holdsLoneSurrogate(id), 'A user id cannot contain a lone surrogate');
 
 /** What the checkout stores for a new customer: the `customers.email` column holds 255 characters. */
 const checkoutEmailSchema = pgVarcharSchema(255).pipe(z.email());
@@ -279,9 +286,9 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
   return {
     /**
      * Start a hosted Checkout subscribe flow; returns the URL to redirect the browser to.
-     * A price that is not in `prices` returns `PriceNotConfigured`, and an email the customer row
-     * cannot hold (not an address, or over 255 characters) returns `InvalidInput`, both before any
-     * provider request, so no Stripe customer is left without a local row.
+     * A price that is not in `prices` returns `PriceNotConfigured`, and a `userId` that holds U+0000 or a
+     * lone surrogate, or an email the customer row cannot hold (not an address, or over 255 characters),
+     * returns `InvalidInput`, all before any provider request, so no Stripe customer is left without a local row.
      */
     async createCheckoutSession({
       userId,
@@ -300,6 +307,9 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
       | SchemaFailure
     > {
       if (!planByPrice.has(priceId)) return PriceNotConfigured({ priceId });
+      // A user id the row refuses made a Stripe customer first and then failed to store it
+      const checkedUserId = parse(checkoutUserIdSchema, userId);
+      if (isFailure(checkedUserId)) return checkedUserId;
 
       // Find-or-create the local customer so the subscription webhook can attribute the row to a
       // user. `provider.createCustomer` also creates the Stripe-side customer.

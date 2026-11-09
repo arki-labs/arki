@@ -2,7 +2,7 @@ import { userIdSchema } from './user-id.js';
 import { z } from '@arki/contracts';
 import { instantSchema } from '@arki/date/zod';
 
-import { INT4_MAX, pgInstantSchema, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from './pg-values.js';
+import { INT4_MAX, holdsLoneSurrogate, pgInstantSchema, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from './pg-values.js';
 
 import { refundIdSchema } from '../refunds/primitives.js';
 import { moneyJsonSchema, positiveMoneySchema, priceSchema } from './money.js';
@@ -39,7 +39,11 @@ export const createPlanInputSchema = z.object({
   price: priceSchema,
   interval: billingIntervalSchema,
   intervalCount: z.number().int().positive().max(365).default(1),
-  features: z.array(pgTextSchema).default([]),
+  /** Stored in a jsonb column: no U+0000 and no lone surrogate in a feature */
+  features: z
+    .array(pgTextSchema)
+    .refine(features => !holdsLoneSurrogate(features), 'A feature cannot contain a lone surrogate (such as U+D800 alone)')
+    .default([]),
   trialPeriodDays: z.number().int().positive().max(365).optional(),
   metadata: pgJsonRecordSchema.optional(),
 });

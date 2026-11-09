@@ -18,6 +18,8 @@ import { sql } from 'drizzle-orm';
 import { invariant } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
+import { formatValue } from './format-value.js';
+
 /**
  * Runtime debug logger for main tester operations
  */
@@ -118,7 +120,8 @@ export function logQuery(query: string, params?: readonly unknown[]): void {
 }
 
 /**
- * Log the current state of an object
+ * Log the current state of an object, as indented JSON. Never throws on the state: a bigint prints as
+ * `12n`, and a value JSON cannot hold (a cycle) prints as its tag, such as `[object Object]`.
  *
  * @param label - Label for the state
  * @param state - Object to log
@@ -130,7 +133,7 @@ export function logQuery(query: string, params?: readonly unknown[]): void {
  */
 export function logState(label: string, state: unknown): void {
   if (debugEnabled) {
-    debugLogger(`[STATE] ${label}:`, JSON.stringify(state, null, 2));
+    debugLogger(`[STATE] ${label}:`, formatValue(state, 2));
   }
 }
 
@@ -255,7 +258,7 @@ export function logSection(label: string): void {
 }
 
 /**
- * Create a scoped debug context
+ * Create a scoped debug context. Its `state` writes the value like {@link logState}: never throws on it.
  *
  * @param context - Context label
  * @returns Debug functions scoped to the context
@@ -284,7 +287,7 @@ export function createDebugContext(context: string) {
     },
     state: (label: string, state: unknown) => {
       if (debugEnabled) {
-        debugLogger(`[STATE] [${context}] ${label}:`, JSON.stringify(state, null, 2));
+        debugLogger(`[STATE] [${context}] ${label}:`, formatValue(state, 2));
       }
     },
     section: (label: string) => {

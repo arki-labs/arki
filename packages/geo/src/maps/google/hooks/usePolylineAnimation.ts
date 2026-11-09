@@ -30,7 +30,8 @@ export type PolylineData = {
   color?: string;
 
   /**
-   * Optional color index (if using palette)
+   * Optional color index (if using palette): a whole number of at least 0 (see `getMarkerColor`);
+   * anything else throws the invariant failure `ARKI_FAILURE_E008` when the polylines are drawn.
    */
   colorIndex?: number;
 

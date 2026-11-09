@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { calculateDestination, calculateMidpoint } from './distance';
+import { FAILURE_ERROR_CODES } from '@arki/failure';
+
+import { bearingToDirection, calculateDestination, calculateMidpoint } from './distance';
 
 // Why: a longitude past 180 is not a valid coordinate; maps, `validateCoordinates` and the geo schemas refuse it,
 // so a midpoint or destination across the antimeridian (Fiji, the Bering Strait) broke whatever used it next.
@@ -25,4 +27,23 @@ describe('calculateDestination', () => {
     expect(there.lat).toBeCloseTo(0, 6);
     expect(there.lng).toBeCloseTo(-179, 6);
   });
+});
+
+// Why: a NaN or infinite bearing indexed past the 16-entry table and returned undefined typed as a Direction,
+// which broke whatever read it next. A bearing the caller computed is the caller's, so it is the invariant failure.
+describe('bearingToDirection', () => {
+  it('wraps any finite bearing into a direction', () => {
+    expect(bearingToDirection(0)).toBe('N');
+    expect(bearingToDirection(-90)).toBe('W');
+    expect(bearingToDirection(720 + 135)).toBe('SE');
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'bearing %s throws the invariant failure',
+    bearing => {
+      expect(() => bearingToDirection(bearing)).toThrow(
+        expect.objectContaining({ code: FAILURE_ERROR_CODES.invariant }),
+      );
+    },
+  );
 });

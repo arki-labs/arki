@@ -131,7 +131,7 @@ await tester.clearTablesByPattern(/^temp_/);
 await tester.clearTablesExcept(users, settings);
 ```
 
-Each helper deletes a child table before the parents it references, whatever order the schema exports them in, so foreign keys never refuse the cleanup.
+Each helper empties its tables in one statement, so foreign keys never refuse the cleanup, whatever order the schema exports them in, even for two tables that reference each other. A set that leaves out a table referencing a cleared one (without `on delete cascade` or `set null`) throws the invariant failure `ARKI_FAILURE_E008` before any row is deleted: clear that table too.
 
 ## Seed
 
@@ -141,6 +141,8 @@ await tester.seed({
   games: [game1],
 });
 ```
+
+Tables are inserted in the key order of the object, so list a parent before the tables that reference it. Records the table refuses (a missing referenced row, a repeated key, a missing NOT NULL column) throw Postgres's error and fail the test; rows are typed `object`, so the compiler does not catch them.
 
 ## Check results
 

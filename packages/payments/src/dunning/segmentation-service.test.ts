@@ -329,7 +329,7 @@ describe('the segmentation doors check what the type allows but Postgres refuses
       await segments.create({ ...base, name: 'Json', criteria: { customAttributes: { [`k${NUL}`]: 1 } }, createdBy: 'usr_admin' }),
       await segments.create({ ...base, name: 'Frequency', updateFrequency: 3_000_000_000, createdBy: 'usr_admin' }),
       await segments.update(kept.id, { name: `bad${NUL}` }),
-      await service.createSegment({ ...base, name: 'Tier', criteria: { planTier: [`pro${NUL}`] } }, 'usr_admin'),
+      await service.createSegment({ ...base, name: 'Tier', criteria: { paymentFailureHistory: { count: 1, timeframe: 0 } } }, 'usr_admin'),
       await service.updateSegment(kept.id, { criteria: { lastPaymentDate: { daysAgo: Number.NaN } } }),
       await service.getCustomersMatchingCriteria({ subscriptionDuration: { min: Number.NaN } }),
       await service.getCustomersMatchingCriteria({ planTier: [`pro${NUL}`] }),
@@ -360,5 +360,114 @@ describe('the segmentation doors check what the type allows but Postgres refuses
 
     expect(await service.listSegments({ ...page, search: `a${NUL}` })).toEqual([]);
     expect(await service.listSegments({ ...page, search: 'Paged segment' })).toEqual([expect.objectContaining({ id: kept.id })]);
+  });
+});
+
+describe('spend ranges are read as money doors, never thrown on (audit 4)', () => {
+  const fine = { totalSpent: { min: { amount: '1.001', currency: 'EUR' } } };
+  const huge = { totalSpent: { max: { amount: '99999999999999999999', currency: 'EUR' } } };
+  const base = { type: 'custom', autoUpdate: true, updateFrequency: 24 } as const;
+
+  it('createSegment, updateSegment and getCustomersMatchingCriteria return money.rounding_necessary or money.out_of_range and write nothing', async () => {
+    const before = await db.select().from(tables.customerSegments);
+    const kept = orThrow(await service.createSegment({ ...base, name: 'Range kept', criteria: {} }, 'usr_admin'));
+
+    // Each threw a raw RoundingNecessaryError or NumericRangeError from toMinorNumber
+    expect(await service.createSegment({ ...base, name: 'Too fine', criteria: fine }, 'usr_admin')).toMatchObject({
+      code: 'money.rounding_necessary',
+    });
+    expect(await service.createSegment({ ...base, name: 'Too large', criteria: huge }, 'usr_admin')).toMatchObject({
+      code: 'money.out_of_range',
+    });
+    expect(await service.updateSegment(kept.id, { criteria: fine })).toMatchObject({ code: 'money.rounding_necessary' });
+    expect(await service.getCustomersMatchingCriteria(huge)).toMatchObject({ code: 'money.out_of_range' });
+
+    expect(await db.select().from(tables.customerSegments)).toHaveLength(before.length + 1);
+    expect(await service.getSegment(kept.id)).toMatchObject({ criteria: {} });
+  });
+
+  it('a stored range finer than the minor unit makes every reader return money.rounding_necessary, as the docs promise', async () => {
+    const [stored] = await db
+      .insert(tables.customerSegments)
+      .values({ name: 'Stored fine range', type: 'custom', criteria: fine, autoUpdate: false, updateFrequency: 24, createdBy: 'usr_admin' })
+      .returning();
+    if (!stored) throw new Error('the segment was not stored');
+    const buyer = await newCustomer('fine-range');
+    await pay(buyer, 1000);
+    const rounding = { code: 'money.rounding_necessary' };
+
+    try {
+      expect(await service.updateSegmentCustomerCount(stored.id)).toMatchObject(rounding);
+      expect(await service.getCustomersInSegment(stored.id)).toMatchObject(rounding);
+      expect(await service.getCustomerSegments(buyer.id)).toMatchObject(rounding);
+      expect(await service.updateCustomerRiskProfile(buyer.id)).toMatchObject(rounding);
+      expect(await service.getCustomerRiskProfile(buyer.id)).toBeNull();
+    } finally {
+      await db.delete(tables.customerSegments).where(eq(tables.customerSegments.id, stored.id));
+    }
+  });
+
+  it('the segment repository parses its contract: a range, tier or lone surrogate it refuses is schema.invalid_input', async () => {
+    const segments = createCustomerSegmentRepository(db, tables);
+    const created = [
+      await segments.create({ ...base, name: 'Repo fine range', criteria: fine, createdBy: 'usr_admin' }),
+      await segments.create({ ...base, name: 'Repo lone', criteria: { customAttributes: { note: 'x\uD800' } }, createdBy: 'usr_admin' }),
+      await segments.create({ ...base, name: '', criteria: {}, createdBy: 'usr_admin' }),
+    ];
+
+    for (const answer of created) expect(answer).toMatchObject({ code: 'schema.invalid_input' });
+    // A tier the plans' enum has not was a raw SQLSTATE 22P02 in the segment query
+    expect(await service.getCustomersMatchingCriteria({ planTier: ['gold'] })).toMatchObject({ code: 'schema.invalid_input' });
+    const rows = await db.select({ name: tables.customerSegments.name }).from(tables.customerSegments);
+    expect(rows.map(row => row.name)).not.toEqual(expect.arrayContaining(['Repo fine range', 'Repo lone', '']));
+  });
+});
+
+describe('the segmentation doors answer an id holding U+0000 as unknown (audit 4)', () => {
+  const NUL = '\u0000';
+
+  it('services and repositories return null, undefined, [] or payments.reference_not_found, never a raw SQLSTATE 22021', async () => {
+    const segments = createCustomerSegmentRepository(db, tables);
+    const profiles = createCustomerRiskProfileRepository(db, tables);
+    const buyer = await newCustomer('nul-ids');
+    orThrow(await service.updateCustomerRiskProfile(buyer.id));
+    const profile = await service.getCustomerRiskProfile(buyer.id);
+    const customerNotFound = { code: 'payments.reference_not_found', data: { kind: 'customer', missing: 'row' } };
+
+    expect(await service.getCustomerRiskProfile(`cust${NUL}`)).toBeNull();
+    expect(await service.updateCustomerRiskProfile(`cust${NUL}`)).toMatchObject(customerNotFound);
+    expect(await service.calculateCustomerRiskScore(`cust${NUL}`)).toMatchObject(customerNotFound);
+    expect(await service.getCustomerSegments(`cust${NUL}`)).toEqual([]);
+    expect(await service.getSegment(`cs${NUL}`)).toBeNull();
+    expect(await service.updateSegmentCustomerCount(`cs${NUL}`)).toMatchObject({ code: 'payments.customer_segment_not_found' });
+    expect(await service.getCustomersInSegment(`cs${NUL}`)).toMatchObject({ code: 'payments.customer_segment_not_found' });
+    expect(await service.updateSegment(`cs${NUL}`, { name: 'Renamed' })).toBeNull();
+    await service.deleteSegment(`cs${NUL}`);
+    expect(await segments.updateCustomerCount(`cs${NUL}`, 1)).toBeUndefined();
+    expect(await profiles.findByCustomerId(`cust${NUL}`)).toBeUndefined();
+    expect(await profiles.update(`cust${NUL}`, { metadata: null })).toBeUndefined();
+    expect(await profiles.updateSegments(`cust${NUL}`, [])).toBeUndefined();
+    if (!profile) throw new Error('the profile was not stored');
+    const { id: _id, createdAt: _created, updatedAt: _updated, ...fields } = profile;
+    expect(await profiles.create({ ...fields, customerId: `cust${NUL}` })).toMatchObject(customerNotFound);
+    expect(await profiles.upsert({ ...fields, customerId: `cust${NUL}` })).toMatchObject(customerNotFound);
+    // The segment id is compared as jsonb, where a lone surrogate is refused too (SQLSTATE 22P02 / 22P05)
+    expect(await profiles.findBySegmentId(`cs${NUL}`)).toEqual([]);
+    expect(await profiles.findBySegmentId('cs\uD800')).toEqual([]);
+    expect(await profiles.updateSegments(buyer.id, ['cs\uD800'])).toMatchObject({ code: 'schema.invalid_input' });
+
+    // The real customer's profile is untouched
+    expect(await service.getCustomerRiskProfile(buyer.id)).toEqual(profile);
+  });
+
+  it('calculateCustomerRiskScore for an unknown customer returns payments.reference_not_found instead of a score of nobody', async () => {
+    const unknown = orThrow(createCustomerId());
+    const known = await newCustomer('scored');
+
+    expect(await service.calculateCustomerRiskScore(unknown)).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'customer', id: unknown },
+    });
+    expect(orThrow(await service.calculateCustomerRiskScore(known.id))).toMatchObject({ category: expect.any(String) });
   });
 });

@@ -478,6 +478,20 @@ describe('Stripe: createSubscriptionBilling().createCheckoutSession for a user w
     expect(requests).toEqual([]);
   });
 
+  // A U+0000 user id made a Stripe customer, then the customers row refused it (a Stripe customer with no local row);
+  // a lone surrogate made the provider throw. Both are refused now before any Stripe request
+  it.each([
+    ['U+0000', 'usr_a\u0000b'],
+    ['a lone surrogate', 'usr_a\uD800'],
+  ] as const)('a user id holding %s is refused as schema.invalid_input before Stripe makes a customer', async (_what, owner) => {
+    const { billing, requests } = billingWhereStripeCreates('cus_never_made_for_bad_id');
+
+    const failure = await billing.createCheckoutSession({ userId: owner, email: 'bad-id@example.com', priceId: 'price_pro_monthly' });
+
+    expect(failure).toMatchObject({ code: 'schema.invalid_input' });
+    expect(requests).toEqual([]);
+  });
+
   it('a Stripe customer that belongs to another user is returned as customer_conflict', async () => {
     const owner = 'usr_checkout_conflict';
     await db.insert(users).values({ id: owner });
@@ -680,6 +694,19 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
     await expect(deliver('rc_hand_built_time', times)).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
 
     expect(await rowsOf('rc_hand_built_time')).toEqual([]);
+    expect(await countEvents(db)).toBe(before);
+  });
+
+  // Event data is jsonb: a lone surrogate failed the insert with a raw 22P02 (db.transaction_rejected)
+  it.each([
+    ['the transaction id', { original_transaction_id: 'rc_lone_\uD800' }],
+    ['the store', { store: '\uD800' }],
+  ])('a lone surrogate in %s is returned as schema.invalid_input, and nothing is written', async (_where, changes) => {
+    const before = await countEvents(db);
+
+    expect(await deliver('rc_lone_store', changes)).toMatchObject({ code: 'schema.invalid_input' });
+
+    expect(await rowsOf('rc_lone_store')).toEqual([]);
     expect(await countEvents(db)).toBe(before);
   });
 
