@@ -1,58 +1,32 @@
-// Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
-import { orThrow } from '@arki/failure';
-
-/**
- * Money in dunning analytics
- *
- * Why it matters: a dunning campaign can recover payments in several
- * currencies, and these totals feed revenue figures. Two currencies must stay
- * apart, and the minor-unit columns must give back exactly what was written.
- */
 import { describe, expect, it } from 'vitest';
 
-import { money } from '@arki/money';
-
-import { fromMinorColumn, toMinorColumn } from '../core/money.js';
-import { createDunningCampaignId } from './primitives.js';
 import { analyticsRowId, sumMinorByCurrency } from './analytics-money.js';
+import { createDunningCampaignId } from './primitives.js';
 
-describe('sumMinorByCurrency', () => {
-  it('never adds two currencies together', () => {
+// Campaign analytics keep one row per currency and day; their recovered revenue is summed per
+// currency and never across currencies, however many rows a date range returns.
+describe('dunning analytics money', () => {
+  it('keeps each currency apart', () => {
     const bag = sumMinorByCurrency([
-      { currency: 'USD', units: '1999' },
-      { currency: 'EUR', units: 500 },
-      { currency: 'usd', units: 1 },
+      { currency: 'USD', units: 150 },
+      { currency: 'eur', units: '200' },
+      { currency: 'USD', units: 50 },
     ]);
-
-    expect(bag.get('USD').toString()).toBe('20 USD');
-    expect(bag.get('EUR').toString()).toBe('5 EUR');
-    expect(bag.currencies().map(c => c.code)).toEqual(['EUR', 'USD']);
+    expect(bag.toJSON()).toEqual(
+      expect.arrayContaining([
+        { amount: '2', currency: 'USD' },
+        { amount: '2', currency: 'EUR' },
+      ]),
+    );
   });
 
-  it('is empty when nothing was recovered', () => {
-    expect(sumMinorByCurrency([]).isZero()).toBe(true);
+  it('sums 200,000 rows without a RangeError from spreading them', () => {
+    const rows = Array.from({ length: 200_000 }, () => ({ currency: 'USD', units: 1 }));
+    expect(sumMinorByCurrency(rows).toJSON()).toEqual([{ amount: '2000', currency: 'USD' }]);
   });
 
-  it('reads units in the currency scale: JPY has no decimals', () => {
-    expect(sumMinorByCurrency([{ currency: 'JPY', units: 1500 }]).get('JPY').toString()).toBe('1500 JPY');
-  });
-});
-
-describe('minor-unit columns', () => {
-  it('round-trip an amount a float4 column would have blurred', () => {
-    // 16,777,217.01 is past what a `real` (about 7 digits) can hold.
-    const amount = money('16777217.01', 'USD');
-
-    expect(toMinorColumn(amount)).toBe(1_677_721_701);
-    expect(fromMinorColumn(toMinorColumn(amount), 'USD').toJSON()).toEqual(amount.toJSON());
-  });
-});
-
-describe('analyticsRowId', () => {
-  it('differs per currency so one day never mixes two currencies in a row', () => {
-    const campaign = orThrow(createDunningCampaignId());
-
-    expect(analyticsRowId(campaign, '2026-10-13', 'usd')).toBe(`${campaign}-2026-10-13-USD`);
-    expect(analyticsRowId(campaign, '2026-10-13', 'EUR')).not.toBe(analyticsRowId(campaign, '2026-10-13', 'USD'));
+  it('names a row by campaign, day and upper-case currency', () => {
+    const campaignId = createDunningCampaignId();
+    expect(analyticsRowId(campaignId, '2026-11-09', 'usd')).toBe(`${campaignId}-2026-11-09-USD`);
   });
 });

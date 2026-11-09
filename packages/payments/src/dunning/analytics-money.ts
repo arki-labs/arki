@@ -25,7 +25,12 @@ export function analyticsRowId(campaignId: DunningCampaignId, day: string, curre
   return `${campaignId}-${day}-${currency.toUpperCase()}`;
 }
 
-/** Sums `(currency, minor units)` pairs into one bag, a balance per currency. */
+/**
+ * Sums `(currency, minor units)` pairs into one bag, a balance per currency. It folds row by row
+ * instead of spreading the rows into one call, so any number of rows fits (a spread past about
+ * 150,000 arguments throws `RangeError`). Throws `NumericRangeError` or `UnknownCurrencyError` for a
+ * stored row whose units or currency `fromMinorColumn` cannot read.
+ */
 export function sumMinorByCurrency(rows: readonly { currency: string; units: number | string }[]): MoneyBag {
-  return MoneyBag.of(...rows.map(row => fromMinorColumn(row.units, row.currency)));
+  return rows.reduce((bag, row) => bag.plus(fromMinorColumn(row.units, row.currency)), MoneyBag.of());
 }
