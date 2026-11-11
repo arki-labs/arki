@@ -145,6 +145,19 @@ export const WebhookEventNotFound = /* @__PURE__ */ defineFailure('payments.webh
 });
 
 /**
+ * The retry service has no strategy with this name, so `updateRetryStrategy` changed nothing.
+ *
+ * @fix Check the name against `getRetryStrategies()`, or add the strategy first with `addRetryStrategy`.
+ * @verify bun run test -- src/core/services/payment-retry-service.test.ts
+ */
+export const RetryStrategyNotFound = /* @__PURE__ */ defineFailure('payments.retry_strategy_not_found', {
+  status: 404,
+  data: z.object({ name: z.string() }),
+  message: 'Retry strategy {name} not found',
+  remediation: 'Check the name against the retry service strategies, or add the strategy first.',
+});
+
+/**
  * A plan with this id is already stored, so `createPlan` wrote nothing.
  *
  * @fix Update the stored plan (`updatePlan`), or leave `id` out so a new one is made.

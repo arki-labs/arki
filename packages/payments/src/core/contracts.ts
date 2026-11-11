@@ -2,7 +2,7 @@ import { userIdSchema } from './user-id.js';
 import { z } from '@arki/contracts';
 import { instantSchema } from '@arki/date/zod';
 
-import { INT4_MAX, holdsLoneSurrogate, pgInstantSchema, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from './pg-values.js';
+import { INT4_MAX, MAX_BATCH_ITEMS, holdsLoneSurrogate, pgInstantSchema, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from './pg-values.js';
 
 import { refundIdSchema } from '../refunds/primitives.js';
 import { moneyJsonSchema, positiveMoneySchema, priceSchema } from './money.js';
@@ -42,6 +42,7 @@ export const createPlanInputSchema = z.object({
   /** Stored in a jsonb column: no U+0000 and no lone surrogate in a feature */
   features: z
     .array(pgTextSchema)
+    .max(MAX_BATCH_ITEMS)
     .refine(features => !holdsLoneSurrogate(features), 'A feature cannot contain a lone surrogate (such as U+D800 alone)')
     .default([]),
   trialPeriodDays: z.number().int().positive().max(365).optional(),
@@ -80,6 +81,7 @@ const customerDetailsSchema = z
           value: z.string(),
         }),
       )
+      .max(MAX_BATCH_ITEMS)
       .optional(),
   })
   .optional();
@@ -189,6 +191,7 @@ export const analyticsQuerySchema = z.object({
   groupBy: z.enum(['day', 'week', 'month', 'year']).optional().default('month'),
   metrics: z
     .array(z.enum(['revenue', 'subscriptions', 'churn', 'mrr', 'arr']))
+    .max(MAX_BATCH_ITEMS)
     .optional()
     .default(['revenue', 'subscriptions']),
 });
@@ -264,7 +267,7 @@ export const healthCheckSchema = z.object({
 });
 
 export const subscriptionAccessSchema = z.object({
-  requiredTiers: z.array(planTierSchema).optional().default([]),
+  requiredTiers: z.array(planTierSchema).max(MAX_BATCH_ITEMS).optional().default([]),
 });
 
 // ============================================
@@ -306,6 +309,7 @@ export const subscriptionPreviewTaxInputSchema = z.object({
           value: z.string(),
         }),
       )
+      .max(MAX_BATCH_ITEMS)
       .optional(),
   }),
 });

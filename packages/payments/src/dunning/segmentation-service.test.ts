@@ -19,6 +19,7 @@ import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 import { UnknownCurrency } from '@arki/money';
 
 import { fromMinorColumn } from '../core/money.js';
+import { MAX_BATCH_ITEMS } from '../core/pg-values.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
 import { userIdFactory } from '../core/user-id.js';
 import { core, planId, schema, users } from '../test-support.js';
@@ -363,6 +364,8 @@ describe('the segmentation doors check what the type allows but Postgres refuses
   });
 });
 
+const spend = (amount: string) => ({ totalSpent: { min: { amount, currency: 'EUR' } } });
+
 describe('spend ranges are read as money doors, never thrown on (audit 4)', () => {
   const fine = { totalSpent: { min: { amount: '1.001', currency: 'EUR' } } };
   const huge = { totalSpent: { max: { amount: '99999999999999999999', currency: 'EUR' } } };
@@ -384,6 +387,25 @@ describe('spend ranges are read as money doors, never thrown on (audit 4)', () =
 
     expect(await db.select().from(tables.customerSegments)).toHaveLength(before.length + 1);
     expect(await service.getSegment(kept.id)).toMatchObject({ criteria: {} });
+  });
+
+  it('a planTier list over MAX_BATCH_ITEMS is schema.invalid_input on every door, before any query', async () => {
+    const tooMany: ('pro')[] = Array.from({ length: MAX_BATCH_ITEMS + 1 }, () => 'pro');
+
+    expect(await service.getCustomersMatchingCriteria({ planTier: tooMany })).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await service.createSegment({ ...base, name: 'Too many tiers', criteria: { planTier: tooMany } }, 'usr_admin')).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await service.updateSegment(orThrow(createCustomerSegmentId()), { criteria: { planTier: tooMany } })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+  });
+
+  it('getCustomersMatchingCriteria returns the exact money code for each spend amount @arki/money refuses', async () => {
+    expect(await service.getCustomersMatchingCriteria(spend('ten'))).toMatchObject({ code: 'money.invalid_text' });
+    expect(await service.getCustomersMatchingCriteria(spend('9'.repeat(5000)))).toMatchObject({ code: 'money.input_too_large' });
+    expect(await service.getCustomersMatchingCriteria(spend('1.001'))).toMatchObject({ code: 'money.rounding_necessary' });
+    expect(await service.getCustomersMatchingCriteria(spend('99999999999999999999'))).toMatchObject({ code: 'money.out_of_range' });
   });
 
   it('a stored range finer than the minor unit makes every reader return money.rounding_necessary, as the docs promise', async () => {

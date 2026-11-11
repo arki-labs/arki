@@ -369,6 +369,22 @@ describe('plans', () => {
     expect(preview).toMatchObject({ code: 'money.unknown_currency' });
   });
 
+  it.each([
+    ['money.out_of_range', 'a line amount that is not a whole number of minor units', 'usd', 5.5],
+    ['money.out_of_range', 'a line amount past 2^53', 'usd', 1e21],
+    ['money.provider_amount', 'an invoice currency Stripe has no amount rule for', 'kwd', 1000],
+  ])('previewSubscriptionChange returns %s for %s', async (code, _what, currency, amount) => {
+    const { stripe } = provider(request =>
+      request.path === '/v1/invoices/create_preview'
+        ? { body: { id: 'in_preview', object: 'invoice', currency, lines: list([line(amount, true)]) } }
+        : { body: stripeSubscription() },
+    );
+
+    const preview = await stripe.previewSubscriptionChange({ subscriptionId: subscriptionRow.id, planId });
+
+    expect(preview).toMatchObject({ code });
+  });
+
   it('getPlan is null for an unknown plan', async () => {
     const { stripe, requests } = provider(() => ({ body: {} }));
     expect(await stripe.getPlan(orThrow(createPlanId()))).toBeNull();

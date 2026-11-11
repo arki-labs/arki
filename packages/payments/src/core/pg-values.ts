@@ -7,6 +7,31 @@ import { instantSchema } from '@arki/date/zod';
  * as `schema.invalid_input`, every value a column would refuse with a raw SQLSTATE error.
  */
 
+/**
+ * The deepest nesting a JSON value may have: a scalar is depth 0, and each object or array around
+ * it adds 1. A deeper value is refused as `schema.invalid_input`. Without a cap, the checks below
+ * (and `JSON.stringify` in the driver) recurse once per level and overflow the stack on a hostile body.
+ */
+export const MAX_JSON_DEPTH = 100;
+
+/**
+ * Whether this value nests objects or arrays deeper than `MAX_JSON_DEPTH`. It walks with its own
+ * stack, not by recursion, and stops at the first value that is too deep, so a 100,000-level body
+ * costs about 100 steps.
+ */
+export function exceedsJsonDepth(value: unknown): boolean {
+  const pending: { item: unknown; depth: number }[] = [{ item: value, depth: 0 }];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const { item, depth } = next;
+    if (typeof item !== 'object' || item === null) continue;
+    if (depth >= MAX_JSON_DEPTH) return true;
+    for (const child of Object.values(item)) pending.push({ item: child, depth: depth + 1 });
+  }
+  return false;
+}
+
+const jsonDepthMessage = `JSON cannot nest deeper than ${MAX_JSON_DEPTH} levels`;
+
 /** Whether a key or a string anywhere in this JSON value holds U+0000. */
 export function holdsNul(value: unknown): boolean {
   let found = false;
@@ -49,11 +74,13 @@ export function pgVarcharSchema(max: number) {
 
 /**
  * A JSON object stored in a jsonb column: no key or string anywhere in it may hold U+0000 (SQLSTATE
- * 22P05) or a lone surrogate (22P02), and no value may be a `bigint` (the driver throws on one).
+ * 22P05) or a lone surrogate (22P02), no value may be a `bigint` (the driver throws on one), and it
+ * nests at most `MAX_JSON_DEPTH` (100) levels.
  * `holdsBigInt` is declared below; the refine runs at parse time.
  */
 export const pgJsonRecordSchema = z
   .record(pgTextSchema, z.unknown())
+  .refine(value => !exceedsJsonDepth(value), { message: jsonDepthMessage, abort: true })
   .refine(value => !holdsBigInt(value), { message: 'JSON cannot contain a bigint', abort: true })
   .refine(value => !holdsNul(value), 'JSON cannot contain the NUL character (U+0000)')
   .refine(value => !holdsLoneSurrogate(value), 'JSON cannot contain a lone surrogate (such as U+D800 alone)');
@@ -71,11 +98,12 @@ export function holdsBigInt(value: unknown): boolean {
 
 /**
  * Any value stored in a jsonb column (an object, an array, a string, a number, a boolean, null). No
- * `bigint` anywhere in it (the driver throws on one), no U+0000 in any key or string (SQLSTATE 22P05),
+ * `bigint` anywhere in it (the driver throws on one), at most `MAX_JSON_DEPTH` (100) levels of nesting, no U+0000 in any key or string (SQLSTATE 22P05),
  * and no lone surrogate in any key or string (22P02).
  */
 export const pgJsonSchema = z
   .unknown()
+  .refine(value => !exceedsJsonDepth(value), { message: jsonDepthMessage, abort: true })
   .refine(value => !holdsBigInt(value), { message: 'JSON cannot contain a bigint', abort: true })
   .refine(value => !holdsNul(value), 'JSON cannot contain the NUL character (U+0000)')
   .refine(value => !holdsLoneSurrogate(value), 'JSON cannot contain a lone surrogate (such as U+D800 alone)');

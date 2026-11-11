@@ -17,11 +17,11 @@ import {
   taxCalculationModeValues,
   taxConfigIdSchema,
   taxConfigStatusValues,
-  taxAuditEntryIdFactory,
+  taxAuditEntryIdSchema,
   taxExemptionIdSchema,
   taxJurisdictionIdSchema,
   taxPlanIntervalValues,
-  taxRecordIdFactory,
+  taxRecordIdSchema,
   taxRecordTypeValues,
 } from './primitives.js';
 
@@ -287,7 +287,7 @@ export const taxExemptionRowSchema = z.object({
 
 /** A `tax_audit_entries` row. `TaxAuditRepository.record` checks every entry with it. */
 export const taxAuditRowSchema = z.object({
-  id: storedId(taxAuditEntryIdFactory.schema).optional(),
+  id: storedId(taxAuditEntryIdSchema).optional(),
   action: z.enum(taxAuditActionValues),
   entity: z.enum(taxAuditEntityValues),
   entityId: pgVarchar(255),
@@ -297,7 +297,7 @@ export const taxAuditRowSchema = z.object({
 
 /** A `tax_records` row. `TaxRecordRepository.recordMany` checks every row with it, and `createTaxTransaction` before it asks the provider. */
 export const taxRecordRowSchema = z.object({
-  id: storedId(taxRecordIdFactory.schema).optional(),
+  id: storedId(taxRecordIdSchema).optional(),
   type: z.enum(taxRecordTypeValues),
   reference: pgVarchar(255),
   jurisdiction: pgVarchar(255),

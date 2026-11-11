@@ -437,6 +437,35 @@ describe('PaymentRepository reads with values no row can hold', () => {
     expect(WebhookEventNotFound.is(await repo.updateWebhookEvent(event, { processed: true }))).toBe(true);
     expect(WebhookEventNotFound.is(await repo.incrementWebhookEventAttempts(event))).toBe(true);
   });
+
+  it('an id or user id longer than an id column finds nothing, and a list query answers empty, not an invariant', async () => {
+    // Audit 6: the id schemas now refuse such an id, so the list queries' schema check would throw on it
+    const tail = 'q'.repeat(300);
+    const user = `usr_${tail}` as const;
+    const customer = `cust_${tail}` as const;
+    const subscription = `sub_${tail}` as const;
+    const plan = `plan_${tail}` as const;
+
+    expect(await repo.findCustomerByUserId(user)).toBeNull();
+    expect(await repo.findSubscriptionsByUserId(user)).toEqual([]);
+    expect(await repo.findPaymentsBySubscriptionId(subscription)).toEqual([]);
+    expect(await repo.findSubscriptions({ limit: 20, offset: 0, userId: user })).toEqual([]);
+    expect(await repo.findSubscriptions({ limit: 20, offset: 0, planId: plan })).toEqual([]);
+    expect(await repo.findPayments({ limit: 20, offset: 0, customerId: customer })).toEqual([]);
+    expect(await repo.findPayments({ limit: 20, offset: 0, subscriptionId: subscription })).toEqual([]);
+    expect(await repo.updatePlan(plan, { name: 'x' })).toMatchObject({ code: 'payments.reference_not_found' });
+  });
+
+  it('createCustomer refuses a user id longer than the user_id column as schema.invalid_input', async () => {
+    const result = await repo.createCustomer({
+      id: orThrow(createCustomerId()),
+      userId: `usr_${'q'.repeat(300)}`,
+      providerCustomerId: 'cus_long_user',
+      email: 'long-user@example.com',
+    });
+
+    expect(result).toMatchObject({ code: 'schema.invalid_input' });
+  });
 });
 
 describe('PaymentRepository counts', () => {

@@ -399,6 +399,17 @@ describe('handleSubscriptionRecovery', () => {
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 
+  it('an id longer than the id column holds is schema.invalid_input, not a package bug', async () => {
+    const service = dunningWith(ruleDoing('email'));
+    const eventsBefore = await countEvents(db);
+
+    // A valid id plus 255 characters: the stream name it becomes cannot be stored
+    const refused = await service.handleSubscriptionRecovery(`${orThrow(createSubscriptionId())}${'q'.repeat(255)}`);
+
+    expect(refused).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
   it('an unknown subscription returns the journal not-found refusal', async () => {
     const service = dunningWith(ruleDoing('email'));
 

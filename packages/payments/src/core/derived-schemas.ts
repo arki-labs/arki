@@ -14,6 +14,7 @@ import {
 import {
   holdsLoneSurrogate,
   INT4_MAX,
+  MAX_BATCH_ITEMS,
   pgInstantSchema,
   pgJsonRecordSchema,
   pgTextSchema,
@@ -61,7 +62,7 @@ function buildCoreDerivedSchemas({
   const planFields = {
     ...timestamps,
     id: () => planIdSchema,
-    features: () => z.array(z.string()),
+    features: () => z.array(z.string()).max(MAX_BATCH_ITEMS),
     interval: () => billingIntervalSchema,
     tier: () => planTierSchema,
   };
@@ -113,7 +114,11 @@ function buildCoreDerivedSchemas({
     intervalCount: () => z.number().int().positive().max(365),
     // No `.default`: the column's own default fills a new row, and an update schema (`.partial()`) must not reset it
     // A jsonb column: no U+0000 (22P05) and no lone surrogate (22P02) in any feature
-    features: () => z.array(pgTextSchema).refine(features => !holdsLoneSurrogate(features), loneSurrogateMessage),
+    features: () =>
+      z
+        .array(pgTextSchema)
+        .max(MAX_BATCH_ITEMS)
+        .refine(features => !holdsLoneSurrogate(features), loneSurrogateMessage),
     trialPeriodDays: () => z.number().int().positive().max(365),
     metadata: () => pgJsonRecordSchema,
   });

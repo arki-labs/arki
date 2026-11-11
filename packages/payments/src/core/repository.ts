@@ -14,6 +14,7 @@ import { is, parse } from '@arki/schema';
 
 import type { PaymentQuery, PlanQuery, SubscriptionQuery } from './contracts.js';
 import { paymentQuerySchema, planQuerySchema, subscriptionQuerySchema } from './contracts.js';
+import { fitsIdColumn } from './id-length.js';
 import type { CoreTables } from './tables.js';
 import type {
   Customer,
@@ -113,12 +114,13 @@ function assertCount(value: number, name: string): void {
 }
 
 /**
- * Whether a row could hold every given id or text. Postgres stores no U+0000 in text, so a lookup by
- * such a value finds no row; the methods answer it as "not found" without a query, which would fail
- * with a raw SQLSTATE 22021. Typed ids (`pln_…`, `usr_…`) are caller text too.
+ * Whether a row could hold every given id. Postgres stores no U+0000 in text, and an id column holds at
+ * most `ID_COLUMN_LENGTH` characters, so a lookup by such an id finds no row; the methods answer it as
+ * "not found" without a query (U+0000 would fail with a raw SQLSTATE 22021, and a list query's schema
+ * refuses the long id). Typed ids (`pln_…`, `usr_…`) are caller text too.
  */
-function findable(...texts: (string | undefined)[]): boolean {
-  return texts.every(text => text === undefined || is(text, pgTextSchema));
+function findable(...ids: (string | undefined)[]): boolean {
+  return ids.every(id => id === undefined || (is(id, pgTextSchema) && fitsIdColumn(id)));
 }
 
 /** The precondition of a list query: a value its contract schema accepts (whole `limit` 1 to 100, `offset` 0 or more, times in the years 1 to 9999). */
@@ -179,7 +181,7 @@ export class PaymentRepository {
     return PlanAlreadyExists({ planId: data.id });
   }
 
-  /** Null too for an id no row can hold (U+0000), with no query. */
+  /** Null too for an id no row can hold (U+0000, or longer than an id column), with no query. */
   async findPlanById(id: PlanId): Promise<Plan | null> {
     if (!findable(id)) return null;
     const [plan] = await this.db.select().from(this.plans).where(eq(this.plans.id, id)).limit(1);
@@ -307,14 +309,14 @@ export class PaymentRepository {
     });
   }
 
-  /** Null too for an id no row can hold (U+0000), with no query. */
+  /** Null too for an id no row can hold (U+0000, or longer than an id column), with no query. */
   async findCustomerById(id: CustomerId): Promise<Customer | null> {
     if (!findable(id)) return null;
     const [customer] = await this.db.select().from(this.customers).where(eq(this.customers.id, id)).limit(1);
     return customer ?? null;
   }
 
-  /** Null too for a user id no row can hold (U+0000), with no query. */
+  /** Null too for a user id no row can hold (U+0000, or longer than an id column), with no query. */
   async findCustomerByUserId(userId: UserId): Promise<Customer | null> {
     if (!findable(userId)) return null;
     const [customer] = await this.db
@@ -410,7 +412,7 @@ export class PaymentRepository {
    * customer or one of its payments (a refund): nothing is deleted then.
    */
   async deleteCustomer(id: CustomerId): Promise<undefined | FailureOf<typeof CustomerInUse>> {
-    // An id no row can hold (U+0000) deletes nothing, like any unknown id
+    // An id no row can hold (U+0000, or longer than an id column) deletes nothing, like any unknown id
     if (!findable(id)) return undefined;
     try {
       // A savepoint inside a caller's transaction, so a refused delete leaves that transaction usable
@@ -425,14 +427,14 @@ export class PaymentRepository {
   }
 
   // Subscription methods
-  /** Null too for an id no row can hold (U+0000), with no query. */
+  /** Null too for an id no row can hold (U+0000, or longer than an id column), with no query. */
   async findSubscriptionById(id: SubscriptionId): Promise<SubscriptionWithPlan | null> {
     if (!findable(id)) return null;
     const [subscription] = await this.readSubscriptions({ where: eq(this.subscriptions.id, id), limit: 1 });
     return subscription ?? null;
   }
 
-  /** Empty too for a user id no row can hold (U+0000), with no query. */
+  /** Empty too for a user id no row can hold (U+0000, or longer than an id column), with no query. */
   async findSubscriptionsByUserId(userId: UserId): Promise<Subscription[]> {
     if (!findable(userId)) return [];
     return this.readSubscriptions({
@@ -443,7 +445,7 @@ export class PaymentRepository {
 
   /**
    * Subscriptions matching the filters left in `query`, newest first, one page. Empty for an id no row
-   * can hold (U+0000), with no query. Otherwise `query` is a value `subscriptionQuerySchema` accepts (a
+   * can hold (U+0000, or longer than an id column), with no query. Otherwise `query` is a value `subscriptionQuerySchema` accepts (a
    * precondition: anything else, such as a fractional `limit`, throws an invariant failure before any query).
    */
   async findSubscriptions(query: SubscriptionQuery): Promise<Subscription[]> {
@@ -463,7 +465,7 @@ export class PaymentRepository {
     });
   }
 
-  /** Null too for a user id no row can hold (U+0000), with no query. */
+  /** Null too for a user id no row can hold (U+0000, or longer than an id column), with no query. */
   async findActiveSubscriptionByUserId(userId: UserId): Promise<SubscriptionWithPlan | null> {
     if (!findable(userId)) return null;
     const [subscription] = await this.readSubscriptions({
@@ -522,7 +524,7 @@ export class PaymentRepository {
   }
 
   // Payment methods
-  /** Null too for an id no row can hold (U+0000), with no query. */
+  /** Null too for an id no row can hold (U+0000, or longer than an id column), with no query. */
   async findPaymentById(id: PaymentId): Promise<Payment | null> {
     if (!findable(id)) return null;
     const [payment] = await this.readPayments({ where: eq(this.payments.id, id), limit: 1 });
@@ -530,7 +532,7 @@ export class PaymentRepository {
   }
 
   /**
-   * The newest `limit` payments of the user; empty for a user id no row can hold (U+0000). `limit` is a
+   * The newest `limit` payments of the user; empty for a user id no row can hold (U+0000, or longer than an id column). `limit` is a
    * whole number of 0 or more (a precondition: anything else throws).
    */
   async findPaymentsByUserId(userId: UserId, limit = 50): Promise<Payment[]> {
@@ -545,7 +547,7 @@ export class PaymentRepository {
 
   /**
    * Payments matching the filters left in `query`, newest first, one page. `startDate` and `endDate` bound
-   * `createdAt`, both inclusive. Empty for an id no row can hold (U+0000), with no query. Otherwise
+   * `createdAt`, both inclusive. Empty for an id no row can hold (U+0000, or longer than an id column), with no query. Otherwise
    * `query` is a value `paymentQuerySchema` accepts (a precondition: anything else, such as a fractional
    * `limit` or a time outside the years 1 to 9999, throws an invariant failure before any query).
    */
@@ -569,7 +571,7 @@ export class PaymentRepository {
     });
   }
 
-  /** Empty too for an id no row can hold (U+0000), with no query. */
+  /** Empty too for an id no row can hold (U+0000, or longer than an id column), with no query. */
   async findPaymentsBySubscriptionId(subscriptionId: SubscriptionId): Promise<Payment[]> {
     if (!findable(subscriptionId)) return [];
     return this.readPayments({
@@ -687,7 +689,7 @@ export class PaymentRepository {
     return reclaimWebhookEvent(this.db, this.webhookEvents, id, seenAttempts, leaseCutoff);
   }
 
-  /** Null too for an id no row can hold (U+0000), with no query. */
+  /** Null too for an id no row can hold (U+0000, or longer than an id column), with no query. */
   async findWebhookEventById(id: WebhookId): Promise<WebhookEvent | null> {
     if (!findable(id)) return null;
     const [webhookEvent] = await this.db

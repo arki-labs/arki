@@ -1,6 +1,8 @@
 import type { IdOf } from '@arki/contracts';
 import { defineId } from '@arki/contracts';
 
+import { boundedIdSchema } from '../core/id-length.js';
+
 export type TaxConfigId = IdOf<typeof taxConfigId>;
 export type TaxJurisdictionId = IdOf<typeof taxJurisdictionId>;
 export type TaxExemptionId = IdOf<typeof taxExemptionId>;
@@ -19,9 +21,11 @@ export const createTaxExemptionId = taxExemptionId.create;
 export const createTaxRecordId = taxRecordId.create;
 export const createTaxAuditEntryId = taxAuditEntryId.create;
 
-export const taxConfigIdSchema = taxConfigId.schema;
-export const taxJurisdictionIdSchema = taxJurisdictionId.schema;
-export const taxExemptionIdSchema = taxExemptionId.schema;
+export const taxConfigIdSchema = boundedIdSchema(taxConfigId.schema);
+export const taxJurisdictionIdSchema = boundedIdSchema(taxJurisdictionId.schema);
+export const taxExemptionIdSchema = boundedIdSchema(taxExemptionId.schema);
+export const taxRecordIdSchema = boundedIdSchema(taxRecordId.schema);
+export const taxAuditEntryIdSchema = boundedIdSchema(taxAuditEntryId.schema);
 
 export const taxConfigIdFactory = taxConfigId;
 export const taxJurisdictionIdFactory = taxJurisdictionId;

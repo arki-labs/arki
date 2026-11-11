@@ -25,6 +25,7 @@ import type {
 import { createPlanInputSchema } from './contracts.js';
 import { createCoreDerivedSchemas } from './derived-schemas.js';
 import { toMinorColumn } from './money.js';
+import { MAX_BATCH_ITEMS } from './pg-values.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from './primitives.js';
 
 const {
@@ -210,6 +211,15 @@ describe('insert schemas refuse what the columns refuse', () => {
 
     expect(createPlanInputSchema.safeParse({ ...plan, features: ['ok', 'a\uD800'] }).success).toBe(false);
     expect(createPlanInputSchema.safeParse({ ...plan, features: ['\uD83D\uDE00'] }).success).toBe(true);
+  });
+
+  it('a plan with more than MAX_BATCH_ITEMS features is refused by the input contract and the insert schema', () => {
+    const plan = { name: 'Pro', tier: 'pro', price: { amount: '10', currency: 'EUR' }, interval: 'monthly' } as const;
+    const features = Array.from({ length: MAX_BATCH_ITEMS + 1 }, () => 'f');
+
+    expect(createPlanInputSchema.safeParse({ ...plan, features }).success).toBe(false);
+    expect(createPlanInputSchema.safeParse({ ...plan, features: features.slice(1) }).success).toBe(true);
+    expect(planInsertSchema.safeParse({ ...planBase, features }).success).toBe(false);
   });
 
   it('a free plan costs zero, and the update schema leaves out what the caller did not send', () => {

@@ -1,6 +1,8 @@
 import type { IdOf } from '@arki/contracts';
 import { defineId } from '@arki/contracts';
 
+import { boundedIdSchema } from '../core/id-length.js';
+
 export type DunningCampaignId = IdOf<typeof dunningCampaignId>;
 export type DunningTemplateId = IdOf<typeof dunningTemplateId>;
 export type DunningExecutionId = IdOf<typeof dunningExecutionId>;
@@ -22,12 +24,12 @@ export const createDunningCommunicationId = dunningCommunicationId.create;
 export const createCustomerSegmentId = customerSegmentId.create;
 export const createCustomerRiskProfileId = customerRiskProfileId.create;
 
-export const dunningCampaignIdSchema = dunningCampaignId.schema;
-export const dunningTemplateIdSchema = dunningTemplateId.schema;
-export const dunningExecutionIdSchema = dunningExecutionId.schema;
-export const dunningCommunicationIdSchema = dunningCommunicationId.schema;
-export const customerSegmentIdSchema = customerSegmentId.schema;
-export const customerRiskProfileIdSchema = customerRiskProfileId.schema;
+export const dunningCampaignIdSchema = boundedIdSchema(dunningCampaignId.schema);
+export const dunningTemplateIdSchema = boundedIdSchema(dunningTemplateId.schema);
+export const dunningExecutionIdSchema = boundedIdSchema(dunningExecutionId.schema);
+export const dunningCommunicationIdSchema = boundedIdSchema(dunningCommunicationId.schema);
+export const customerSegmentIdSchema = boundedIdSchema(customerSegmentId.schema);
+export const customerRiskProfileIdSchema = boundedIdSchema(customerRiskProfileId.schema);
 
 export const dunningCampaignIdFactory = dunningCampaignId;
 export const dunningTemplateIdFactory = dunningTemplateId;

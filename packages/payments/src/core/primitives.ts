@@ -1,6 +1,8 @@
 import type { IdOf } from '@arki/contracts';
 import { defineId } from '@arki/contracts';
 
+import { boundedIdSchema } from './id-length.js';
+
 export type PaymentProviderId = `pprov_${string}`;
 export type SubscriptionId = IdOf<typeof subscriptionId>;
 export type PaymentId = IdOf<typeof paymentId>;
@@ -20,11 +22,11 @@ export const createPaymentId = paymentId.create;
 export const createCustomerId = customerId.create;
 export const createWebhookId = webhookId.create;
 
-export const planIdSchema = planId.schema;
-export const subscriptionIdSchema = subscriptionId.schema;
-export const paymentIdSchema = paymentId.schema;
-export const customerIdSchema = customerId.schema;
-export const webhookIdSchema = webhookId.schema;
+export const planIdSchema = boundedIdSchema(planId.schema);
+export const subscriptionIdSchema = boundedIdSchema(subscriptionId.schema);
+export const paymentIdSchema = boundedIdSchema(paymentId.schema);
+export const customerIdSchema = boundedIdSchema(customerId.schema);
+export const webhookIdSchema = boundedIdSchema(webhookId.schema);
 
 export const planIdFactory = planId;
 export const subscriptionIdFactory = subscriptionId;

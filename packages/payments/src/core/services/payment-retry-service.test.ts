@@ -284,6 +284,16 @@ describe('a strategy the schedule cannot follow fails where it is set', () => {
     expect(service.getRetryStrategies()).toEqual(before);
   });
 
+  it('updateRetryStrategy for a name no strategy has is payments.retry_strategy_not_found, and changes nothing', () => {
+    const service = build(providerWhereRetryEnds('succeeded'), reads, writes);
+    const before = structuredClone(service.getRetryStrategies());
+
+    const refused = service.updateRetryStrategy('no-such-strategy', { maxAttempts: 2 });
+
+    expect(refused).toMatchObject({ code: 'payments.retry_strategy_not_found', data: { name: 'no-such-strategy' } });
+    expect(service.getRetryStrategies()).toEqual(before);
+  });
+
   it('more than MAX_BATCH_ITEMS strategies, or delays in one, are payments.configuration_invalid', () => {
     const many = Array.from({ length: MAX_BATCH_ITEMS + 1 }, (_, index) => ({ ...oneRetryNow, name: `s${index}` }));
     const manyDelays = { ...oneRetryNow, delayMinutes: Array.from({ length: MAX_BATCH_ITEMS + 1 }, () => 1) };

@@ -10,7 +10,7 @@ import type { CoreWrites } from '../journal.js';
 import type { BasePaymentProvider } from '../providers/base-provider.js';
 import type { PaymentRepository } from '../repository.js';
 import type { Payment, PaymentId, Subscription, SubscriptionId } from '../types.js';
-import { PaymentsConfigurationInvalid, PaymentWithoutSubscription } from '../failures.js';
+import { PaymentsConfigurationInvalid, PaymentWithoutSubscription, RetryStrategyNotFound } from '../failures.js';
 import { paymentAmount } from '../money.js';
 import { MAX_BATCH_ITEMS } from '../pg-values.js';
 import { CardDeclined, ReferenceNotFound } from '../providers/provider-error.js';
@@ -37,6 +37,7 @@ const retryStrategySchema = z.object({
 export type RetryStrategy = z.output<typeof retryStrategySchema>;
 
 type ConfigurationInvalid = FailureOf<typeof PaymentsConfigurationInvalid>;
+type RetryStrategyMissing = FailureOf<typeof RetryStrategyNotFound>;
 
 /** Nothing, or `payments.configuration_invalid` for `setting` when a strategy breaks `retryStrategySchema`. */
 function checkStrategies(strategies: readonly RetryStrategy[], setting: string): ConfigurationInvalid | undefined {
@@ -517,14 +518,19 @@ export class PaymentRetryService {
     return [...this.strategies];
   }
 
-  /** Change the named strategy. Returns nothing, or `payments.configuration_invalid` (and changes nothing) when the result breaks the rules of `addRetryStrategy`. */
-  updateRetryStrategy(name: string, updates: Partial<RetryStrategy>): ConfigurationInvalid | undefined {
+  /**
+   * Change the named strategy. Returns nothing, `payments.retry_strategy_not_found` when no strategy has this name,
+   * or `payments.configuration_invalid` when the result breaks the rules of `addRetryStrategy`. A failure changes nothing.
+   */
+  updateRetryStrategy(
+    name: string,
+    updates: Partial<RetryStrategy>,
+  ): ConfigurationInvalid | RetryStrategyMissing | undefined {
     const strategy = this.strategies.find((s) => s.name === name);
-    if (strategy) {
-      const invalid = checkStrategies([{ ...strategy, ...updates }], 'retry.strategy');
-      if (invalid) return invalid;
-      Object.assign(strategy, updates);
-    }
+    if (!strategy) return RetryStrategyNotFound({ name });
+    const invalid = checkStrategies([{ ...strategy, ...updates }], 'retry.strategy');
+    if (invalid) return invalid;
+    Object.assign(strategy, updates);
     return;
   }
 }

@@ -83,7 +83,7 @@ export const campaignTriggerSchema = z.object({
     // Compared with a failure count in SQL: at most int4, as a count Postgres holds
     paymentFailureCount: z.number().int().min(1).max(INT4_MAX).optional(),
     // Compared with the subscriptions' status enum: a status no subscription has would be a raw SQLSTATE 22P02
-    subscriptionStatus: z.array(z.enum(subscriptionStatusValues)).optional(),
+    subscriptionStatus: z.array(z.enum(subscriptionStatusValues)).max(MAX_BATCH_ITEMS).optional(),
     daysSinceLastPayment: daysSchema(0).optional(),
     daysSinceFailure: daysSchema(0).optional(),
     trialEndingDays: daysSchema(0).optional(),
@@ -91,8 +91,8 @@ export const campaignTriggerSchema = z.object({
   }),
   filters: z
     .object({
-      customerSegments: z.array(customerSegmentIdSchema).optional(),
-      planTiers: z.array(pgText).optional(),
+      customerSegments: z.array(customerSegmentIdSchema).max(MAX_BATCH_ITEMS).optional(),
+      planTiers: z.array(pgText).max(MAX_BATCH_ITEMS).optional(),
       subscriptionAge: z
         .object({
           min: z.number().int().min(0).optional(),
@@ -113,7 +113,7 @@ export const campaignSettingsSchema = z.object({
   respectUnsubscribe: z.boolean(),
   businessHoursOnly: z.boolean(),
   timezone: pgText.optional(),
-  allowedDays: z.array(z.number().int().min(0).max(6)).optional(), // 0-6 for days of week
+  allowedDays: z.array(z.number().int().min(0).max(6)).max(7).optional(), // 0-6 for days of week
   abTestVariant: pgText.optional(),
 });
 
@@ -121,7 +121,7 @@ export const communicationTemplateSchema = z.object({
   channel: communicationChannelSchema,
   subject: pgText.min(1).max(500).optional(),
   content: pgText.min(1),
-  variables: z.array(pgText),
+  variables: z.array(pgText).max(MAX_BATCH_ITEMS),
   design: z
     .object({
       theme: pgText.optional(),
@@ -146,7 +146,7 @@ export const segmentCriteriaSchema = z.object({
     })
     .optional(),
   // Compared with the plans' tier enum: a tier no plan has would be a raw SQLSTATE 22P02
-  planTier: z.array(z.enum(planTierValues)).optional(),
+  planTier: z.array(z.enum(planTierValues)).max(MAX_BATCH_ITEMS).optional(),
   lastPaymentDate: z
     .object({
       daysAgo: daysSchema(0),
@@ -196,6 +196,7 @@ export const dunningCampaignTemplateInputSchema = z.object({
 export const dunningCampaignTemplatesSchema = z
   .array(dunningCampaignTemplateInputSchema)
   .min(1)
+  .max(MAX_BATCH_ITEMS)
   .refine(templates => new Set(templates.map(template => template.stepNumber)).size === templates.length, {
     message: 'Template step numbers must be unique',
   })
@@ -209,7 +210,7 @@ export const createDunningCampaignInputSchema = z.object({
   type: dunningCampaignTypeSchema,
   trigger: campaignTriggerSchema,
   settings: campaignSettingsSchema,
-  targetSegments: z.array(customerSegmentIdSchema).default([]),
+  targetSegments: z.array(customerSegmentIdSchema).max(MAX_BATCH_ITEMS).default([]),
   templates: dunningCampaignTemplatesSchema,
 });
 
@@ -220,7 +221,7 @@ export const updateDunningCampaignInputSchema = z.object({
   status: dunningCampaignStatusSchema.optional(),
   trigger: campaignTriggerSchema.optional(),
   settings: campaignSettingsSchema.optional(),
-  targetSegments: z.array(customerSegmentIdSchema).optional(),
+  targetSegments: z.array(customerSegmentIdSchema).max(MAX_BATCH_ITEMS).optional(),
   /** When given, the campaign's steps become exactly this set (see `DunningCampaignService.updateCampaign`). */
   templates: dunningCampaignTemplatesSchema.optional(),
 });
@@ -283,7 +284,7 @@ export const campaignAnalyticsInputSchema = z.object({
     end: instantSchema(),
   }),
   granularity: z.enum(['hour', 'day', 'week', 'month']).default('day'),
-  metrics: z.array(pgText).optional(),
+  metrics: z.array(pgText).max(MAX_BATCH_ITEMS).optional(),
 });
 
 export const updateExecutionStatusInputSchema = z.object({
@@ -336,7 +337,7 @@ export const communicationWebhookSchema = z.object({
 });
 
 export const bulkExecuteCampaignInputSchema = z.object({
-  campaignIds: z.array(dunningCampaignIdSchema).min(1),
+  campaignIds: z.array(dunningCampaignIdSchema).min(1).max(MAX_BATCH_ITEMS),
   dryRun: z.boolean().default(false),
   customFilters: z
     .object({
@@ -349,7 +350,7 @@ export const bulkExecuteCampaignInputSchema = z.object({
 
 export const customerRiskProfileInputSchema = z.object({
   customerId: customerIdSchema,
-  segmentIds: z.array(customerSegmentIdSchema).default([]),
+  segmentIds: z.array(customerSegmentIdSchema).max(MAX_BATCH_ITEMS).default([]),
   paymentHistory: z.object({
     totalPayments: z.number().int().min(0),
     successfulPayments: z.number().int().min(0),
@@ -375,7 +376,7 @@ export const customerRiskProfileInputSchema = z.object({
   communicationPreferences: z.object({
     preferredChannel: communicationChannelSchema.optional(),
     unsubscribed: z.boolean(),
-    unsubscribedChannels: z.array(communicationChannelSchema),
+    unsubscribedChannels: z.array(communicationChannelSchema).max(MAX_BATCH_ITEMS),
     timezone: pgText.optional(),
     language: pgText.optional(),
   }),

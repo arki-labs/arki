@@ -1160,6 +1160,35 @@ describe('the communication doors answer an id, time or JSON Postgres would refu
       trackingData: null,
     });
   });
+
+  it('updateStatus with JSON nested 100,000 levels deep is schema.invalid_input and writes nothing', async () => {
+    const { row } = await storedCommunication('email_deep_json');
+    const communications = createDunningCommunicationRepository(db, tables);
+    let deep: Record<string, unknown> = {};
+    for (let level = 0; level < 100_000; level++) deep = { next: deep };
+
+    const refused = await communications.updateStatus(row.id, 'sent', { providerResponse: deep });
+
+    expect(refused).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await communications.findById(row.id)).toMatchObject({ providerResponse: null });
+  });
+
+  it('JSON nested 100 levels deep is stored; 101 levels is schema.invalid_input', async () => {
+    const { row } = await storedCommunication('email_limit_json');
+    const communications = createDunningCommunicationRepository(db, tables);
+    // The record itself is level 1, so 99 more wrappers make 100 levels
+    let atLimit: Record<string, unknown> = {};
+    for (let level = 1; level < 100; level++) atLimit = { next: atLimit };
+
+    expect(
+      await communications.updateStatus(row.id, 'sent', { providerResponse: { next: { ...atLimit } } }),
+    ).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await communications.updateStatus(row.id, 'sent', { providerResponse: atLimit })).toMatchObject({
+      providerResponse: atLimit,
+    });
+  });
 });
 
 describe('the communication doors refuse a choice no row has (hostile-input gate)', () => {
