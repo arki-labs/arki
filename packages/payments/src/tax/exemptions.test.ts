@@ -15,8 +15,7 @@ import { instant } from '@arki/date';
 import { FAILURE_ERROR_CODES, FailureError, InvalidInput, orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
-import { StripeProvider } from '../core/providers/stripe-provider.js';
-import { createFakeStripeHttp } from '../core/providers/stripe-test-support.js';
+import { createFakeStripeHttp, stripeProviderOf } from '../core/providers/stripe-test-support.js';
 import { customerId, openDb, rejectionOf, schema } from '../test-support.js';
 import { createExemptionSchema, createJurisdictionSchema } from './contracts.js';
 import { TaxReferenceNotFound } from './failures.js';
@@ -59,7 +58,7 @@ function serviceWithStripe(jurisdiction: StripeJurisdiction = GERMANY) {
       },
     },
   }));
-  const provider = new StripeProvider(
+  const provider = stripeProviderOf(
     { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
     { httpClient: http.client, maxNetworkRetries: 0 },
   );
@@ -134,6 +133,27 @@ describe('a new exemption', () => {
     expect(InvalidInput.is(refused) && refused.data.issues[0]?.message).toMatch(/validTo must not be before validFrom/);
     expect(await db.select().from(tax.taxExemptions).where(eq(tax.taxExemptions.customerId, 'cus_dates'))).toEqual([]);
     await expect(db.insert(tax.taxExemptions).values(input)).rejects.toThrow();
+  });
+});
+
+describe('an enum or text value a column cannot hold', () => {
+  const nul = 'a\u0000b';
+  const long = 'x'.repeat(300);
+
+  // Each used to reach Postgres as a raw 22021, 22001 or 22P02; now the row schema refuses it and nothing is written
+  it('is refused as schema.invalid_input by the create methods of configurations, jurisdictions and exemptions', async () => {
+    for (const hostile of [nul, '\uD800', long, 'nope']) {
+      // @ts-expect-error a hostile calculation mode: the type only lets three modes in
+      expect(await repos.configurations.createConfiguration({ name: 'cfg', calculationMode: hostile })).toMatchObject({ code: InvalidInput.code });
+      // @ts-expect-error a hostile business type: the type only lets five types in
+      expect(await repos.configurations.createConfiguration({ name: 'cfg', businessType: hostile })).toMatchObject({ code: InvalidInput.code });
+      // @ts-expect-error a hostile jurisdiction type: the type only lets six types in
+      expect(await repos.jurisdictions.createJurisdiction({ name: 'j', code: 'J', type: hostile, countryCode: 'DE' })).toMatchObject({ code: InvalidInput.code });
+      // @ts-expect-error a hostile exemption type: the type only lets four types in
+      expect(await repos.exemptions.createExemption({ type: hostile, customerId: 'c', exemptionCode: 'E', reason: 'r', validFrom: instant('2026-01-01T00:00:00Z') })).toMatchObject({ code: InvalidInput.code });
+      // @ts-expect-error a hostile exemption status: the type only lets four statuses in
+      expect(await repos.exemptions.createExemption({ type: 'customer', status: hostile, customerId: 'c', exemptionCode: 'E', reason: 'r', validFrom: instant('2026-01-01T00:00:00Z') })).toMatchObject({ code: InvalidInput.code });
+    }
   });
 });
 

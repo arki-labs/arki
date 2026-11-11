@@ -9,17 +9,25 @@ import { defineFailure } from '@arki/failure';
 
 import { webhookIdSchema } from '../primitives.js';
 
+/** The checks `WebhookSecurityService.validateWebhook` runs, in order; `WebhookRejected.check` names the one that refused. */
+export const WEBHOOK_CHECKS = ['source_ip', 'timestamp', 'replay', 'signature'] as const;
+
+/** One of `WEBHOOK_CHECKS`. */
+export type WebhookCheck = (typeof WEBHOOK_CHECKS)[number];
+
 /**
- * The webhook validator refused the delivery: a bad or missing signature, a source address that is
- * not allowed, a timestamp outside the window, a replayed delivery, or no webhook secret. `reason`
- * is the validator's own text, for logs only; branch on the code. Nothing was stored.
+ * The webhook validator refused the delivery. `check` says which check: `source_ip` (the source is
+ * not an allowed address), `timestamp` (outside the window or not Unix seconds), `replay` (this
+ * process saw the same delivery) or `signature` (a bad, malformed or missing signature, no webhook
+ * secret, or a provider whose signature is not verified). `reason` is the validator's own text, for
+ * logs only; branch on the code and `check`. Nothing was stored.
  *
  * @fix Check the webhook secret and the provider's signing setup. A resend of the same delivery is refused again.
  * @verify bun run test -- src/core/services/webhook-handler.test.ts
  */
 export const WebhookRejected = /* @__PURE__ */ defineFailure('payments.webhook_rejected', {
   status: 401,
-  data: z.object({ reason: z.string(), retryable: z.literal(false) }),
+  data: z.object({ check: z.enum(WEBHOOK_CHECKS), reason: z.string(), retryable: z.literal(false) }),
   message: 'The webhook was rejected: {reason}',
   remediation:
     'Check the webhook secret and the provider signing setup; a resend of the same delivery is refused again.',

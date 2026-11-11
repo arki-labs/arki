@@ -4,7 +4,7 @@ import type { Instant } from '@arki/date';
 import { now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
-import { invariant, isFailure } from '@arki/failure';
+import { invariant, isFailure, orThrow } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
 import { Money } from '@arki/money';
 import { is } from '@arki/schema';
@@ -18,8 +18,9 @@ import { MAX_DUNNING_DAYS } from '../contracts.js';
 import type { DunningCampaignId } from '../primitives.js';
 import type { DunningTables } from '../tables.js';
 import type { DunningTickReport } from '../failures.js';
+import type { PaymentsConfigurationInvalid } from '../../core/failures.js';
 import type { CampaignWithTrigger } from '../types.js';
-import type { CommunicationOrchestrationConfig } from './communication-service.js';
+import type { CommunicationOrchestrationConfig, CommunicationOrchestrationService } from './communication-service.js';
 import type { DunningDatabase } from '../repository.js';
 import { createDunningCampaignService } from './campaign-service.js';
 import { createCommunicationOrchestrationService } from './communication-service.js';
@@ -79,11 +80,12 @@ export class DunningIntegrationService {
   private readonly dunningCommunications: DunningTables['dunningCommunications'];
   private readonly customerSegments: DunningTables['customerSegments'];
 
-  constructor(
+  private constructor(
     private readonly db: DunningDatabase,
     coreTables: DunningIntegrationCoreTables,
     dunningTables: DunningIntegrationDunningTables,
     config: DunningIntegrationConfig,
+    communicationService: CommunicationOrchestrationService,
     private readonly paymentRetryService?: PaymentRetryService,
   ) {
     this.systemUserId = config.systemUserId;
@@ -92,11 +94,7 @@ export class DunningIntegrationService {
     this.dunningCommunications = dunningTables.dunningCommunications;
     this.customerSegments = dunningTables.customerSegments;
 
-    this.communicationService = createCommunicationOrchestrationService(
-      db,
-      { dunningCommunications: dunningTables.dunningCommunications, dunningExecutions: dunningTables.dunningExecutions },
-      config.communication,
-    );
+    this.communicationService = communicationService;
 
     this.campaignService = createDunningCampaignService(
       db,
@@ -119,6 +117,26 @@ export class DunningIntegrationService {
       customerSegments: dunningTables.customerSegments,
       customerRiskProfiles: dunningTables.customerRiskProfiles,
     });
+  }
+
+  /**
+   * Builds the service, or returns `payments.configuration_invalid` for a channel setting in
+   * `config.communication` that no provider can use (see `createCommunicationOrchestrationService`).
+   */
+  static create(
+    db: DunningDatabase,
+    coreTables: DunningIntegrationCoreTables,
+    dunningTables: DunningIntegrationDunningTables,
+    config: DunningIntegrationConfig,
+    paymentRetryService?: PaymentRetryService,
+  ): DunningIntegrationService | FailureOf<typeof PaymentsConfigurationInvalid> {
+    const communicationService = createCommunicationOrchestrationService(
+      db,
+      { dunningCommunications: dunningTables.dunningCommunications, dunningExecutions: dunningTables.dunningExecutions },
+      config.communication,
+    );
+    if (isFailure(communicationService)) return communicationService;
+    return new DunningIntegrationService(db, coreTables, dunningTables, config, communicationService, paymentRetryService);
   }
 
   /**
@@ -166,9 +184,9 @@ export class DunningIntegrationService {
     if (isFailure(customerSegments)) return customerSegments;
 
     // Find active campaigns for payment failure trigger
-    const applicableCampaigns = await this.campaignService.findActiveCampaignsForTrigger(
-      'payment_failure',
-      customerSegments,
+    // The trigger is a constant and the segment ids come from our own query, so a refusal is a bug
+    const applicableCampaigns = orThrow(
+      await this.campaignService.findActiveCampaignsForTrigger('payment_failure', customerSegments),
     );
 
     // Execute applicable campaigns
@@ -246,9 +264,9 @@ export class DunningIntegrationService {
     if (isFailure(customerSegments)) return customerSegments;
 
     // A trial-ending campaign is a time-based one (its `trialEndingDays` condition)
-    const applicableCampaigns = await this.campaignService.findActiveCampaignsForTrigger(
-      'time_based',
-      customerSegments,
+    // The trigger is a constant and the segment ids come from our own query, so a refusal is a bug
+    const applicableCampaigns = orThrow(
+      await this.campaignService.findActiveCampaignsForTrigger('time_based', customerSegments),
     );
 
     // A campaign run that throws (the database is down) is thrown, so the caller can retry the event
@@ -340,9 +358,9 @@ export class DunningIntegrationService {
     const customerSegments = await this.segmentationService.getCustomerSegments(event.customerId);
     if (isFailure(customerSegments)) return customerSegments;
 
-    const applicableCampaigns = await this.campaignService.findActiveCampaignsForTrigger(
-      'subscription_status',
-      customerSegments,
+    // The trigger is a constant and the segment ids come from our own query, so a refusal is a bug
+    const applicableCampaigns = orThrow(
+      await this.campaignService.findActiveCampaignsForTrigger('subscription_status', customerSegments),
     );
 
     // A campaign run that throws (the database is down) is thrown, so the caller can retry the event
@@ -705,7 +723,7 @@ export class DunningIntegrationService {
 }
 
 /**
- * Factory function to create DunningIntegrationService.
+ * Factory function to create DunningIntegrationService: {@link DunningIntegrationService.create}.
  */
 export function createDunningIntegrationService(
   db: DunningDatabase,
@@ -714,5 +732,5 @@ export function createDunningIntegrationService(
   config: DunningIntegrationConfig,
   paymentRetryService?: PaymentRetryService,
 ) {
-  return new DunningIntegrationService(db, coreTables, dunningTables, config, paymentRetryService);
+  return DunningIntegrationService.create(db, coreTables, dunningTables, config, paymentRetryService);
 }

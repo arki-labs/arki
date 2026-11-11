@@ -12,6 +12,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
+import type { SchemaFailure } from '@arki/failure';
 import { FAILURE_ERROR_CODES, FailureError, invariant, orThrow } from '@arki/failure';
 
 import { core, customerId, rejectionOf, schema, userId, users } from '../test-support.js';
@@ -39,14 +40,14 @@ const settings = {
 
 
 /** The ids of the rows a read resolves to. */
-async function idsOf<Row extends { id: string }>(rows: Promise<Row[]>): Promise<string[]> {
-  const resolved = await rows;
+async function idsOf<Row extends { id: string }>(rows: Promise<Row[] | SchemaFailure>): Promise<string[]> {
+  const resolved = orThrow(await rows);
   return resolved.map(row => row.id);
 }
 
 /** The names of the rows a read resolves to. */
-async function namesOf<Row extends { name: string }>(rows: Promise<Row[]>): Promise<string[]> {
-  const resolved = await rows;
+async function namesOf<Row extends { name: string }>(rows: Promise<Row[] | SchemaFailure>): Promise<string[]> {
+  const resolved = orThrow(await rows);
   return resolved.map(row => row.name);
 }
 /** One field of the row a read resolves to, `undefined` when there is no row. */
@@ -207,5 +208,83 @@ describe('an insert that returns no row', () => {
     } finally {
       await db.execute(sql`DROP TRIGGER skip_campaign_insert ON pay.dunning_campaigns`);
     }
+  });
+});
+
+describe('hostile caller values return schema.invalid_input', () => {
+  const invalid = { code: 'schema.invalid_input' };
+  const page = { limit: 10, offset: 0, sortOrder: 'asc' } as const;
+  const badName = 'nope';
+  const nul = '\u0000';
+
+  it('a sortBy that names no column is refused in all four list reads', async () => {
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await repositories.campaigns.findMany({ ...page, sortBy: badName })).toMatchObject(invalid);
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await repositories.customerSegments.findMany({ ...page, sortBy: badName })).toMatchObject(invalid);
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await repositories.executions.findMany({ ...page, sortBy: badName })).toMatchObject(invalid);
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await repositories.communications.findMany({ ...page, sortBy: badName })).toMatchObject(invalid);
+  });
+
+  it('a type, status or channel no row has is refused before any query, NUL included', async () => {
+    for (const bad of [badName, nul]) {
+      // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+      expect(await repositories.campaigns.findMany({ ...page, sortBy: 'name', type: bad })).toMatchObject(invalid);
+      // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+      expect(await repositories.customerSegments.findMany({ ...page, sortBy: 'name', type: bad })).toMatchObject(
+        invalid,
+      );
+      // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+      expect(await repositories.executions.findMany({ ...page, sortBy: 'createdAt', status: bad })).toMatchObject(
+        invalid,
+      );
+      // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+      expect(await repositories.communications.findMany({ ...page, sortBy: 'createdAt', channel: bad })).toMatchObject(
+        invalid,
+      );
+      // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+      expect(await repositories.campaigns.findByType(bad)).toMatchObject(invalid);
+      // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+      expect(await repositories.campaigns.findActiveForTrigger(bad)).toMatchObject(invalid);
+      // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+      expect(await repositories.customerRiskProfiles.findByRiskCategory(bad)).toMatchObject(invalid);
+      // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+      expect(await repositories.campaigns.updateStatus('dc_x', bad, userId)).toMatchObject(invalid);
+      // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+      expect(await repositories.executions.updateStatus('de_x', bad)).toMatchObject(invalid);
+      // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+      expect(await repositories.communications.updateStatus('dcm_x', bad)).toMatchObject(invalid);
+    }
+  });
+
+  it('more than 1,000 segment ids in a trigger lookup are refused', async () => {
+    const ids = Array.from({ length: 1001 }, (_, index) => `cs_${String(index)}`);
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await repositories.campaigns.findActiveForTrigger('manual', ids)).toMatchObject(invalid);
+  });
+
+  it('a reference longer than the id column is a missing row, not a Postgres 22001', async () => {
+    const profile = {
+      customerId: 'x'.repeat(300),
+      segmentIds: [],
+      riskScore: {
+        overall: 40,
+        factors: {},
+        category: 'medium',
+        lastCalculated: instant('2026-03-04T05:06:07Z'),
+        trends: { direction: 'stable', changePercent: 0, timeframe: 30 },
+      },
+      paymentHistory: {},
+      subscriptionHistory: {},
+      engagementMetrics: {},
+      communicationPreferences: {},
+      metadata: null,
+    };
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await repositories.customerRiskProfiles.upsert(profile)).toMatchObject({
+      code: 'payments.reference_not_found',
+    });
   });
 });

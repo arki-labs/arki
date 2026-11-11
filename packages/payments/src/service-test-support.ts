@@ -25,6 +25,7 @@ import type {
   SubscriptionStatus,
 } from './core/types.js';
 import type { RefundId } from './refunds/primitives.js';
+import { RefundService } from './refunds/service.js';
 import type { AppDb } from './test-support.js';
 import { core, customerId, meta, planId, refundsTables, typed, userId } from './test-support.js';
 
@@ -188,4 +189,9 @@ export async function refundRow(db: AppDb, refundId: RefundId) {
   const [row] = await db.select().from(refunds).where(eq(refunds.id, refundId));
 
   return row;
+}
+
+/** A `RefundService` for a test: `RefundService.create` with a config failure thrown, since a test builds it with good settings. */
+export function refundServiceOf(...args: Parameters<typeof RefundService.create>): RefundService {
+  return orThrow(RefundService.create(...args));
 }

@@ -6,6 +6,7 @@ import type { SpendRange } from './types.js';
 import { nonNegativeMoneySchema } from '../core/money.js';
 import {
   INT4_MAX,
+  MAX_BATCH_ITEMS,
   pgInstantSchema,
   pgJsonRecordSchema as jsonRecord,
   pgTextSchema as pgText,
@@ -268,8 +269,8 @@ export const executeCampaignInputSchema = z.object({
   dryRun: z.boolean().default(false),
   customFilters: z
     .object({
-      customerIds: z.array(customerIdSchema).optional(),
-      excludeCustomerIds: z.array(customerIdSchema).optional(),
+      customerIds: z.array(customerIdSchema).max(MAX_BATCH_ITEMS).optional(),
+      excludeCustomerIds: z.array(customerIdSchema).max(MAX_BATCH_ITEMS).optional(),
       testMode: z.boolean().default(false),
     })
     .optional(),
@@ -339,8 +340,8 @@ export const bulkExecuteCampaignInputSchema = z.object({
   dryRun: z.boolean().default(false),
   customFilters: z
     .object({
-      customerIds: z.array(customerIdSchema).optional(),
-      excludeCustomerIds: z.array(customerIdSchema).optional(),
+      customerIds: z.array(customerIdSchema).max(MAX_BATCH_ITEMS).optional(),
+      excludeCustomerIds: z.array(customerIdSchema).max(MAX_BATCH_ITEMS).optional(),
       testMode: z.boolean().default(false),
     })
     .optional(),

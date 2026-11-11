@@ -5,10 +5,12 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { money, NumberFormatError, NumericRangeError, RoundingNecessaryError, UnknownCurrencyError } from '@arki/money';
+import { FAILURE_ERROR_CODES } from '@arki/failure';
+import { money, NumericRangeError, RoundingNecessaryError } from '@arki/money';
 
 import {
   fromMinorColumn,
+  fromStoredNumber,
   nonNegativeMoneySchema,
   paymentAmount,
   planPrice,
@@ -27,12 +29,17 @@ describe('the builders over stored rows', () => {
     expect(fromMinorColumn('2500', 'EUR').toJSON()).toEqual({ amount: '25.00', currency: 'EUR' });
   });
 
-  it('throw the documented errors for a row the insert schemas would have refused', () => {
-    expect(() => paymentAmount({ amountMinor: 1.5, currency: 'EUR' })).toThrow(NumericRangeError);
-    expect(() => paymentAmount({ amountMinor: 2 ** 60, currency: 'EUR' })).toThrow(NumericRangeError);
-    expect(() => paymentAmount({ amountMinor: 1, currency: 'ZZZ' })).toThrow(UnknownCurrencyError);
-    expect(() => planPrice({ priceMinor: Number.NaN, currency: 'EUR' })).toThrow(NumericRangeError);
-    expect(() => fromMinorColumn('12.5', 'EUR')).toThrow(NumberFormatError);
+  it('break the stated invariant for a row the insert schemas would have refused', () => {
+    const invariantBroken = expect.objectContaining({ code: FAILURE_ERROR_CODES.invariant });
+    expect(() => paymentAmount({ amountMinor: 1.5, currency: 'EUR' })).toThrow(invariantBroken);
+    expect(() => paymentAmount({ amountMinor: 2 ** 60, currency: 'EUR' })).toThrow(invariantBroken);
+    expect(() => paymentAmount({ amountMinor: 1, currency: 'ZZZ' })).toThrow(invariantBroken);
+    expect(() => paymentAmount({ amountMinor: 1, currency: '\u0000' })).toThrow(invariantBroken);
+    expect(() => planPrice({ priceMinor: Number.NaN, currency: 'EUR' })).toThrow(invariantBroken);
+    expect(() => fromMinorColumn('12.5', 'EUR')).toThrow(invariantBroken);
+    expect(() => fromStoredNumber(Number.NaN, 'EUR')).toThrow(invariantBroken);
+    expect(() => fromStoredNumber(1e300, 'EUR')).toThrow(invariantBroken);
+    expect(() => fromStoredNumber(1, 'ZZZ')).toThrow(invariantBroken);
   });
 
   it('toMinorColumn throws the documented errors for an amount no amount schema accepts', () => {

@@ -2,7 +2,7 @@ import type { IdGenerationFailure } from '@arki/contracts';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { z } from '@arki/contracts';
 import { isFailure } from '@arki/failure';
-import { parse } from '@arki/schema';
+import { is, parse } from '@arki/schema';
 import type Stripe from 'stripe';
 
 import type { UserId } from '../core/user-id.js';
@@ -16,7 +16,7 @@ import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { PaymentRepository } from '../core/repository.js';
 import type { PlanId, SubscriptionStatus } from '../core/types.js';
 import { subscriptionStatusSchema } from '../core/contracts.js';
-import { misconfigured } from '../core/failures.js';
+import { PaymentsConfigurationInvalid } from '../core/failures.js';
 import { holdsLoneSurrogate, pgTextSchema, pgVarcharSchema } from '../core/pg-values.js';
 import { userIdSchema } from '../core/user-id.js';
 import {
@@ -208,11 +208,14 @@ const PRO_GRANTING_STATUSES: ReadonlySet<SubscriptionStatus> = new Set<Subscript
  * Read a user's current entitlement straight from our own `subscriptions` table — the single
  * source of truth. Both rails (web Stripe webhooks, native RevenueCat webhooks) project into this
  * table, so this one read answers "is Pro?" regardless of where the purchase happened.
+ * A `userId` holding U+0000 names no user (no row can hold it), so it is `{ tier: 'free' }`.
  */
 export async function getEntitlement(
   repo: Pick<PaymentRepository, 'findSubscriptionsByUserId'>,
   userId: UserId,
 ): Promise<Entitlement> {
+  // A user id holding U+0000 names no row, and a lookup by it would fail in Postgres: answer free without asking
+  if (!is(userId, pgTextSchema)) return { tier: 'free' };
   const subscriptions = await repo.findSubscriptionsByUserId(userId);
   // findSubscriptionsByUserId returns newest-first; the first granting row is the live one.
   const granting = subscriptions.find((s) => PRO_GRANTING_STATUSES.has(s.status));
@@ -246,14 +249,14 @@ export type SubscriptionBillingConfig = {
   urls: { success: string; cancel: string };
   /**
    * Free-trial length applied to new subscriptions; omit for no trial. A whole number of days from 1 to
-   * 730 (Stripe's range): anything else throws `payments.configuration_invalid` when the preset is built.
+   * 730 (Stripe's range): anything else makes `createSubscriptionBilling` return `payments.configuration_invalid`.
    */
   trialDays?: number;
   /** Enable Stripe Tax at checkout (EU VAT). Requires Stripe Tax configured on the account. */
   automaticTax?: boolean;
 };
 
-export type SubscriptionBilling = ReturnType<typeof createSubscriptionBilling>;
+export type SubscriptionBilling = ReturnType<typeof buildSubscriptionBilling>;
 
 /** The three Stripe events `handleWebhook` projects onto the `subscriptions` table. */
 type SubscriptionEventType =
@@ -273,14 +276,23 @@ export type StripeWebhookOutcome =
  * are NOT NULL, so a local customer row must exist *before* the subscription webhook arrives (the
  * projection resolves the owning user via the Stripe customer id).
  *
- * A `trialDays` Stripe cannot take is a configuration fault: it throws `payments.configuration_invalid`
- * here, at boot, instead of failing every checkout.
+ * A `trialDays` Stripe cannot take is a configuration fault: it returns `PaymentsConfigurationInvalid`
+ * (`payments.configuration_invalid`) here, at boot, instead of failing every checkout.
  */
-export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
-  const { provider, repo, writes, urls, trialDays, automaticTax } = config;
-  if (trialDays !== undefined && !trialDaysSchema.safeParse(trialDays).success) {
-    throw misconfigured('presets.subscription.trialDays', `must be a whole number of days from 1 to 730; got ${String(trialDays)}`);
+export function createSubscriptionBilling(
+  config: SubscriptionBillingConfig,
+): SubscriptionBilling | FailureOf<typeof PaymentsConfigurationInvalid> {
+  if (config.trialDays !== undefined && !trialDaysSchema.safeParse(config.trialDays).success) {
+    return PaymentsConfigurationInvalid({
+      setting: 'presets.subscription.trialDays',
+      problem: `must be a whole number of days from 1 to 730; got ${String(config.trialDays)}`,
+    });
   }
+  return buildSubscriptionBilling(config);
+}
+
+function buildSubscriptionBilling(config: SubscriptionBillingConfig) {
+  const { provider, repo, writes, urls, trialDays, automaticTax } = config;
   const planByPrice = new Map(config.prices.map((p) => [p.priceId, p.planId]));
 
   return {

@@ -17,8 +17,7 @@ import { captureSpans } from '@arki/testing/otel';
 import type { RecordedStripeRequest } from './providers/stripe-test-support.js';
 import type { Customer } from './types.js';
 import { createCustomerId } from './primitives.js';
-import { StripeProvider } from './providers/stripe-provider.js';
-import { createFakeStripeHttp } from './providers/stripe-test-support.js';
+import { createFakeStripeHttp, stripeProviderOf } from './providers/stripe-test-support.js';
 import { observePayments } from './telemetry.js';
 
 let spans: SpanCapture;
@@ -100,7 +99,7 @@ describe('StripeProvider spans', () => {
 
   function provider(respond: (request: RecordedStripeRequest) => { status?: number; body: unknown }) {
     const http = createFakeStripeHttp(respond);
-    return new StripeProvider(
+    return stripeProviderOf(
       { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
       {
         references: {

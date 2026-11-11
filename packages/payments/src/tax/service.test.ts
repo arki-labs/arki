@@ -14,8 +14,7 @@ import { Currency, money, ProviderAmount, UnknownCurrency } from '@arki/money';
 
 import { createCustomerId } from '../core/primitives.js';
 import { PaymentProviderError, TaxAddressIncomplete } from '../core/providers/provider-error.js';
-import { StripeProvider } from '../core/providers/stripe-provider.js';
-import { createFakeStripeHttp } from '../core/providers/stripe-test-support.js';
+import { createFakeStripeHttp, stripeProviderOf } from '../core/providers/stripe-test-support.js';
 import { TaxService } from './service.js';
 
 /** No exemptions: nothing in these tests is exempt. */
@@ -33,7 +32,7 @@ const noExemptions = {
 
 function serviceAnswering(status: number, body: unknown) {
   const http = createFakeStripeHttp(() => ({ status, body }));
-  const provider = new StripeProvider(
+  const provider = stripeProviderOf(
     { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
     { httpClient: http.client, maxNetworkRetries: 0 },
   );

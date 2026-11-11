@@ -22,7 +22,7 @@ import type { RefundStripe } from './workflow.js';
 import { NotificationFailed } from '../core/failures.js';
 import { createCoreJournal } from '../core/journal.js';
 import { IdempotencyConflict, PaymentProviderError } from '../core/providers/provider-error.js';
-import { coreReads, refundReads, refundRow, seedPayment } from '../service-test-support.js';
+import { coreReads, refundReads, refundRow, refundServiceOf, seedPayment } from '../service-test-support.js';
 import {
   adminId,
   core,
@@ -36,7 +36,6 @@ import {
 } from '../test-support.js';
 import { RefundInvalidState } from './failures.js';
 import { createRefundsJournal } from './journal.js';
-import { RefundService } from './service.js';
 import { createRefundWorkflow } from './workflow.js';
 
 type StripeRefund = { refundId: string; providerRefundId: string; status: string | null; failureReason: string | null };
@@ -386,7 +385,7 @@ describe('settling', () => {
 
 describe('starting the run', () => {
   it('approving starts exactly one run even when approval is retried', async () => {
-    const service = new RefundService(refundReads(h.db), h.refunds.writes(run), coreReads(h.db), {
+    const service = refundServiceOf(refundReads(h.db), h.refunds.writes(run), coreReads(h.db), {
       systemUserId: adminId,
       autoApproveLimits: {},
     });
@@ -419,7 +418,7 @@ describe('starting the run', () => {
   });
 
   it('an auto-approved refund starts its run too', async () => {
-    const service = new RefundService(refundReads(h.db), h.refunds.writes(run), coreReads(h.db), {
+    const service = refundServiceOf(refundReads(h.db), h.refunds.writes(run), coreReads(h.db), {
       systemUserId: adminId,
     });
     const payment = await seedPayment(h.payments.writes(run), null, '25');

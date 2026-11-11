@@ -232,6 +232,20 @@ describe('PaymentRepository writes refuse what the columns cannot hold, as typed
     ).toMatchObject({ code: 'schema.invalid_input' });
   });
 
+  it('updateCustomer refuses an email past 255 characters and U+0000 in the name, and writes nothing', async () => {
+    const owner = 'usr_update_refused';
+    await db.insert(users).values({ id: owner });
+    const customer = orThrow(
+      await repo.createCustomer({ userId: owner, providerCustomerId: 'cus_update_refused', email: 'kept@example.com' }),
+    );
+
+    expect(await repo.updateCustomer(customer.id, { email: `${'a'.repeat(250)}@example.com` })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await repo.updateCustomer(customer.id, { name: 'N\u0000' })).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await repo.findCustomerById(customer.id)).toMatchObject({ email: 'kept@example.com', name: null });
+  });
+
   it('updateCustomer returns customer_conflict for a user or provider customer another customer holds', async () => {
     const first = 'usr_conflict_a';
     const second = 'usr_conflict_b';
@@ -334,6 +348,41 @@ describe('PaymentRepository reads with values no row can hold', () => {
       expect(await repo.findPaymentByProviderPaymentId(id)).toBeNull();
       expect(await repo.findWebhookEventByProviderEventId(id, 'stripe')).toBeNull();
     }
+  });
+
+  it('a lookup by a value outside a pgEnum column answers empty or null, never a raw 22P02 or 22021', async () => {
+    // JSON.parse is typed `any`, the way an untyped caller reaches these methods with a value outside the enum
+    const outside = JSON.parse('"\\u0000"');
+    const long = JSON.parse(`"${'x'.repeat(300)}"`);
+
+    expect(await repo.findPlansByTier(outside)).toEqual([]);
+    expect(await repo.findSubscriptionsByStatus(long)).toEqual([]);
+    expect(await repo.findSubscriptionsEndingInRange(instant('2026-01-01T00:00:00Z'), instant('2026-02-01T00:00:00Z'), outside)).toEqual([]);
+    expect(await repo.findPaymentsByStatus(outside)).toEqual([]);
+    expect(await repo.findWebhookEventsByType(long)).toEqual([]);
+    expect(await repo.findCustomerByProviderCustomerId('cus_1', outside)).toBeNull();
+    expect(await repo.findWebhookEventByProviderEventId('evt_1', long)).toBeNull();
+  });
+
+  it('claimWebhookEvent returns schema.invalid_input for a provider or event type outside its enum, and writes nothing', async () => {
+    const outside = JSON.parse('"\\u0000"');
+    const base = { providerEventId: 'evt_enum_claim', data: {} };
+
+    expect(await repo.claimWebhookEvent({ ...base, provider: outside, eventType: 'subscription.created' })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await repo.claimWebhookEvent({ ...base, provider: 'stripe', eventType: outside })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await repo.findWebhookEventByProviderEventId('evt_enum_claim', 'stripe')).toBeNull();
+  });
+
+  it('a belowAttempts past the 32-bit range matches every event instead of a raw 22003', async () => {
+    const created = orThrow(await repo.createWebhookEvent({ provider: 'stripe', eventType: 'subscription.created', providerEventId: 'evt_big_attempts', data: {} }));
+
+    const events = await repo.findUnprocessedWebhookEvents(1000, 2 ** 31);
+
+    expect(events.map(event => event.id)).toContain(created.id);
   });
 
   it('a time outside the years 1 to 9999 or a fractional count breaks a stated precondition', async () => {

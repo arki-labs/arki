@@ -1,6 +1,6 @@
 import type { Instant } from '@arki/date';
 import { fromDate, isSameOrBefore, now, toDate, toMillis } from '@arki/date';
-import type { Failure } from '@arki/failure';
+import type { Failure, FailureOf } from '@arki/failure';
 import { z } from '@arki/contracts';
 import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
@@ -9,8 +9,9 @@ import type { CoreWrites } from '../journal.js';
 import type { BasePaymentProvider } from '../providers/base-provider.js';
 import type { PaymentRepository } from '../repository.js';
 import type { PaymentId, SubscriptionId } from '../types.js';
-import { misconfigured } from '../failures.js';
+import { PaymentsConfigurationInvalid } from '../failures.js';
 import { paymentAmount } from '../money.js';
+import { MAX_BATCH_ITEMS } from '../pg-values.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
 
 const logger = getLogger('arki:payments:dunning');
@@ -104,28 +105,51 @@ const cancelStepConfigSchema = z.looseObject({ reason: z.string().min(1) });
 /** A rule's delay: whole days from 0 to ten years, so the scheduled day is always a real date. */
 const delayDaysSchema = z.number().int().min(0).max(3650);
 
+type ConfigurationInvalid = FailureOf<typeof PaymentsConfigurationInvalid>;
+
+/** A list of rules or retry days: at most `MAX_BATCH_ITEMS` (1,000) items. */
+const configListSchema = z.array(z.unknown()).max(MAX_BATCH_ITEMS);
+
 /**
- * Throws `payments.configuration_invalid` when an enabled rule needs a sender the app did not pass,
- * an `email` rule names no template, or a rule's `trigger.delayDays` is not a whole number from 0 to
- * 3650. Runs when the service is built and when its rules change.
+ * Nothing, or `payments.configuration_invalid` when `rules` or `retrySchedule` holds more than
+ * `MAX_BATCH_ITEMS` items, an enabled rule needs a sender the app did not pass, an `email` rule
+ * names no template, or a rule's `trigger.delayDays` is not a whole number from 0 to 3650. Runs
+ * when the service is built and when its configuration changes.
  */
-function checkRulesHaveSenders(rules: readonly DunningRule[], senders: DunningSenders): void {
-  for (const rule of rules) {
+function checkConfiguration(
+  config: Pick<DunningConfiguration, 'rules' | 'retrySchedule'>,
+  senders: DunningSenders,
+): ConfigurationInvalid | undefined {
+  for (const [setting, list] of [['rules', config.rules], ['retrySchedule', config.retrySchedule]] as const) {
+    if (!configListSchema.safeParse(list).success) {
+      return PaymentsConfigurationInvalid({ setting, problem: `at most ${MAX_BATCH_ITEMS} items` });
+    }
+  }
+  for (const rule of config.rules) {
     if (!delayDaysSchema.safeParse(rule.trigger.delayDays).success) {
-      throw misconfigured(`rules.${rule.id}.trigger.delayDays`, 'a delay is a whole number of days from 0 to 3650');
+      return PaymentsConfigurationInvalid({
+        setting: `rules.${rule.id}.trigger.delayDays`,
+        problem: 'a delay is a whole number of days from 0 to 3650',
+      });
     }
     if (!rule.enabled) continue;
-    const { type, config } = rule.action;
+    const { type, config: step } = rule.action;
     if (type === 'email') {
-      if (!senders.sendEmail) throw misconfigured('senders.sendEmail', `rule ${rule.id} sends email`);
-      if (!emailStepConfigSchema.safeParse(config).success) {
-        throw misconfigured(`rules.${rule.id}.action.config.template`, 'an email step needs a template name');
+      if (!senders.sendEmail) {
+        return PaymentsConfigurationInvalid({ setting: 'senders.sendEmail', problem: `rule ${rule.id} sends email` });
+      }
+      if (!emailStepConfigSchema.safeParse(step).success) {
+        return PaymentsConfigurationInvalid({
+          setting: `rules.${rule.id}.action.config.template`,
+          problem: 'an email step needs a template name',
+        });
       }
     }
     if (type === 'webhook' && !senders.sendWebhook) {
-      throw misconfigured('senders.sendWebhook', `rule ${rule.id} calls a webhook`);
+      return PaymentsConfigurationInvalid({ setting: 'senders.sendWebhook', problem: `rule ${rule.id} calls a webhook` });
     }
   }
+  return;
 }
 
 const DEFAULT_DUNNING_CONFIG: DunningConfiguration = {
@@ -237,16 +261,33 @@ export class DunningService {
   private config: DunningConfiguration;
   private dunningEvents = new Map<string, DunningEvent>();
 
-  /** Throws `payments.configuration_invalid` when an enabled rule needs a sender that `senders` lacks, or a rule's delay is not whole days from 0 to 3650. */
-  constructor(
+  /** Use `DunningService.create`: it checks the configuration first. */
+  private constructor(
     private readonly paymentProvider: DunningProvider,
     private readonly paymentRepository: DunningReads,
     private readonly writes: CoreWrites,
-    config: Partial<DunningConfiguration> = {},
-    private readonly senders: DunningSenders = {},
+    config: DunningConfiguration,
+    private readonly senders: DunningSenders,
   ) {
-    this.config = { ...DEFAULT_DUNNING_CONFIG, ...config };
-    checkRulesHaveSenders(this.config.rules, senders);
+    this.config = config;
+  }
+
+  /**
+   * Build the service. Returns it, or `payments.configuration_invalid` when an enabled rule needs a
+   * sender that `senders` lacks, a rule's delay is not whole days from 0 to 3650, or `rules` or
+   * `retrySchedule` holds more than `MAX_BATCH_ITEMS` (1,000) items.
+   */
+  static create(
+    paymentProvider: DunningProvider,
+    paymentRepository: DunningReads,
+    writes: CoreWrites,
+    config: Partial<DunningConfiguration> = {},
+    senders: DunningSenders = {},
+  ): DunningService | ConfigurationInvalid {
+    const resolved = { ...DEFAULT_DUNNING_CONFIG, ...config };
+    const invalid = checkConfiguration(resolved, senders);
+    if (invalid) return invalid;
+    return new DunningService(paymentProvider, paymentRepository, writes, resolved, senders);
   }
 
   /**
@@ -389,7 +430,9 @@ export class DunningService {
     const { sendEmail } = this.senders;
     // Checked when the rules were set: an enabled email rule always has a sender and a template
     const step = emailStepConfigSchema.safeParse(config);
-    if (!sendEmail || !step.success) throw misconfigured('senders.sendEmail', 'an email step ran without a sender');
+    if (!sendEmail || !step.success) {
+      return PaymentsConfigurationInvalid({ setting: 'senders.sendEmail', problem: 'an email step ran without a sender' });
+    }
 
     const subscription = await this.paymentRepository.findSubscriptionById(event.subscriptionId);
     if (!subscription) return ReferenceNotFound({ kind: 'subscription', id: event.subscriptionId, missing: 'row' });
@@ -497,7 +540,9 @@ export class DunningService {
   private async triggerWebhook(event: DunningEvent, config: Record<string, unknown>) {
     const { sendWebhook } = this.senders;
     // Checked when the rules were set: an enabled webhook rule always has a sender
-    if (!sendWebhook) throw misconfigured('senders.sendWebhook', 'a webhook step ran without a sender');
+    if (!sendWebhook) {
+      return PaymentsConfigurationInvalid({ setting: 'senders.sendWebhook', problem: 'a webhook step ran without a sender' });
+    }
 
     return sendWebhook({
       eventId: event.id,
@@ -588,11 +633,17 @@ export class DunningService {
   /**
    * Update dunning configuration
    */
-  /** Throws `payments.configuration_invalid`, and keeps the old rules, when a new rule needs a missing sender or has a delay outside whole days from 0 to 3650. */
-  updateConfiguration(config: Partial<DunningConfiguration>): void {
+  /**
+   * Returns nothing, or `payments.configuration_invalid` (and keeps the old configuration) when a new
+   * rule needs a missing sender, has a delay outside whole days from 0 to 3650, or `rules` or
+   * `retrySchedule` holds more than `MAX_BATCH_ITEMS` (1,000) items.
+   */
+  updateConfiguration(config: Partial<DunningConfiguration>): ConfigurationInvalid | undefined {
     const next = { ...this.config, ...config };
-    checkRulesHaveSenders(next.rules, this.senders);
+    const invalid = checkConfiguration(next, this.senders);
+    if (invalid) return invalid;
     this.config = next;
+    return;
   }
 
   /**
@@ -609,6 +660,6 @@ export function createDunningService(
   writes: CoreWrites,
   config?: Partial<DunningConfiguration>,
   senders?: DunningSenders,
-) {
-  return new DunningService(paymentProvider, paymentRepository, writes, config, senders);
+): DunningService | ConfigurationInvalid {
+  return DunningService.create(paymentProvider, paymentRepository, writes, config, senders);
 }

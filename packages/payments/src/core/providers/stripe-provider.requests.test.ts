@@ -19,7 +19,7 @@ import { createRefundId } from '../../refunds/primitives.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId } from '../primitives.js';
 import { CardDeclined, IdempotencyConflict, PaymentMethodRequired, ReferenceNotFound } from './provider-error.js';
 import { StripeProvider } from './stripe-provider.js';
-import { createFakeStripeHttp } from './stripe-test-support.js';
+import { createFakeStripeHttp, stripeProviderOf } from './stripe-test-support.js';
 
 const PERIOD_START = 1_767_225_600;
 const PERIOD_END = 1_769_904_000;
@@ -109,7 +109,7 @@ function stripeSubscription(overrides: Record<string, unknown> = {}) {
 
 function provider(respond: (request: RecordedStripeRequest) => { status?: number; body: unknown }) {
   const http = createFakeStripeHttp(respond);
-  const stripe = new StripeProvider(
+  const stripe = stripeProviderOf(
     { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
     { references, httpClient: http.client, maxNetworkRetries: 0 },
   );
@@ -165,7 +165,7 @@ describe('createSubscription', () => {
   it('returns ReferenceNotFound before any request when the plan has no Stripe price', async () => {
     const noPrice = planRow(null);
     const http = createFakeStripeHttp(() => ({ body: stripeSubscription() }));
-    const direct = new StripeProvider(
+    const direct = stripeProviderOf(
       { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
       { references: { ...references, findPlanById: () => Promise.resolve(noPrice) }, httpClient: http.client },
     );
@@ -178,7 +178,7 @@ describe('createSubscription', () => {
   });
 
   it('says not_configured when the provider has no references', async () => {
-    const bare = new StripeProvider({ apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' });
+    const bare = stripeProviderOf({ apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' });
 
     await expect(bare.createSubscription({ customerId: customer.id, planId: proPlan.id })).rejects.toMatchObject({
       name: 'PaymentProviderError',
@@ -419,7 +419,7 @@ describe('ID failure before charge requests', () => {
 
   it('returns the canonical refusal before creating subscriptions or payment intents', async () => {
     const http = createFakeStripeHttp(() => ({ body: {} }));
-    const stripe = new StripeProvider(
+    const stripe = stripeProviderOf(
       { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
       {
         httpClient: http.client,
@@ -512,7 +512,7 @@ describe('failures returned by every call that takes our ids', () => {
   it('getPlan returns null for an unknown plan row and ReferenceNotFound for a plan with no Stripe price', async () => {
     const { stripe, requests } = provider(() => ({ body: {} }));
     const noPrice = planRow(null);
-    const withoutPrice = new StripeProvider(
+    const withoutPrice = stripeProviderOf(
       { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
       { references: { ...references, findPlanById: () => Promise.resolve(noPrice) } },
     );
@@ -657,6 +657,39 @@ describe('caller input refused before any request', () => {
     expect(requests).toHaveLength(0);
   });
 
+  /** Every call that takes an idempotency key, with the key the caller passes. */
+  const keyCalls = {
+    createSubscription: (stripe: StripeProvider, key: string) =>
+      stripe.createSubscription({ customerId: customer.id, planId: proPlan.id, idempotencyKey: key }),
+    updateSubscription: (stripe: StripeProvider, key: string) =>
+      stripe.updateSubscription(subscriptionRow.id, { cancelAtPeriodEnd: true, idempotencyKey: key }),
+    cancelSubscription: (stripe: StripeProvider, key: string) =>
+      stripe.cancelSubscription(subscriptionRow.id, { immediately: true, idempotencyKey: key }),
+    refundPayment: (stripe: StripeProvider, key: string) =>
+      stripe.refundPayment(orThrow(createPaymentId()), { refundId: orThrow(createRefundId()), idempotencyKey: key }),
+    createSetupIntent: (stripe: StripeProvider, key: string) => stripe.createSetupIntent(customer.id, { idempotencyKey: key }),
+    createPaymentIntent: (stripe: StripeProvider, key: string) =>
+      stripe.createPaymentIntent({
+        customerId: customer.id,
+        amount: money('9.99', 'USD'),
+        paymentMethodId: 'pm_1',
+        automatic: true,
+        idempotencyKey: key,
+      }),
+  };
+  // A line break or a character past U+00FF makes Stripe's HTTP client throw before sending, which
+  // came back as a retryable `unavailable`; an empty or over-long key Stripe refuses.
+  const unsendableKeys = ['k\r\nX-Injected: 1', 'k\u0000', 'k\uD800', 'ключ', '', ' k', 'k'.repeat(256)];
+
+  it.each(Object.entries(keyCalls))('%s returns schema.invalid_input for a key a header cannot carry, before any request', async (_name, call) => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    for (const key of unsendableKeys) {
+      expect(await call(stripe, key)).toMatchObject({ code: 'schema.invalid_input' });
+    }
+    expect(requests).toHaveLength(0);
+  });
+
   it('metadata holding a lone surrogate is schema.invalid_input before any request: the row keeps it in jsonb (22P02)', async () => {
     const { stripe, requests } = provider(() => ({ body: {} }));
 
@@ -667,29 +700,46 @@ describe('caller input refused before any request', () => {
     expect(requests).toHaveLength(0);
   });
 
-  it('text with a lone surrogate, which the Stripe form encoding cannot take, throws PaymentProviderError invalid_request before any request', async () => {
+  it('text with a lone surrogate, which the Stripe form encoding cannot take, is schema.invalid_input before any request', async () => {
     const { stripe, requests } = provider(() => ({ body: {} }));
 
-    await expect(stripe.detachPaymentMethod('pm_\uD800')).rejects.toMatchObject({ name: 'PaymentProviderError', code: 'invalid_request' });
-    await expect(stripe.createCustomer({ userId: 'usr_alice', email: 'a@example.com', name: 'A\uDC00' })).rejects.toMatchObject({
-      name: 'PaymentProviderError',
-      code: 'invalid_request',
+    expect(await stripe.detachPaymentMethod('pm_\uD800')).toMatchObject({ code: 'schema.invalid_input' });
+    expect(
+      await stripe.createCustomer({ userId: 'usr_alice', email: 'a@example.com', name: 'A\uDC00' }),
+    ).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await stripe.createCustomerPortalSession('cus_1', 'https://app.test/\uD800')).toMatchObject({
+      code: 'schema.invalid_input',
     });
+    expect(
+      await stripe.previewSubscriptionChange({
+        subscriptionId: subscriptionRow.id,
+        planId: proPlan.id,
+        // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+        prorationBehavior: 'bad\uD800',
+      }),
+    ).toMatchObject({ code: 'schema.invalid_input' });
     expect(requests).toHaveLength(0);
   });
 
   it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
-    'maxNetworkRetries %s is payments.configuration_invalid when the provider is built',
+    'maxNetworkRetries %s is returned as payments.configuration_invalid when the provider is built',
     retries => {
       expect(
-        () =>
-          new StripeProvider(
-            { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
-            { maxNetworkRetries: retries },
-          ),
-      ).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
+        StripeProvider.create(
+          { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
+          { maxNetworkRetries: retries },
+        ),
+      ).toMatchObject({ code: 'payments.configuration_invalid' });
     },
   );
+
+  it('an empty apiKey is returned as payments.configuration_invalid, not the Stripe client throw', () => {
+    // `new Stripe('')` throws a plain Error; an app reading an unset env var into `apiKey` must get the failure.
+    expect(StripeProvider.create({ apiKey: '', webhookSecret: 'whsec_fake', environment: 'sandbox' })).toMatchObject({
+      code: 'payments.configuration_invalid',
+      data: { setting: 'apiKey' },
+    });
+  });
 
   it('answers an id holding U+0000 as missing without asking the references or Stripe', async () => {
     let lookups = 0;
@@ -700,7 +750,7 @@ describe('caller input refused before any request', () => {
       findPaymentById: () => (lookups++, Promise.resolve(null)),
     };
     const http = createFakeStripeHttp(() => ({ body: {} }));
-    const stripe = new StripeProvider(
+    const stripe = stripeProviderOf(
       { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
       { references: counted, httpClient: http.client, maxNetworkRetries: 0 },
     );

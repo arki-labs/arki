@@ -7,6 +7,7 @@ import { WebhookSecurityService } from '../services/webhook-security.js';
  */
 export * from '../services/webhook-security.js';
 
-export function createWebhookSecurityService(config: WebhookSecurityConfig): WebhookSecurityService {
-  return new WebhookSecurityService(config);
+/** Builds a `WebhookSecurityService`: the same as `WebhookSecurityService.create`, which returns `payments.configuration_invalid` for a bad config. */
+export function createWebhookSecurityService(config: WebhookSecurityConfig) {
+  return WebhookSecurityService.create(config);
 }

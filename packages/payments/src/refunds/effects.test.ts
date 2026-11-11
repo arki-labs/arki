@@ -18,11 +18,10 @@ import type { NotificationService } from '../core/notifications/service.js';
 import { NotificationFailed } from '../core/failures.js';
 import type { AppDb, AppTx } from '../test-support.js';
 import { createCoreJournal } from '../core/journal.js';
-import { coreReads, refundReads, seedPayment } from '../service-test-support.js';
+import { coreReads, refundReads, refundServiceOf, seedPayment } from '../service-test-support.js';
 import { adminId, core, journalTablesInSchema, meta, metaSchema, openDb, refundsTables, userId } from '../test-support.js';
 import { createRefundEffects } from './effects.js';
 import { createRefundsJournal } from './journal.js';
-import { RefundService } from './service.js';
 
 /** The refunds the approvers were mailed about, in order. */
 const approverMails: string[] = [];
@@ -70,7 +69,7 @@ const run: Parameters<typeof refunds.writes>[0] = (command, input) => journal.ru
 
 /** Refunds up to 10.00 USD are approved at once; larger ones wait for a person. */
 const service = () =>
-  new RefundService(refundReads(db), refunds.writes(run), coreReads(db), {
+  refundServiceOf(refundReads(db), refunds.writes(run), coreReads(db), {
     systemUserId: adminId,
     autoApproveLimits: { USD: '10.00' },
   });

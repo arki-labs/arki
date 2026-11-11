@@ -20,7 +20,7 @@ import { PaymentRetryService } from '../core/services/payment-retry-service.js';
 import { coreReads, runnerOn } from '../service-test-support.js';
 import { core, customerId as fixtureCustomerId, openDb, planId, schema, typed, users } from '../test-support.js';
 import { createDunningCampaignId } from './primitives.js';
-import { DunningIntegrationService } from './services/integration-service.js';
+import { createDunningIntegrationService, DunningIntegrationService } from './services/integration-service.js';
 import { createDunningTables } from './tables.js';
 
 const dunning = createDunningTables({
@@ -31,11 +31,13 @@ const dunning = createDunningTables({
 });
 
 // The condition check reads no table, so the database is empty
-const service = new DunningIntegrationService(
+const service = orThrow(
+DunningIntegrationService.create(
   drizzle({ client: new PGlite('memory://') }),
   { customers: core.customers, payments: core.payments, subscriptions: core.subscriptions, plans: core.plans },
   dunning,
   { systemUserId: 'usr_system' },
+),
 );
 
 const event = {
@@ -91,11 +93,13 @@ describe('the event handlers return the money failure of a stored segment range'
   const relations = defineRelations({ ...dunning, customers: core.customers, payments: core.payments }, () => ({}));
   const client = new PGlite('memory://');
   const db = drizzle({ client, relations });
-  const handlers = new DunningIntegrationService(
+  const handlers = orThrow(
+  DunningIntegrationService.create(
     db,
     { customers: core.customers, payments: core.payments, subscriptions: core.subscriptions, plans: core.plans },
     dunning,
     { systemUserId: 'usr_system' },
+  ),
   );
   const customerId = orThrow(createCustomerId());
   const subscriptionId = orThrow(createSubscriptionId());
@@ -197,11 +201,13 @@ async function plainDatabase() {
   await db
     .insert(core.customers)
     .values({ id: customerId, userId: owner, providerCustomerId: `cus_${customerId}`, email: 'plain@example.com' });
-  const service = new DunningIntegrationService(
+  const service = orThrow(
+  DunningIntegrationService.create(
     db,
     { customers: core.customers, payments: core.payments, subscriptions: core.subscriptions, plans: core.plans },
     dunning,
     { systemUserId: 'usr_system' },
+  ),
   );
   return { client, db, service, customerId };
 }
@@ -561,18 +567,20 @@ describe('an event handler names what the event refers to and has no row', () =>
     });
     try {
       // The retry service only reads the payment here; it never reaches the payment provider
-      const provider: ConstructorParameters<typeof PaymentRetryService>[0] = {
+      const provider: Parameters<typeof PaymentRetryService.create>[0] = {
         async confirmPayment() {
           throw new Error('scheduling a retry never confirms a payment');
         },
       };
-      const retries = new PaymentRetryService(provider, coreReads(db), typed.core.writes(runnerOn(db)));
-      const handlers = new DunningIntegrationService(
+      const retries = orThrow(PaymentRetryService.create(provider, coreReads(db), typed.core.writes(runnerOn(db))));
+      const handlers = orThrow(
+      DunningIntegrationService.create(
         db,
         { customers: core.customers, payments: core.payments, subscriptions: core.subscriptions, plans: core.plans },
         dunning,
         { systemUserId: 'usr_system' },
         retries,
+      ),
       );
       const paymentId = orThrow(createPaymentId());
 
@@ -626,5 +634,16 @@ describe('the event handlers answer an id holding U+0000 without a raw SQLSTATE 
     } finally {
       await client.close();
     }
+  });
+});
+
+describe('building the service', () => {
+  it('create and createDunningIntegrationService return payments.configuration_invalid for a channel setting no provider can use', () => {
+    const tables = { customers: core.customers, payments: core.payments, subscriptions: core.subscriptions, plans: core.plans };
+    const config = { systemUserId: 'usr_system', communication: { webhook: { allowedHosts: [] } } };
+    const db = drizzle({ client: new PGlite('memory://') });
+
+    expect(DunningIntegrationService.create(db, tables, dunning, config)).toMatchObject({ code: 'payments.configuration_invalid' });
+    expect(createDunningIntegrationService(db, tables, dunning, config)).toMatchObject({ code: 'payments.configuration_invalid' });
   });
 });

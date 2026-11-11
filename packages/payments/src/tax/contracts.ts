@@ -6,11 +6,13 @@ import { currencyCodeSchema } from '@arki/money/zod';
 import type { TaxComplianceReport } from './reporting.js';
 import type { TaxCalculationResult, TaxService } from './service.js';
 import { moneyJsonSchema, positiveMoneySchema } from '../core/money.js';
-import { pgInstantSchema, pgJsonSchema, pgTextSchema as pgText, pgVarcharSchema as pgVarchar } from '../core/pg-values.js';
+import { holdsLoneSurrogate, MAX_BATCH_ITEMS, pgInstantSchema, pgJsonSchema, pgTextSchema as pgText, pgVarcharSchema as pgVarchar } from '../core/pg-values.js';
 import {
   exemptionStatusValues,
   exemptionTypeValues,
   jurisdictionTypeValues,
+  taxAuditActionValues,
+  taxAuditEntityValues,
   taxBusinessTypeValues,
   taxCalculationModeValues,
   taxConfigIdSchema,
@@ -18,7 +20,9 @@ import {
   taxAuditEntryIdFactory,
   taxExemptionIdSchema,
   taxJurisdictionIdSchema,
+  taxPlanIntervalValues,
   taxRecordIdFactory,
+  taxRecordTypeValues,
 } from './primitives.js';
 
 // Enum schemas
@@ -68,6 +72,7 @@ export const createTaxConfigSchema = z.object({
           status: z.enum(['active', 'inactive', 'pending']),
         }),
       )
+      .max(MAX_BATCH_ITEMS)
       .optional(),
   }),
   features: z
@@ -115,9 +120,10 @@ export const createJurisdictionSchema = z.object({
       z.object({
         rate: taxRateSchema,
         description: pgText,
-        applicableTo: z.array(pgText),
+        applicableTo: z.array(pgText).max(MAX_BATCH_ITEMS),
       }),
     )
+    .max(MAX_BATCH_ITEMS)
     .optional(),
   taxIdRequired: z.boolean().default(false),
   registrationRequired: z.boolean().default(false),
@@ -186,6 +192,7 @@ export const createExemptionSchema = z
         expiresAt: pgText.optional(),
       }),
     )
+    .max(MAX_BATCH_ITEMS)
     .optional(),
   })
   .refine(exemption => exemptionTargetSchema.safeParse(exemption).success, exemptionTargetIssue)
@@ -226,6 +233,9 @@ export const taxConfigurationRowSchema = z.object({
   id: storedId(taxConfigIdSchema).optional(),
   name: pgVarchar(255),
   description: pgText.nullish(),
+  status: taxConfigStatusSchema.optional(),
+  calculationMode: taxCalculationModeSchema.optional(),
+  businessType: taxBusinessTypeSchema.optional(),
   defaultTaxCode: pgVarchar(50).optional(),
   provider: pgVarchar(50).optional(),
   providerSettings: pgJsonSchema.optional(),
@@ -242,6 +252,7 @@ export const taxConfigurationRowSchema = z.object({
 export const taxJurisdictionRowSchema = z.object({
   id: storedId(taxJurisdictionIdSchema).optional(),
   name: pgVarchar(255),
+  type: jurisdictionTypeSchema.optional(),
   code: pgVarchar(20),
   countryCode: pgVarchar(2),
   stateCode: pgVarchar(10).nullish(),
@@ -257,6 +268,8 @@ export const taxJurisdictionRowSchema = z.object({
 /** A `tax_exemptions` row. `TaxExemptionRepository` checks inserts with it, updates and approvals with `.partial()`. */
 export const taxExemptionRowSchema = z.object({
   id: storedId(taxExemptionIdSchema).optional(),
+  type: exemptionTypeSchema.optional(),
+  status: exemptionStatusSchema.optional(),
   customerId: pgVarchar(255).nullish(),
   productCode: pgVarchar(100).nullish(),
   exemptionCode: pgVarchar(50),
@@ -275,6 +288,8 @@ export const taxExemptionRowSchema = z.object({
 /** A `tax_audit_entries` row. `TaxAuditRepository.record` checks every entry with it. */
 export const taxAuditRowSchema = z.object({
   id: storedId(taxAuditEntryIdFactory.schema).optional(),
+  action: z.enum(taxAuditActionValues),
+  entity: z.enum(taxAuditEntityValues),
   entityId: pgVarchar(255),
   details: pgJsonSchema,
   occurredAt: pgInstantSchema().optional(),
@@ -283,6 +298,7 @@ export const taxAuditRowSchema = z.object({
 /** A `tax_records` row. `TaxRecordRepository.recordMany` checks every row with it, and `createTaxTransaction` before it asks the provider. */
 export const taxRecordRowSchema = z.object({
   id: storedId(taxRecordIdFactory.schema).optional(),
+  type: z.enum(taxRecordTypeValues),
   reference: pgVarchar(255),
   jurisdiction: pgVarchar(255),
   /** Percent as decimal text; the column is `numeric(8,4)`, so 10000 or more cannot be stored */
@@ -302,45 +318,60 @@ export const taxRecordRowSchema = z.object({
   occurredAt: pgInstantSchema().optional(),
 });
 
+/** The batch `TaxRecordRepository.recordMany` and `createTaxTransaction` write: at most `MAX_BATCH_ITEMS` (1,000) rows. */
+export const taxRecordRowsSchema = z.array(taxRecordRowSchema).max(MAX_BATCH_ITEMS);
+
 // Tax calculation
 
 /** A sale's line items share its currency: one in another currency cannot be added to the rest. */
+/** Text the tax provider (Stripe) takes: it refuses a lone surrogate (such as `'\ud800'`) as an invalid request. */
+const providerText = z.string().refine(value => !holdsLoneSurrogate(value), 'Text cannot contain a lone surrogate (such as U+D800 alone)');
+
+/** The text of a line item that goes to the tax provider. */
+export const taxLineTextSchema = z.object({
+  description: providerText,
+  reference: providerText,
+  taxCode: providerText.optional(),
+  planId: providerText.optional(),
+});
+
+/** A customer's address and tax ids as the tax provider takes them. */
+export const taxCustomerDetailsSchema = z.object({
+  address: z
+    .object({
+      line1: providerText.optional(),
+      line2: providerText.optional(),
+      city: providerText.optional(),
+      state: providerText.optional(),
+      postalCode: providerText.optional(),
+      country: providerText.optional(),
+    })
+    .optional(),
+  taxIds: z
+    .array(
+      z.object({
+        type: providerText,
+        value: providerText,
+      }),
+    )
+    .max(MAX_BATCH_ITEMS)
+    .optional(),
+});
+
+/** At most `MAX_BATCH_ITEMS` (1,000) line items; every line item is in the sale's currency. */
 export const taxCalculationInputSchema = z
   .object({
   customerId: pgText,
-  lineItems: z.array(
-    z.object({
-      /** In `currency` */
-      amount: positiveMoneySchema,
-      description: z.string(),
-      reference: z.string(),
-      taxCode: z.string().optional(),
-      planId: z.string().optional(),
-    }),
-  ),
+  lineItems: z
+    .array(
+      taxLineTextSchema.extend({
+        /** In `currency` */
+        amount: positiveMoneySchema,
+      }),
+    )
+    .max(MAX_BATCH_ITEMS),
   currency: z.string().length(3).toUpperCase(),
-  customerDetails: z
-    .object({
-      address: z
-        .object({
-          line1: z.string().optional(),
-          line2: z.string().optional(),
-          city: z.string().optional(),
-          state: z.string().optional(),
-          postalCode: z.string().optional(),
-          country: z.string().optional(),
-        })
-        .optional(),
-      taxIds: z
-        .array(
-          z.object({
-            type: z.string(),
-            value: z.string(),
-          }),
-        )
-        .optional(),
-    })
-    .optional(),
+  customerDetails: taxCustomerDetailsSchema.optional(),
   })
   .refine(input => input.lineItems.every(item => item.amount.currency.code === input.currency), {
     path: ['lineItems'],
@@ -350,9 +381,9 @@ export const taxCalculationInputSchema = z
 export const calculateSubscriptionTaxInputSchema = z.object({
   customerId: pgText,
   planAmount: positiveMoneySchema,
-  planInterval: z.enum(['monthly', 'yearly']),
+  planInterval: z.enum(taxPlanIntervalValues),
   taxCode: z.string().optional(),
-  customerDetails: taxCalculationInputSchema.shape.customerDetails.optional(),
+  customerDetails: taxCustomerDetailsSchema.optional(),
 });
 
 export const taxIdValidationSchema = z.object({

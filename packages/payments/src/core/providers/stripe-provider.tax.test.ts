@@ -15,8 +15,7 @@ import type { Customer } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
 import { createCustomerId } from '../primitives.js';
 import { TaxAddressIncomplete } from './provider-error.js';
-import { StripeProvider } from './stripe-provider.js';
-import { createFakeStripeHttp } from './stripe-test-support.js';
+import { createFakeStripeHttp, stripeProviderOf } from './stripe-test-support.js';
 
 const customer: Customer = {
   id: orThrow(createCustomerId()),
@@ -33,7 +32,7 @@ const customer: Customer = {
 
 function provider(respond: (request: RecordedStripeRequest) => { status?: number; body: unknown }) {
   const http = createFakeStripeHttp(respond);
-  const stripe = new StripeProvider(
+  const stripe = stripeProviderOf(
     { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
     {
       references: {
@@ -367,6 +366,27 @@ describe('calculateTax', () => {
     });
 
     expect(quote).toMatchObject({ code: 'payments.tax_address_incomplete' });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('returns schema.invalid_input for text Stripe cannot take or more than 1,000 line items, before calling Stripe', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+    const item = { amount: money('6.00', 'USD'), reference: 'plan' };
+
+    expect(
+      await stripe.calculateTax({
+        customerId: customer.id,
+        currency: 'USD',
+        lineItems: [{ ...item, taxCode: 'txcd_\uD800' }],
+      }),
+    ).toMatchObject({ code: 'schema.invalid_input' });
+    expect(
+      await stripe.calculateTax({
+        customerId: customer.id,
+        currency: 'USD',
+        lineItems: Array.from({ length: 1001 }, () => item),
+      }),
+    ).toMatchObject({ code: 'schema.invalid_input' });
     expect(requests).toHaveLength(0);
   });
 

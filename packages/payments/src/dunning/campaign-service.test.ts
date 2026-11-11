@@ -1,5 +1,4 @@
 // Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
-import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 
 /**
  * DunningCampaignService.createCampaign: one transaction
@@ -18,25 +17,26 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { add, fromDate, now, sub, toMillis } from '@arki/date';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 
 import type { CustomerId } from '../core/types.js';
 import type { CreateDunningCampaignInput } from './contracts.js';
-import { updateDunningCampaignInputSchema } from './contracts.js';
 import type { DunningCampaignId } from './primitives.js';
-import { DunningCampaignNotFound, DunningCampaignWithoutSteps, DunningTemplateInUse } from './failures.js';
-import { createDunningCampaignId, createDunningExecutionId, createDunningTemplateId } from './primitives.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
 import { userIdFactory } from '../core/user-id.js';
 import { core, customerId, planId, schema, userId, users } from '../test-support.js';
-import { DunningCampaignService } from './services/campaign-service.js';
-import { CommunicationOrchestrationService, EmailProvider } from './services/communication-service.js';
-import { createDunningTables } from './tables.js';
+import { updateDunningCampaignInputSchema } from './contracts.js';
+import { DunningCampaignNotFound, DunningCampaignWithoutSteps, DunningTemplateInUse } from './failures.js';
+import { createDunningCampaignId, createDunningExecutionId, createDunningTemplateId } from './primitives.js';
 import {
   createDunningCampaignRepository,
   createDunningCommunicationRepository,
   createDunningExecutionRepository,
   createDunningTemplateRepository,
 } from './repository.js';
+import { DunningCampaignService } from './services/campaign-service.js';
+import { CommunicationOrchestrationService, EmailProvider } from './services/communication-service.js';
+import { createDunningTables } from './tables.js';
 
 const dunning = createDunningTables({
   schema,
@@ -122,13 +122,15 @@ beforeAll(async () => {
     .values({ id: customerId, userId, providerCustomerId: 'cus_test', email: 'buyer@example.com' });
   const communications = new CommunicationOrchestrationService(db, tables);
   communications.registerProvider(
-    new EmailProvider({
-      apiKey: 're_test',
-      fromEmail: 'billing@example.com',
-      fromName: 'Billing',
-      timeoutMs: 300,
-      apiBaseUrl: `http://127.0.0.1:${address.port}`,
-    }),
+    orThrow(
+      EmailProvider.create({
+        apiKey: 're_test',
+        fromEmail: 'billing@example.com',
+        fromName: 'Billing',
+        timeoutMs: 300,
+        apiBaseUrl: `http://127.0.0.1:${address.port}`,
+      }),
+    ),
   );
   service = new DunningCampaignService(db, serviceTables, () => communications);
 });
@@ -204,15 +206,26 @@ describe('updateCampaign templates', () => {
 
     const updated = orThrow(
       await service.updateCampaign(
-      created.id,
-      {
-        templates: [
-          { name: 'SMS nudge', stepNumber: 1, delayHours: 2, communication: { channel: 'sms', content: 'Pay now', variables: [] } },
-          { name: 'Final notice', stepNumber: 3, delayHours: 72, communication: { channel: 'email', subject: 'Last call', content: 'Final', variables: [] } },
-        ],
-      },
-      'usr_admin',
-    ));
+        created.id,
+        {
+          templates: [
+            {
+              name: 'SMS nudge',
+              stepNumber: 1,
+              delayHours: 2,
+              communication: { channel: 'sms', content: 'Pay now', variables: [] },
+            },
+            {
+              name: 'Final notice',
+              stepNumber: 3,
+              delayHours: 72,
+              communication: { channel: 'email', subject: 'Last call', content: 'Final', variables: [] },
+            },
+          ],
+        },
+        'usr_admin',
+      ),
+    );
 
     expect(updated?.templates.map(template => [template.stepNumber, template.communication.channel])).toEqual([
       [1, 'sms'],
@@ -251,7 +264,19 @@ describe('updateCampaign templates', () => {
       created.id,
       {
         name: 'After',
-        templates: [{ name: 'Step 1', stepNumber: 1, delayHours: 0, communication: { channel: 'email', subject: 'Payment failed', content: 'Please update your card', variables: [] } }],
+        templates: [
+          {
+            name: 'Step 1',
+            stepNumber: 1,
+            delayHours: 0,
+            communication: {
+              channel: 'email',
+              subject: 'Payment failed',
+              content: 'Please update your card',
+              variables: [],
+            },
+          },
+        ],
       },
       'usr_admin',
     );
@@ -274,7 +299,9 @@ describe('updateCampaign templates', () => {
 
 describe('deleteCampaign', () => {
   it('deletes a campaign that never sent anything, with its steps', async () => {
-    const created = orThrow(await service.createCampaign({ ...campaignInput([0, 24]), name: 'Never ran' }, 'usr_admin'));
+    const created = orThrow(
+      await service.createCampaign({ ...campaignInput([0, 24]), name: 'Never ran' }, 'usr_admin'),
+    );
 
     expect(await service.deleteCampaign(created.id)).toBeUndefined();
 
@@ -288,7 +315,9 @@ describe('deleteCampaign', () => {
 
   // An admin deletes a campaign that already ran: the sent message keeps its step, so the route needs a 409 to answer with
   it('refuses a campaign whose step already sent a communication with payments.dunning_template_in_use, and deletes nothing', async () => {
-    const created = orThrow(await service.createCampaign({ ...campaignInput([0, 24]), name: 'Already ran' }, 'usr_admin'));
+    const created = orThrow(
+      await service.createCampaign({ ...campaignInput([0, 24]), name: 'Already ran' }, 'usr_admin'),
+    );
     const [first, second] = created.templates;
     if (!first || !second) throw new Error('campaign needs two steps');
     const sent = await execution(created.id, 'completed');
@@ -319,7 +348,9 @@ describe('deleteCampaign', () => {
 describe('the dunning repositories answer a missing or referenced row with a failure', () => {
   // An admin tool deletes through the repository: a campaign that already ran must answer 409, not a raw foreign key error
   it('DunningCampaignRepository.delete refuses a campaign whose step sent a communication with payments.dunning_template_in_use', async () => {
-    const created = orThrow(await service.createCampaign({ ...campaignInput([0, 24]), name: 'Repository delete' }, 'usr_admin'));
+    const created = orThrow(
+      await service.createCampaign({ ...campaignInput([0, 24]), name: 'Repository delete' }, 'usr_admin'),
+    );
     const [first, second] = created.templates;
     if (!first || !second) throw new Error('campaign needs two steps');
     const sent = await execution(created.id, 'completed');
@@ -361,7 +392,9 @@ describe('the dunning repositories answer a missing or referenced row with a fai
   });
 
   it('DunningTemplateRepository.delete refuses a step that sent a communication with payments.dunning_template_in_use', async () => {
-    const created = orThrow(await service.createCampaign({ ...campaignInput([0, 24]), name: 'Step delete' }, 'usr_admin'));
+    const created = orThrow(
+      await service.createCampaign({ ...campaignInput([0, 24]), name: 'Step delete' }, 'usr_admin'),
+    );
     const [first, second] = created.templates;
     if (!first || !second) throw new Error('campaign needs two steps');
     const sent = await execution(created.id, 'completed');
@@ -389,7 +422,9 @@ describe('the dunning repositories answer a missing or referenced row with a fai
   });
 
   it('DunningExecutionRepository.create names the missing campaign, step or customer with its not-found code', async () => {
-    const created = orThrow(await service.createCampaign({ ...campaignInput([0]), name: 'Execution refs' }, 'usr_admin'));
+    const created = orThrow(
+      await service.createCampaign({ ...campaignInput([0]), name: 'Execution refs' }, 'usr_admin'),
+    );
     const [step] = created.templates;
     if (!step) throw new Error('campaign needs a step');
     const executions = createDunningExecutionRepository(db, tables);
@@ -417,12 +452,17 @@ describe('the dunning repositories answer a missing or referenced row with a fai
       code: 'payments.reference_not_found',
       data: { kind: 'customer', id: unknownCustomer, missing: 'row' },
     });
-    const rows = await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.campaignId, created.id));
+    const rows = await db
+      .select()
+      .from(tables.dunningExecutions)
+      .where(eq(tables.dunningExecutions.campaignId, created.id));
     expect(rows).toEqual([]);
   });
 
   it('DunningCommunicationRepository.create names a missing execution or step with its not-found code', async () => {
-    const created = orThrow(await service.createCampaign({ ...campaignInput([0]), name: 'Communication refs' }, 'usr_admin'));
+    const created = orThrow(
+      await service.createCampaign({ ...campaignInput([0]), name: 'Communication refs' }, 'usr_admin'),
+    );
     const [step] = created.templates;
     if (!step) throw new Error('campaign needs a step');
     const ran = await execution(created.id, 'completed');
@@ -462,7 +502,9 @@ describe('the dunning repositories answer a missing or referenced row with a fai
   // PGlite has one connection, so the race itself cannot run here. A message written between the check and
   // the delete must wait on a row lock; the lock has to be taken before the check reads the communications.
   it('updateCampaign locks the steps before it checks them for sent communications', async () => {
-    const created = orThrow(await service.createCampaign({ ...campaignInput([0, 24]), name: 'Locked update' }, 'usr_admin'));
+    const created = orThrow(
+      await service.createCampaign({ ...campaignInput([0, 24]), name: 'Locked update' }, 'usr_admin'),
+    );
     const queries: string[] = [];
     const logged = drizzle({ client, relations, logger: { logQuery: query => queries.push(query) } });
     const watched = new DunningCampaignService(logged, serviceTables, () => {
@@ -511,9 +553,9 @@ describe('listExecutions', () => {
     await execution(other, 'scheduled');
     const query = { limit: 20, offset: 0, sortBy: 'scheduledAt', sortOrder: 'desc' } as const;
 
-    const all = await service.listExecutions({ ...query, campaignId: mine });
-    const scheduled = await service.listExecutions({ ...query, campaignId: mine, status: 'scheduled' });
-    const secondPage = await service.listExecutions({ ...query, campaignId: mine, limit: 2, offset: 2 });
+    const all = orThrow(await service.listExecutions({ ...query, campaignId: mine }));
+    const scheduled = orThrow(await service.listExecutions({ ...query, campaignId: mine, status: 'scheduled' }));
+    const secondPage = orThrow(await service.listExecutions({ ...query, campaignId: mine, limit: 2, offset: 2 }));
 
     expect(all.map(row => row.id)).toEqual([third.id, second.id, first.id]);
     expect(scheduled.map(row => row.id)).toEqual([third.id, first.id]);
@@ -693,6 +735,23 @@ describe('executeCampaign refusals', () => {
     expect(refused).toMatchObject({ code: 'payments.dunning_campaign_not_found', data: { campaignId: unknown } });
   });
 
+  it('customerIds or excludeCustomerIds over MAX_BATCH_ITEMS returns schema.invalid_input and runs nothing', async () => {
+    const campaignId = orThrow(createDunningCampaignId());
+    const ids = Array.from({ length: 1001 }, () => orThrow(createCustomerId()));
+
+    const tooManyIncluded = await service.executeCampaign(
+      { campaignId, dryRun: true, customFilters: { customerIds: ids, testMode: false } },
+      'usr_admin',
+    );
+    const tooManyExcluded = await service.executeCampaign(
+      { campaignId, dryRun: true, customFilters: { excludeCustomerIds: ids, testMode: false } },
+      'usr_admin',
+    );
+
+    expect(tooManyIncluded).toMatchObject({ code: 'schema.invalid_input' });
+    expect(tooManyExcluded).toMatchObject({ code: 'schema.invalid_input' });
+  });
+
   it('a draft campaign returns payments.dunning_campaign_not_active and schedules nothing', async () => {
     const campaignId = await createdCampaign('Refused: draft', 'draft');
 
@@ -835,7 +894,10 @@ describe('a scheduled execution in a named schema', () => {
       .select()
       .from(tables.dunningCampaignAnalytics)
       .where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
-    expect(rows.find(row => row.currency === 'EUR')).toMatchObject({ paymentsRecovered: 1, revenueRecoveredMinor: 1999 });
+    expect(rows.find(row => row.currency === 'EUR')).toMatchObject({
+      paymentsRecovered: 1,
+      revenueRecoveredMinor: 1999,
+    });
   });
 });
 
@@ -1129,7 +1191,10 @@ describe('a message that did not go out fails the execution and is reported', ()
 
     expect(report.failed.find(fault => fault.id === id)?.code).toBe('payments.notification_provider_rejected');
     const stored = await storedExecution(id);
-    expect(stored).toMatchObject({ status: 'failed', errorMessage: 'resend refused the notification with status 503: try later' });
+    expect(stored).toMatchObject({
+      status: 'failed',
+      errorMessage: 'resend refused the notification with status 503: try later',
+    });
     expect(minutesUntil(stored.nextRetryAt)).toBe(30);
     const analyticsRows = await db
       .select()
@@ -1188,7 +1253,8 @@ describe('the dunning repositories refuse what their columns refuse', () => {
     const updated = await campaigns.update(campaignId, { name: 'Renamed', updatedBy: `usr_${NUL}` });
     const statusChanged = await campaigns.updateStatus(campaignId, 'paused', `usr_${NUL}`);
 
-    for (const refused of [created, updated, statusChanged]) expect(refused).toMatchObject({ code: 'schema.invalid_input' });
+    for (const refused of [created, updated, statusChanged])
+      expect(refused).toMatchObject({ code: 'schema.invalid_input' });
     expect(await countOf(tables.dunningCampaigns)).toBe(before + 1);
     expect(await service.getCampaign(campaignId)).toMatchObject({ name: 'Actor updates', status: 'active' });
   });
@@ -1206,8 +1272,12 @@ describe('the dunning repositories refuse what their columns refuse', () => {
       scheduledAt: add(now(), { hours: 24 }),
     };
 
-    expect(await executions.create({ ...valid, triggerType: 't'.repeat(101) })).toMatchObject({ code: 'schema.invalid_input' });
-    expect(await executions.create({ ...valid, triggerData: { note: NUL } })).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await executions.create({ ...valid, triggerType: 't'.repeat(101) })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await executions.create({ ...valid, triggerData: { note: NUL } })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
     const stored = orThrow(await executions.create(valid));
     expect(await executions.updateStatus(stored.id, 'failed', undefined, `bad${NUL}`)).toMatchObject({
       code: 'schema.invalid_input',
@@ -1216,7 +1286,10 @@ describe('the dunning repositories refuse what their columns refuse', () => {
       status: 'failed',
       errorMessage: 'The error message cannot be stored',
     });
-    const rows = await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.campaignId, campaignId));
+    const rows = await db
+      .select()
+      .from(tables.dunningExecutions)
+      .where(eq(tables.dunningExecutions.campaignId, campaignId));
     expect(rows).toHaveLength(1);
   });
 
@@ -1235,8 +1308,12 @@ describe('the dunning repositories refuse what their columns refuse', () => {
       status: 'pending' as const,
     };
 
-    expect(await communications.create({ ...valid, recipient: 'r'.repeat(256) })).toMatchObject({ code: 'schema.invalid_input' });
-    expect(await communications.create({ ...valid, subject: 's'.repeat(501) })).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await communications.create({ ...valid, recipient: 'r'.repeat(256) })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(await communications.create({ ...valid, subject: 's'.repeat(501) })).toMatchObject({
+      code: 'schema.invalid_input',
+    });
     const stored = orThrow(await communications.create(valid));
     expect(await communications.updateStatus(stored.id, 'sent', { providerMessageId: 'm'.repeat(256) })).toMatchObject({
       code: 'schema.invalid_input',
@@ -1249,7 +1326,10 @@ describe('the dunning repositories refuse what their columns refuse', () => {
     });
     expect(await communications.findByProviderMessageId(`m${NUL}`)).toBeUndefined();
     expect(await communications.findByProviderMessageId('m'.repeat(256))).toBeUndefined();
-    const rows = await db.select().from(tables.dunningCommunications).where(eq(tables.dunningCommunications.executionId, ran.id));
+    const rows = await db
+      .select()
+      .from(tables.dunningCommunications)
+      .where(eq(tables.dunningCommunications.executionId, ran.id));
     expect(rows).toEqual([expect.objectContaining({ status: 'pending', providerMessageId: null })]);
   });
 });
@@ -1260,7 +1340,12 @@ describe('the dunning write doors parse what the type allows but the columns ref
     name: 'Step',
     stepNumber: 7,
     delayHours: 0,
-    communication: { channel: 'email' as const, subject: 'Payment failed', content: 'Please update your card', variables: [] },
+    communication: {
+      channel: 'email' as const,
+      subject: 'Payment failed',
+      content: 'Please update your card',
+      variables: [],
+    },
   };
 
   it('DunningTemplateRepository.create and update parse their contract: schema.invalid_input, nothing written', async () => {
@@ -1285,7 +1370,10 @@ describe('the dunning write doors parse what the type allows but the columns ref
 
     for (const answer of [...created, ...updated]) expect(answer).toMatchObject({ code: 'schema.invalid_input' });
     expect(await countOf(tables.dunningTemplates)).toBe(before);
-    expect(await templates.findById(existing.id)).toMatchObject({ name: existing.name, delayHours: existing.delayHours });
+    expect(await templates.findById(existing.id)).toMatchObject({
+      name: existing.name,
+      delayHours: existing.delayHours,
+    });
   });
 
   it('campaign writes refuse a name, text or JSON their columns cannot store and write nothing', async () => {
@@ -1337,17 +1425,25 @@ describe('the dunning write doors parse what the type allows but the columns ref
       await expect(service.retryFailedExecutions(bad)).rejects.toMatchObject(invariantFailure);
       await expect(communications.findPendingCommunications(bad)).rejects.toMatchObject(invariantFailure);
       await expect(service.getCampaignAnalytics(campaignId, bad)).rejects.toMatchObject(invariantFailure);
-      await expect(executions.findRecentForCustomer(customerId, campaignId, bad)).rejects.toMatchObject(invariantFailure);
-      await expect(service.listCampaigns({ ...page, sortBy: 'createdAt', limit: bad })).rejects.toMatchObject(invariantFailure);
-      await expect(service.listExecutions({ ...page, sortBy: 'createdAt', offset: bad })).rejects.toMatchObject(invariantFailure);
+      await expect(executions.findRecentForCustomer(customerId, campaignId, bad)).rejects.toMatchObject(
+        invariantFailure,
+      );
+      await expect(service.listCampaigns({ ...page, sortBy: 'createdAt', limit: bad })).rejects.toMatchObject(
+        invariantFailure,
+      );
+      await expect(service.listExecutions({ ...page, sortBy: 'createdAt', offset: bad })).rejects.toMatchObject(
+        invariantFailure,
+      );
     }
     // A span past 100 years would leave the range of dates
     await expect(service.getCampaignAnalytics(campaignId, 1e9)).rejects.toMatchObject(invariantFailure);
-    await expect(executions.findRecentForCustomer(customerId, campaignId, 1e12)).rejects.toMatchObject(invariantFailure);
-    const year10000 = fromDate(new Date('+010000-01-01T00:00:00Z'));
-    await expect(service.listExecutions({ ...page, sortBy: 'createdAt', scheduledBefore: year10000 })).rejects.toMatchObject(
+    await expect(executions.findRecentForCustomer(customerId, campaignId, 1e12)).rejects.toMatchObject(
       invariantFailure,
     );
+    const year10000 = fromDate(new Date('+010000-01-01T00:00:00Z'));
+    await expect(
+      service.listExecutions({ ...page, sortBy: 'createdAt', scheduledBefore: year10000 }),
+    ).rejects.toMatchObject(invariantFailure);
 
     // The bounds themselves are valid, and a search no name can hold matches nothing
     expect(await service.getCampaignAnalytics(campaignId, 0)).toMatchObject({ executions: 0 });
@@ -1414,7 +1510,9 @@ describe('the campaign, step and execution doors answer an id, time or setting P
     expect(await campaigns.findActiveForTrigger('payment_failure', [`cs${NUL}`])).toEqual([]);
     expect(await campaigns.getAnalyticsSince(now(), `dc${NUL}`)).toMatchObject({ executions: 0, paymentsRecovered: 0 });
     expect(await service.getCampaignAnalytics(`dc${NUL}`)).toMatchObject({ executions: 0, communicationsSent: 0 });
-    expect(await service.updateCampaign(`dc${NUL}`, { name: 'Renamed', templates: campaignInput([0]).templates }, userId)).toBeNull();
+    expect(
+      await service.updateCampaign(`dc${NUL}`, { name: 'Renamed', templates: campaignInput([0]).templates }, userId),
+    ).toBeNull();
     expect(await templates.findById(`dt${NUL}`)).toBeNull();
     expect(await templates.findByCampaignId(`dc${NUL}`)).toEqual([]);
     expect(await templates.findActiveTemplates(`dc${NUL}`)).toEqual([]);
@@ -1450,9 +1548,15 @@ describe('the campaign, step and execution doors answer an id, time or setting P
       code: 'payments.reference_not_found',
       data: { kind: 'customer' },
     });
-    expect(await executions.create({ ...valid, campaignId: `dc${NUL}` })).toMatchObject({ code: 'payments.dunning_campaign_not_found' });
-    expect(await executions.create({ ...valid, templateId: `dt${NUL}` })).toMatchObject({ code: 'payments.dunning_template_not_found' });
-    expect(await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.campaignId, campaignId))).toEqual([]);
+    expect(await executions.create({ ...valid, campaignId: `dc${NUL}` })).toMatchObject({
+      code: 'payments.dunning_campaign_not_found',
+    });
+    expect(await executions.create({ ...valid, templateId: `dt${NUL}` })).toMatchObject({
+      code: 'payments.dunning_template_not_found',
+    });
+    expect(
+      await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.campaignId, campaignId)),
+    ).toEqual([]);
   });
 
   it('a time an instant column cannot hold is schema.invalid_input on a write and an invariant failure on a read, before any query', async () => {
@@ -1495,8 +1599,14 @@ describe('the campaign, step and execution doors answer an id, time or setting P
       await service.createCampaign({ ...input, settings: { ...settings, cooldownPeriod: 1e12 } }, userId),
       await service.createCampaign({ ...input, settings: { ...settings, priority: Number.NaN } }, userId),
       await service.createCampaign({ ...input, settings: { ...settings, allowedDays: [7] } }, userId),
-      await service.createCampaign({ ...input, trigger: { type: 'payment_failure', conditions: { paymentFailureCount: 1e20 } } }, userId),
-      await service.createCampaign({ ...input, trigger: { type: 'time_based', conditions: { trialEndingDays: 1e9 } } }, userId),
+      await service.createCampaign(
+        { ...input, trigger: { type: 'payment_failure', conditions: { paymentFailureCount: 1e20 } } },
+        userId,
+      ),
+      await service.createCampaign(
+        { ...input, trigger: { type: 'time_based', conditions: { trialEndingDays: 1e9 } } },
+        userId,
+      ),
       await campaigns.create({ ...input, settings: { ...settings, timezone: 'UTC\uD800' }, createdBy: userId }),
       await campaigns.create({ ...input, settings: { ...settings, maxExecutionsPerCustomer: 0 }, createdBy: userId }),
     ];
@@ -1504,7 +1614,9 @@ describe('the campaign, step and execution doors answer an id, time or setting P
     for (const answer of refused) expect(answer).toMatchObject({ code: 'schema.invalid_input' });
     expect(await countOf(tables.dunningCampaigns)).toBe(before);
     const campaignId = await createdCampaign('Contract updates');
-    expect(await campaigns.update(campaignId, { settings: { ...settings, cooldownPeriod: -1 }, updatedBy: userId })).toMatchObject({
+    expect(
+      await campaigns.update(campaignId, { settings: { ...settings, cooldownPeriod: -1 }, updatedBy: userId }),
+    ).toMatchObject({
       code: 'schema.invalid_input',
     });
     expect(await campaigns.findById(campaignId)).toMatchObject({ settings: { cooldownPeriod: 24 } });
@@ -1516,7 +1628,9 @@ describe('the campaign, step and execution doors answer an id, time or setting P
     const before = await countOf(tables.dunningTemplates);
     const communication = { channel: 'email' as const, content: 'Pay \uD800', variables: [] };
 
-    expect(await templates.create({ campaignId, name: 'Step', stepNumber: 9, delayHours: 0, communication })).toMatchObject({
+    expect(
+      await templates.create({ campaignId, name: 'Step', stepNumber: 9, delayHours: 0, communication }),
+    ).toMatchObject({
       code: 'schema.invalid_input',
     });
     const [existing] = await templates.findByCampaignId(campaignId);
@@ -1538,10 +1652,32 @@ describe('the campaign, step and execution doors answer an id, time or setting P
     expect(nobody).toEqual([]);
     const someone = orThrow(
       await service.executeCampaign(
-        { campaignId, dryRun: false, customFilters: { customerIds: [buyer.id, `cust${NUL}`], excludeCustomerIds: [`cust${NUL}`], testMode: false } },
+        {
+          campaignId,
+          dryRun: false,
+          customFilters: { customerIds: [buyer.id, `cust${NUL}`], excludeCustomerIds: [`cust${NUL}`], testMode: false },
+        },
         'usr_admin',
       ),
     );
     expect(someone.map(row => row.customerId)).toEqual([buyer.id]);
+  });
+});
+
+describe('the campaign doors refuse a choice no row has (hostile-input gate)', () => {
+  it('listCampaigns, listExecutions, updateCampaignStatus and findActiveCampaignsForTrigger return schema.invalid_input', async () => {
+    const page = { limit: 20, offset: 0, sortOrder: 'desc' } as const;
+    const nul = '\u0000';
+
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await service.listCampaigns({ ...page, sortBy: 'bad column' })).toMatchObject({ code: 'schema.invalid_input' });
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await service.listCampaigns({ ...page, sortBy: 'createdAt', status: nul })).toMatchObject({ code: 'schema.invalid_input' });
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await service.listExecutions({ ...page, sortBy: 'bad column' })).toMatchObject({ code: 'schema.invalid_input' });
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await service.updateCampaignStatus(orThrow(createDunningCampaignId()), nul, 'usr_admin')).toMatchObject({ code: 'schema.invalid_input' });
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await service.findActiveCampaignsForTrigger(nul)).toMatchObject({ code: 'schema.invalid_input' });
   });
 });

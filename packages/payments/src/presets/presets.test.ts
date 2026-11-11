@@ -30,8 +30,7 @@ import type { RevenueCatEvent } from './revenuecat.js';
 import type { SubscriptionBilling, projectStripeSubscription } from './subscription.js';
 import * as subscriptionIds from '../core/primitives.js';
 import { createSubscriptionId } from '../core/primitives.js';
-import { StripeProvider } from '../core/providers/stripe-provider.js';
-import { createFakeStripeHttp } from '../core/providers/stripe-test-support.js';
+import { createFakeStripeHttp, stripeProviderOf } from '../core/providers/stripe-test-support.js';
 import { PaymentRepository } from '../core/repository.js';
 import { coreReads, runnerOn } from '../service-test-support.js';
 import {
@@ -109,7 +108,7 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
 
   // No network: the provider only checks the signature, and the signature is made here.
   const stripe = new Stripe('sk_test_presets');
-  const provider = new StripeProvider({
+  const provider = stripeProviderOf({
     apiKey: 'sk_test_presets',
     webhookSecret: WEBHOOK_SECRET,
     environment: 'sandbox',
@@ -118,7 +117,7 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
   let billing: SubscriptionBilling;
 
   beforeAll(() => {
-    billing = createSubscriptionBilling({
+    billing = orThrow(createSubscriptionBilling({
       provider,
       repo: {
         ...coreReads(db),
@@ -135,7 +134,7 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
       writes,
       prices: [{ priceId: PRICE_ID, planId }],
       urls: { success: 'https://app.test/pro?status=success', cancel: 'https://app.test/pro?status=cancelled' },
-    });
+    }));
   });
 
   type SubscriptionEventType =
@@ -433,24 +432,24 @@ describe('Stripe: createSubscriptionBilling().createCheckoutSession for a user w
         ? { body: { id: stripeCustomerId, object: 'customer', created: 1_767_225_600 } }
         : { body: { id: 'cs_test', object: 'checkout.session', url: 'https://checkout.stripe.test/cs_test' } },
     );
-    const provider = new StripeProvider(
+    const provider = stripeProviderOf(
       { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
       { httpClient: http.client, maxNetworkRetries: 0 },
     );
-    const billing = createSubscriptionBilling({
+    const billing = orThrow(createSubscriptionBilling({
       provider,
       repo: new PaymentRepository(db, core),
       writes,
       prices: [{ priceId: 'price_pro_monthly', planId }],
       urls: { success: 'https://app.test/ok', cancel: 'https://app.test/cancel' },
-    });
+    }));
     return { billing, requests: http.requests };
   }
 
   // A bad trial failed every checkout at Stripe, or (NaN) went out as no trial at all: it is a boot fault now
-  it.each([0, 1.5, Number.NaN, 731])('a trialDays of %s is refused when the preset is built', trialDays => {
-    const provider = new StripeProvider({ apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' });
-    expect(() =>
+  it.each([0, 1.5, Number.NaN, 731])('a trialDays of %s is returned as payments.configuration_invalid when the preset is built', trialDays => {
+    const provider = stripeProviderOf({ apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' });
+    expect(
       createSubscriptionBilling({
         provider,
         repo: new PaymentRepository(db, core),
@@ -459,7 +458,7 @@ describe('Stripe: createSubscriptionBilling().createCheckoutSession for a user w
         urls: { success: 'https://app.test/ok', cancel: 'https://app.test/cancel' },
         trialDays,
       }),
-    ).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
+    ).toMatchObject({ code: 'payments.configuration_invalid' });
   });
 
   it('an email the customers row cannot hold is refused before Stripe makes a customer', async () => {
@@ -560,6 +559,19 @@ describe('getEntitlement', () => {
       cancelAtPeriodEnd: true,
       trialEnd: null,
     });
+  });
+
+  it('a user id holding U+0000 names no user, so it is free and no row is asked for', async () => {
+    let asked = false;
+    const repo = {
+      findSubscriptionsByUserId: () => {
+        asked = true;
+        return Promise.resolve([]);
+      },
+    };
+
+    expect(await getEntitlement(repo, 'usr_\u0000')).toEqual({ tier: 'free' });
+    expect(asked).toBe(false);
   });
 
   it('a trialing subscription grants Pro, so the trial meant to sell Pro actually shows it', async () => {

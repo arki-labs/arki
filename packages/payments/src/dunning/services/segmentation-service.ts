@@ -5,7 +5,7 @@ import type { Instant } from '@arki/date';
 import { now, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
-import { invariant, isFailure } from '@arki/failure';
+import { invariant, isFailure, orThrow } from '@arki/failure';
 import type { MoneyFailure, MoneyJSON } from '@arki/money';
 import { AmountOutOfRange, Money, RoundingNecessary } from '@arki/money';
 import { is, parse } from '@arki/schema';
@@ -176,9 +176,10 @@ export class CustomerSegmentationService {
 
   /**
    * List segments with filtering and pagination. `limit` and `offset` are whole numbers of 0 or more (a
-   * precondition: anything else throws an invariant failure); a `search` holding U+0000 matches nothing.
+   * precondition: anything else throws an invariant failure); a `search` holding U+0000 matches nothing. A
+   * `type` or `sortBy` outside its list returns `schema.invalid_input`.
    */
-  async listSegments(query: ListCustomerSegmentsQuery): Promise<CustomerSegment[]> {
+  async listSegments(query: ListCustomerSegmentsQuery): Promise<CustomerSegment[] | SchemaFailure> {
     const dbSegments = await this.segmentRepo.findMany(query);
     return dbSegments;
   }
@@ -1002,7 +1003,8 @@ export class CustomerSegmentationService {
       sortOrder: 'desc',
     });
 
-    const segments = dbSegments;
+    // The query above is built from constants, so a refusal is a bug
+    const segments = orThrow(dbSegments);
 
     const matchingSegments: CustomerSegmentId[] = [];
 
@@ -1165,9 +1167,9 @@ export class CustomerSegmentationService {
 
   /**
    * Get customers by risk category. `limit` is a whole number of 0 or more (a precondition: anything else
-   * throws an invariant failure before any query).
+   * throws an invariant failure before any query). A category no profile has returns `schema.invalid_input`.
    */
-  async getCustomersByRiskCategory(category: RiskCategory, limit = 100): Promise<CustomerRiskProfile[]> {
+  async getCustomersByRiskCategory(category: RiskCategory, limit = 100): Promise<CustomerRiskProfile[] | SchemaFailure> {
     const dbProfiles = await this.riskProfileRepo.findByRiskCategory(category, limit);
     return dbProfiles;
   }

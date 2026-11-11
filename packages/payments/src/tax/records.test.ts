@@ -18,8 +18,8 @@ import { Money, money } from '@arki/money';
 import type { Customer } from '../core/types.js';
 import { createCustomerId } from '../core/primitives.js';
 import { ReferenceNotFound } from '../core/providers/provider-error.js';
-import { StripeProvider } from '../core/providers/stripe-provider.js';
-import { createFakeStripeHttp } from '../core/providers/stripe-test-support.js';
+import { MAX_BATCH_ITEMS } from '../core/pg-values.js';
+import { createFakeStripeHttp, stripeProviderOf } from '../core/providers/stripe-test-support.js';
 import { customerId, openDb, rejectionOf, schema } from '../test-support.js';
 import { TaxCurrencyMismatch, TaxLineCurrencyMismatch, TaxRefundSaleNotFound } from './failures.js';
 import { createTaxRepositories } from './repository.js';
@@ -74,7 +74,7 @@ beforeAll(async () => {
         },
   );
   requests = http.requests;
-  const provider = new StripeProvider(
+  const provider = stripeProviderOf(
     { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
     {
       references: {
@@ -195,7 +195,7 @@ describe('getCustomerTaxSummary', () => {
 
   it('refuses a sale for a customer the provider cannot find, and asks Stripe nothing', async () => {
     const http = createFakeStripeHttp(() => ({ body: {} }));
-    const provider = new StripeProvider(
+    const provider = stripeProviderOf(
       { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
       {
         references: {
@@ -337,6 +337,27 @@ describe('a tax record a column cannot store', () => {
     expect(requests).toHaveLength(before);
   });
 
+  it('is refused by recordMany for a type outside sale and refund, and for more than MAX_BATCH_ITEMS rows', async () => {
+    const row = { reference: 'direct_type', type: 'sale' as const, jurisdiction: 'Germany', rate: '19', taxAmountMinor: 1900, currency: 'EUR' };
+    for (const type of ['a\u0000b', 'x'.repeat(300), 'nope']) {
+      // @ts-expect-error a hostile type: the type only lets sale and refund in
+      expect(await repos.records.recordMany([{ ...row, type }])).toMatchObject({ code: InvalidInput.code });
+      // @ts-expect-error a hostile type: no record holds it, so there is none to find
+      expect(await repos.records.findByReference(type, 'direct_type')).toEqual([]);
+    }
+    const tooMany = Array.from({ length: MAX_BATCH_ITEMS + 1 }, (_, index) => ({ ...row, reference: `batch_${index}` }));
+    expect(await repos.records.recordMany(tooMany)).toMatchObject({ code: InvalidInput.code });
+    expect(await repos.records.findByReference('sale', 'batch_0')).toEqual([]);
+  });
+
+  it('is refused by createTaxTransaction for a type outside sale and refund, and Stripe is not asked', async () => {
+    const before = requests.length;
+    // @ts-expect-error a hostile type: the type only lets sale and refund in
+    const refused = await service.createTaxTransaction({ type: 'a\u0000b', customerId, lineItems, currency: 'EUR', reference: 'pay_type', breakdown: [germany] });
+    expect(refused).toMatchObject({ code: InvalidInput.code });
+    expect(requests).toHaveLength(before);
+  });
+
   it('is refused by recordMany too, and no row of the batch is written', async () => {
     const row = { reference: 'direct_1', type: 'sale' as const, jurisdiction: 'Germany', rate: '19', taxAmountMinor: 1900, currency: 'EUR' };
 
@@ -379,6 +400,27 @@ describe('tax records that add up past 2^53 minor units', () => {
     ]);
     const summary = await service.getCustomerTaxSummary({ customerId: otherCustomer, year: 2033 });
     expect(summary.totalTaxPaid.map(total => total.toJSON())).toEqual([{ amount: '180143985094819.82', currency: 'EUR' }]);
+  });
+});
+
+describe('text Stripe would refuse (a lone surrogate)', () => {
+  it('is refused as schema.invalid_input by the four calculation methods and createTaxTransaction, and Stripe is not asked', async () => {
+    const before = requests.length;
+    const input = { customerId, lineItems, currency: 'EUR' };
+    const badLine = lineItems.map(item => ({ ...item, reference: '\uD800' }));
+    const badDetails = { address: { city: '\uD800' } };
+
+    expect(await service.calculateTax({ ...input, lineItems: badLine })).toMatchObject({ code: InvalidInput.code });
+    expect(await service.calculateTax({ ...input, customerDetails: badDetails })).toMatchObject({ code: InvalidInput.code });
+    expect(await service.calculateTax({ ...input, customerDetails: { taxIds: [{ type: 'eu_vat', value: '\uD800' }] } })).toMatchObject({ code: InvalidInput.code });
+    expect(await service.calculateSubscriptionTax({ customerId, planAmount: money('10', 'EUR'), planInterval: 'monthly', taxCode: '\uD800' })).toMatchObject({ code: InvalidInput.code });
+    // @ts-expect-error a hostile interval: the type only lets four intervals in
+    expect(await service.calculateSubscriptionTax({ customerId, planAmount: money('10', 'EUR'), planInterval: '\uD800' })).toMatchObject({ code: InvalidInput.code });
+    expect(await service.calculateOneTimeTax({ customerId, amount: money('10', 'EUR'), description: 'Tip', customerDetails: badDetails })).toMatchObject({ code: InvalidInput.code });
+    expect(
+      await service.createTaxTransaction({ type: 'sale', customerId, lineItems: badLine, currency: 'EUR', reference: 'pay_surrogate', breakdown: [germany] }),
+    ).toMatchObject({ code: InvalidInput.code });
+    expect(requests).toHaveLength(before);
   });
 });
 

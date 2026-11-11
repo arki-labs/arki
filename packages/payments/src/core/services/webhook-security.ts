@@ -1,22 +1,42 @@
 import { createHash } from 'node:crypto';
+import { BlockList } from 'node:net';
 
 import type { Instant } from '@arki/date';
+import { z } from '@arki/contracts';
 import { isBefore, now, sub } from '@arki/date';
 import { isFailure } from '@arki/failure';
-import { WebhookMalformed, WebhookStale, stripe } from '@arki/http/webhooks';
+import { stripe, WebhookMalformed, WebhookStale } from '@arki/http/webhooks';
 import { is, recordSchema } from '@arki/schema';
-import { z } from '@arki/contracts';
 
-import type { PaymentProviderType, WebhookValidationResult } from '../types.js';
-import { misconfigured } from '../failures.js';
+import type { PaymentProviderType } from '../types.js';
+import type { WebhookCheck } from './webhook-failures.js';
+import { PaymentsConfigurationInvalid } from '../failures.js';
+import { MAX_BATCH_ITEMS } from '../pg-values.js';
+import { paymentProviderValues } from '../primitives.js';
 import { mapStripeEventType } from '../providers/stripe-event-types.js';
+import { WebhookRejected } from './webhook-failures.js';
+
+/** One allowed source: an IPv4 or IPv6 address, or a CIDR range of either. */
+const allowedIpSchema = z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()]);
+
+/** A delivery's source address: an IPv4 or IPv6 address. Anything else is not allowed. */
+const sourceIpSchema = z.union([z.ipv4(), z.ipv6()]);
 
 /**
- * The verifier's settings. `replayWindowSeconds` is whole seconds from 1 to one day: it is both the
- * timestamp window and Stripe's signature tolerance. `maxRetries` is a whole number of 0 or more.
+ * A `Stripe-Signature` value an HTTP header can carry: printable ASCII. Stripe writes only that, and
+ * `new Headers` throws on a line break or a character past U+00FF.
+ */
+const signatureHeaderSchema = z.string().regex(/^[\u0020-\u007E]*$/);
+
+/**
+ * The verifier's settings. `allowedIps` holds addresses and CIDR ranges (`'203.0.113.10'`,
+ * `'173.0.80.0/20'`, `'2001:db8::/32'`); a malformed entry is refused when the service is built, so
+ * it can never let an address through. `replayWindowSeconds` is whole seconds from 1 to one day: it
+ * is both the timestamp window and Stripe's signature tolerance. `maxRetries` is a whole number of 0 or more.
+ * `allowedIps` holds at most `MAX_BATCH_ITEMS` (1,000) entries.
  */
 const webhookSecurityConfigSchema = z.object({
-  allowedIps: z.array(z.string()),
+  allowedIps: z.array(allowedIpSchema).max(MAX_BATCH_ITEMS),
   replayWindowSeconds: z.number().int().min(1).max(86_400),
   maxRetries: z.number().int().min(0),
 });
@@ -39,6 +59,37 @@ const stripeTypedEventSchema = z.looseObject({ type: z.string() });
 /** A whole number of seconds since the epoch, as Stripe writes `t=`. */
 const UNIX_SECONDS = /^\d+$/;
 
+/** The sources each provider sends webhooks from, besides `allowedIps`. */
+const PROVIDER_IP_RANGES: Record<PaymentProviderType, readonly string[]> = {
+  stripe: ['54.187.174.169', '54.187.205.235', '54.187.216.72', '54.241.31.99', '54.241.31.102', '54.241.34.107'],
+  paypal: ['173.0.80.0/20', '173.0.96.0/20', '173.0.112.0/20'],
+  square: ['52.21.213.172', '35.174.233.25'],
+  razorpay: [],
+  // RevenueCat authenticates webhooks via the Authorization header secret, not an IP allowlist.
+  revenuecat: [],
+};
+
+/**
+ * The allow list for addresses and CIDR ranges that `allowedIpSchema` accepted. `node:net`'s
+ * `BlockList` does the matching (also an IPv4 address written as IPv4-mapped IPv6).
+ */
+function allowListOf(entries: readonly string[]): BlockList {
+  const list = new BlockList();
+  for (const entry of entries) {
+    const slash = entry.indexOf('/');
+    const address = slash === -1 ? entry : entry.slice(0, slash);
+    const family = address.includes(':') ? 'ipv6' : 'ipv4';
+    if (slash === -1) list.addAddress(address, family);
+    else list.addSubnet(address, Number(entry.slice(slash + 1)), family);
+  }
+  return list;
+}
+
+/** A refusal of the delivery, with the check that refused it. */
+function rejected(check: WebhookCheck, reason: string) {
+  return WebhookRejected({ check, reason, retryable: false });
+}
+
 /** The messages this service has always returned, by `@arki/http/webhooks` code. */
 function stripeFailure(code: string): string {
   switch (code) {
@@ -60,6 +111,10 @@ const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 /**
  * Checks a webhook delivery's source address, timestamp, replay and signature.
  *
+ * `validateWebhook` returns `WebhookRejected` (`payments.webhook_rejected`) for every refusal, with
+ * `check` naming the check that refused it: `source_ip`, `timestamp`, `replay` or `signature`. It
+ * never throws for a delivery.
+ *
  * Limit: the replay set is in this process's memory only. It is empty after a restart and not shared
  * between instances, so it only catches a copy that reaches the same process within the window. The
  * webhook handler's database claim (`claimWebhookEvent`) is what keeps an event from running twice.
@@ -70,18 +125,31 @@ const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 export class WebhookSecurityService {
   private processedEvents = new Map<string, Instant>();
   private readonly config: WebhookSecurityConfig;
+  private readonly allowLists: ReadonlyMap<PaymentProviderType, BlockList>;
   private lastCleanupAt: Instant = now();
 
-  /** Throws `payments.configuration_invalid` for a config that breaks `WebhookSecurityConfig`'s rules. */
-  constructor(config: WebhookSecurityConfig) {
+  private constructor(config: WebhookSecurityConfig) {
+    this.config = config;
+    this.allowLists = new Map(
+      paymentProviderValues.map(provider => [
+        provider,
+        allowListOf([...config.allowedIps, ...PROVIDER_IP_RANGES[provider]]),
+      ]),
+    );
+  }
+
+  /** Builds the verifier. Returns `payments.configuration_invalid` for a config that breaks `WebhookSecurityConfig`'s rules. */
+  static create(config: WebhookSecurityConfig) {
     const checked = webhookSecurityConfigSchema.safeParse(config);
     if (!checked.success) {
-      throw misconfigured(
-        'webhookSecurity',
-        checked.error.issues.map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`).join('; '),
-      );
+      return PaymentsConfigurationInvalid({
+        setting: 'webhookSecurity',
+        problem: checked.error.issues
+          .map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`)
+          .join('; '),
+      });
     }
-    this.config = config;
+    return new WebhookSecurityService(checked.data);
   }
 
   async validateWebhook(
@@ -92,148 +160,59 @@ export class WebhookSecurityService {
     sourceIp: string,
     webhookSecret: string,
     options: WebhookValidationOptions = {},
-  ): Promise<WebhookValidationResult> {
-    try {
-      // 1. IP Address validation
-      if (!options.skipIpValidation && !this.isIpAllowed(sourceIp, provider)) {
-        return {
-          isValid: false,
-          provider,
-          error: `Webhook from unauthorized IP address: ${sourceIp}`,
-        };
-      }
-
-      // 2. Timestamp validation (prevent replay attacks). Stripe signs its own
-      //    timestamp, which the signature check verifies; the caller's value is not trusted.
-      if (!options.skipTimestampValidation && provider !== 'stripe') {
-        const timestampValidation = this.validateTimestamp(timestamp);
-        if (!timestampValidation.isValid) {
-          return {
-            isValid: false,
-            provider,
-            error: timestampValidation.error,
-          };
-        }
-      }
-
-      // 3. Replay attack prevention
-      this.cleanupIfDue();
-      const eventId = this.generateEventId(payload, signature, timestamp);
-      if (this.isEventProcessed(eventId)) {
-        return {
-          isValid: false,
-          provider,
-          error: 'Webhook event has already been processed (replay attack detected)',
-        };
-      }
-
-      // 4. Signature verification
-      if (!options.skipSignatureValidation) {
-        const signatureValidation = await this.validateSignature(provider, payload, signature, webhookSecret);
-        if (!signatureValidation.isValid) {
-          return signatureValidation;
-        }
-      }
-
-      // 5. Payload sanitization
-      const sanitizedPayload = this.sanitizePayload(payload);
-
-      // Mark event as processed
-      this.markEventAsProcessed(eventId);
-
-      const typed = stripeTypedEventSchema.safeParse(sanitizedPayload);
-      const eventType =
-        provider === 'stripe' && typed.success ? (mapStripeEventType(typed.data.type) ?? undefined) : undefined;
-
-      return {
-        isValid: true,
-        provider,
-        eventType,
-        data: sanitizedPayload,
-      };
-    } catch (error) {
-      return {
-        isValid: false,
-        provider,
-        error: `Webhook validation error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      };
+  ) {
+    // 1. IP Address validation
+    if (!options.skipIpValidation && !this.isIpAllowed(sourceIp, provider)) {
+      return rejected('source_ip', `Webhook from unauthorized IP address: ${sourceIp}`);
     }
+
+    // 2. Timestamp validation (prevent replay attacks). Stripe signs its own
+    //    timestamp, which the signature check verifies; the caller's value is not trusted.
+    if (!options.skipTimestampValidation && provider !== 'stripe') {
+      const timestampRefusal = this.validateTimestamp(timestamp);
+      if (timestampRefusal !== undefined) return rejected('timestamp', timestampRefusal);
+    }
+
+    // 3. Replay attack prevention
+    this.cleanupIfDue();
+    const eventId = this.generateEventId(payload, signature, timestamp);
+    if (this.isEventProcessed(eventId)) {
+      return rejected('replay', 'Webhook event has already been processed (replay attack detected)');
+    }
+
+    // 4. Signature verification
+    if (!options.skipSignatureValidation) {
+      const signatureRefusal = await this.validateSignature(provider, payload, signature, webhookSecret);
+      if (signatureRefusal !== undefined) return rejected('signature', signatureRefusal);
+    }
+
+    // 5. Payload sanitization
+    const sanitizedPayload = this.sanitizePayload(payload);
+
+    // Mark event as processed
+    this.markEventAsProcessed(eventId);
+
+    const typed = stripeTypedEventSchema.safeParse(sanitizedPayload);
+    const eventType =
+      provider === 'stripe' && typed.success ? (mapStripeEventType(typed.data.type) ?? undefined) : undefined;
+
+    return { provider, eventType, data: sanitizedPayload };
   }
 
+  /** Whether the source is an address on the provider's allow list. Text that is not an IP address is not. */
   private isIpAllowed(sourceIp: string, provider: PaymentProviderType): boolean {
-    // Provider-specific IP allowlists
-    const providerIpRanges: Record<PaymentProviderType, string[]> = {
-      stripe: [
-        '54.187.174.169',
-        '54.187.205.235',
-        '54.187.216.72',
-        '54.241.31.99',
-        '54.241.31.102',
-        '54.241.34.107',
-        // Add more Stripe IPs as needed
-      ],
-      paypal: ['173.0.80.0/20', '173.0.96.0/20', '173.0.112.0/20'],
-      square: ['52.21.213.172', '35.174.233.25'],
-      razorpay: [],
-      // RevenueCat authenticates webhooks via the Authorization header secret, not an IP allowlist.
-      revenuecat: [],
-    };
-
-    const allowedIps = [...this.config.allowedIps, ...(providerIpRanges[provider] || [])];
-
-    return allowedIps.some((allowedIp) => {
-      if (allowedIp.includes('/')) {
-        return this.isIpInCidrRange(sourceIp, allowedIp);
-      }
-      return sourceIp === allowedIp;
-    });
+    if (!is(sourceIp, sourceIpSchema)) return false;
+    return this.allowLists.get(provider)?.check(sourceIp, sourceIp.includes(':') ? 'ipv6' : 'ipv4') ?? false;
   }
 
-  private isIpInCidrRange(ip: string, cidr: string): boolean {
-    // Simplified CIDR check - in production use a proper networking library
-    try {
-      const [network, prefixLength] = cidr.split('/');
-      if (!network || !prefixLength) {
-        return false;
-      }
-      const mask = (0xFF_FF_FF_FF << (32 - Number.parseInt(prefixLength, 10))) >>> 0;
-
-      const ipInt = this.ipToInt(ip);
-      const networkInt = this.ipToInt(network);
-
-      return (ipInt & mask) === (networkInt & mask);
-    } catch {
-      return false;
+  /** Why the caller's timestamp is refused, or `undefined` when it is inside the window. */
+  private validateTimestamp(timestamp: string): string | undefined {
+    if (!UNIX_SECONDS.test(timestamp)) return 'Invalid timestamp format';
+    const timeDifference = Math.abs(Date.now() - Number(timestamp) * 1000);
+    if (timeDifference > this.config.replayWindowSeconds * 1000) {
+      return `Webhook timestamp is outside acceptable window (${this.config.replayWindowSeconds}s)`;
     }
-  }
-
-  private ipToInt(ip: string): number {
-    return ip.split('.').reduce((acc, octet) => (acc << 8) + Number.parseInt(octet, 10), 0) >>> 0;
-  }
-
-  private validateTimestamp(timestamp: string): { isValid: boolean; error?: string } {
-    try {
-      if (!UNIX_SECONDS.test(timestamp)) {
-        return { isValid: false, error: 'Invalid timestamp format' };
-      }
-      const webhookTime = Number(timestamp) * 1000;
-      const currentTime = Date.now();
-      const timeDifference = Math.abs(currentTime - webhookTime);
-
-      if (timeDifference > this.config.replayWindowSeconds * 1000) {
-        return {
-          isValid: false,
-          error: `Webhook timestamp is outside acceptable window (${this.config.replayWindowSeconds}s)`,
-        };
-      }
-
-      return { isValid: true };
-    } catch {
-      return {
-        isValid: false,
-        error: 'Invalid timestamp format',
-      };
-    }
+    return undefined;
   }
 
   private generateEventId(payload: string | Buffer, signature: string, timestamp: string): string {
@@ -267,42 +246,31 @@ export class WebhookSecurityService {
     }
   }
 
+  /** Why the signature is refused, or `undefined` when it matches. */
   private async validateSignature(
     provider: PaymentProviderType,
     payload: string | Buffer,
     signature: string,
     webhookSecret: string,
-  ): Promise<WebhookValidationResult> {
+  ): Promise<string | undefined> {
     // An HMAC keyed with an empty secret can be computed by anyone.
-    if (!webhookSecret) {
-      return { isValid: false, provider, error: 'Webhook secret is not configured' };
-    }
+    if (!webhookSecret) return 'Webhook secret is not configured';
 
-    try {
-      switch (provider) {
-        case 'stripe': {
-          return await this.validateStripeSignature(payload, signature, webhookSecret);
-        }
-        case 'paypal': {
-          return this.validatePayPalSignature(payload, signature, webhookSecret);
-        }
-        case 'square': {
-          return this.validateSquareSignature(payload, signature, webhookSecret);
-        }
-        default: {
-          return {
-            isValid: false,
-            provider,
-            error: `Unsupported provider for signature validation: ${provider}`,
-          };
-        }
+    switch (provider) {
+      case 'stripe': {
+        return this.validateStripeSignature(payload, signature, webhookSecret);
       }
-    } catch (error) {
-      return {
-        isValid: false,
-        provider,
-        error: `Signature validation error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      };
+      // PayPal verifies through its API with transmission headers this method does not receive.
+      case 'paypal': {
+        return 'PayPal signature verification is not implemented';
+      }
+      // Square signs the notification URL plus the body, and this method does not receive the URL.
+      case 'square': {
+        return 'Square signature verification is not implemented';
+      }
+      default: {
+        return `Unsupported provider for signature validation: ${provider}`;
+      }
     }
   }
 
@@ -311,34 +279,14 @@ export class WebhookSecurityService {
     payload: string | Buffer,
     signature: string,
     secret: string,
-  ): Promise<WebhookValidationResult> {
+  ): Promise<string | undefined> {
+    if (!is(signature, signatureHeaderSchema)) return stripeFailure(WebhookMalformed.code);
     const body = typeof payload === 'string' ? new TextEncoder().encode(payload) : new Uint8Array(payload);
     const result = await stripe({ secrets: [secret] }).verify(
       { headers: new Headers({ 'stripe-signature': signature }), body },
       { tolerance: this.config.replayWindowSeconds },
     );
-    if (isFailure(result)) {
-      return { isValid: false, provider: 'stripe', error: stripeFailure(result.code) };
-    }
-    return { isValid: true, provider: 'stripe' };
-  }
-
-  private validatePayPalSignature(
-    _payload: string | Buffer,
-    _signature: string,
-    _secret: string,
-  ): WebhookValidationResult {
-    // PayPal verifies through its API with transmission headers this method does not receive.
-    return { isValid: false, provider: 'paypal', error: 'PayPal signature verification is not implemented' };
-  }
-
-  private validateSquareSignature(
-    _payload: string | Buffer,
-    _signature: string,
-    _secret: string,
-  ): WebhookValidationResult {
-    // Square signs the notification URL plus the body, and this method does not receive the URL.
-    return { isValid: false, provider: 'square', error: 'Square signature verification is not implemented' };
+    return isFailure(result) ? stripeFailure(result.code) : undefined;
   }
 
   private sanitizePayload(payload: string | Buffer): Record<string, unknown> {
@@ -359,7 +307,7 @@ export class WebhookSecurityService {
     }
 
     if (Array.isArray(value)) {
-      return value.map((item) => this.deepSanitize(item));
+      return value.map(item => this.deepSanitize(item));
     }
 
     const sanitized: Record<string, JsonValue> = {};

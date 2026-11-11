@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import type { IdGenerationFailure } from '@arki/contracts';
 import type { FailureOf, Result, SchemaFailure } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
+import { z } from '@arki/contracts';
 import { fromUnix, now } from '@arki/date';
 import { invariant, isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
@@ -39,9 +40,9 @@ import type {
 import type { UserId } from '../user-id.js';
 import type { PaymentProviderConfig, ProviderRefundResult } from './base-provider.js';
 import type { CardDeclined, IdempotencyConflict } from './provider-error.js';
-import { misconfigured } from '../failures.js';
+import { PaymentsConfigurationInvalid } from '../failures.js';
 import { toMinorColumn } from '../money.js';
-import { pgJsonRecordSchema, pgTextSchema } from '../pg-values.js';
+import { holdsLoneSurrogate, MAX_BATCH_ITEMS, pgJsonRecordSchema, pgTextSchema } from '../pg-values.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId, planIdSchema } from '../primitives.js';
 import { observePayments } from '../telemetry.js';
 import { BasePaymentProvider } from './base-provider.js';
@@ -78,7 +79,7 @@ export type StripeProviderOptions = {
   httpClient?: Stripe.HttpClient;
   /**
    * Retries of network failures and 5xx answers: a whole number, 0 or more. Stripe's default is 1.
-   * Anything else throws `payments.configuration_invalid` when the provider is built.
+   * Anything else is returned as `payments.configuration_invalid` when the provider is built.
    */
   maxNetworkRetries?: number;
 };
@@ -132,6 +133,79 @@ type Conflict = FailureOf<typeof IdempotencyConflict>;
  */
 function checkMetadata(metadata: Record<string, unknown> | undefined) {
   return parse(pgJsonRecordSchema.optional(), metadata);
+}
+
+/** Text Stripe's form encoder can take: a lone surrogate (such as U+D800 alone) makes it throw a raw `URIError`. */
+const stripeTextsSchema = z.record(
+  z.string(),
+  z
+    .string()
+    .refine(value => !holdsLoneSurrogate(value), 'Text cannot contain a lone surrogate (such as U+D800 alone)')
+    .optional(),
+);
+
+/**
+ * The caller's text parameters, checked before any request: one Stripe cannot take (a lone surrogate)
+ * is returned as `InvalidInput` (`schema.invalid_input`), the key naming the parameter.
+ */
+function checkStripeTexts(texts: Record<string, string | undefined>) {
+  return parse(stripeTextsSchema, texts);
+}
+
+/** The proration choices Stripe takes; any other text is returned as `InvalidInput` before any request. */
+const prorationBehaviorSchema = z.enum(['create_prorations', 'none', 'always_invoice']).optional();
+
+/** The lists of a tax call: at most `MAX_BATCH_ITEMS` (1,000) line items and as many tax ids; more is `InvalidInput`. */
+const taxListsSchema = z.object({
+  lineItems: z.array(z.unknown()).max(MAX_BATCH_ITEMS),
+  taxIds: z.array(z.unknown()).max(MAX_BATCH_ITEMS).optional(),
+});
+
+/** Every free-text field of a tax call (references, tax codes, address, tax ids), keyed by its path, for `checkStripeTexts`. */
+function taxTextsOf(params: {
+  reference?: string;
+  originalTransactionId?: string;
+  lineItems: { reference: string; taxCode?: string }[];
+  customerDetails?: TaxCustomerDetails;
+}) {
+  const texts: Record<string, string | undefined> = {
+    reference: params.reference,
+    originalTransactionId: params.originalTransactionId,
+  };
+  for (const [index, item] of params.lineItems.entries()) {
+    texts[`lineItems.${index}.reference`] = item.reference;
+    texts[`lineItems.${index}.taxCode`] = item.taxCode;
+  }
+  const details = params.customerDetails;
+  for (const [field, value] of Object.entries(details?.address ?? {})) texts[`address.${field}`] = value;
+  for (const [index, taxId] of (details?.taxIds ?? []).entries()) {
+    texts[`taxIds.${index}.type`] = taxId.type;
+    texts[`taxIds.${index}.value`] = taxId.value;
+  }
+  return texts;
+}
+
+/**
+ * An idempotency key Stripe receives unchanged in the `Idempotency-Key` header: 1 to 255 printable
+ * ASCII characters (Stripe's length limit). A header cannot carry a control character, a line break
+ * or a character past U+00FF, and fetch trims outer spaces.
+ */
+const idempotencyKeySchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[\u0021-\u007E](?:[\u0020-\u007E]*[\u0021-\u007E])?$/, 'must be printable ASCII with no outer spaces');
+
+/**
+ * The request options for the caller's idempotency key, checked before any request: a key a header
+ * cannot carry is returned as `InvalidInput` (`schema.invalid_input`) instead of failing inside
+ * Stripe's HTTP client, where it would look like a retryable outage.
+ */
+function requestOptionsOf(idempotencyKey: string | undefined) {
+  if (idempotencyKey === undefined) return;
+  const key = parse(idempotencyKeySchema, idempotencyKey);
+  if (isFailure(key)) return key;
+  return { idempotencyKey: key };
 }
 
 /**
@@ -294,12 +368,12 @@ export class StripeProvider extends BasePaymentProvider {
     taxReporting: false,
   };
 
-  constructor(config: PaymentProviderConfig, options: StripeProviderOptions = {}) {
+  /**
+   * Build a Stripe provider with `StripeProvider.create`. The constructor is private so that a bad
+   * setting is a returned failure, not a throw.
+   */
+  private constructor(config: PaymentProviderConfig, options: StripeProviderOptions) {
     super(config);
-    const retries = options.maxNetworkRetries;
-    if (retries !== undefined && !(Number.isSafeInteger(retries) && retries >= 0)) {
-      throw misconfigured('maxNetworkRetries', 'a whole number of retries, 0 or more');
-    }
     this.references = options.references;
     this.stripe = new Stripe(config.apiKey, {
       apiVersion: '2026-09-30.endive',
@@ -307,6 +381,28 @@ export class StripeProvider extends BasePaymentProvider {
       httpClient: options.httpClient,
       maxNetworkRetries: options.maxNetworkRetries,
     });
+  }
+
+  /**
+   * A Stripe provider for `config`. Returns `PaymentsConfigurationInvalid` (`payments.configuration_invalid`) when
+   * `config.apiKey` is empty (the Stripe client throws on one) or `options.maxNetworkRetries` is not a whole
+   * number of retries, 0 or more.
+   */
+  static create(
+    config: PaymentProviderConfig,
+    options: StripeProviderOptions = {},
+  ): StripeProvider | FailureOf<typeof PaymentsConfigurationInvalid> {
+    if (config.apiKey.length === 0) {
+      return PaymentsConfigurationInvalid({ setting: 'apiKey', problem: 'a Stripe secret key, not empty' });
+    }
+    const retries = options.maxNetworkRetries;
+    if (retries !== undefined && !(Number.isSafeInteger(retries) && retries >= 0)) {
+      return PaymentsConfigurationInvalid({
+        setting: 'maxNetworkRetries',
+        problem: 'a whole number of retries, 0 or more',
+      });
+    }
+    return new StripeProvider(config, options);
   }
 
   /**
@@ -428,6 +524,8 @@ export class StripeProvider extends BasePaymentProvider {
     name?: string;
     metadata?: Record<string, unknown>;
   }): Promise<Customer | IdGenerationFailure | SchemaFailure> {
+    const texts = checkStripeTexts({ userId: params.userId, email: params.email, name: params.name });
+    if (isFailure(texts)) return texts;
     const metadata = checkMetadata(params.metadata);
     if (isFailure(metadata)) return metadata;
     const customerId = createCustomerId();
@@ -486,6 +584,8 @@ export class StripeProvider extends BasePaymentProvider {
     customerId: CustomerId,
     params: { email?: string; name?: string; metadata?: Record<string, unknown> },
   ): Promise<Result<Customer, NotFound | SchemaFailure>> {
+    const texts = checkStripeTexts({ email: params.email, name: params.name });
+    if (isFailure(texts)) return texts;
     const metadata = checkMetadata(params.metadata);
     if (isFailure(metadata)) return metadata;
     const row = await this.customerRef(customerId);
@@ -558,6 +658,8 @@ export class StripeProvider extends BasePaymentProvider {
   }): Promise<Result<Plan, IdGenerationFailure | SendAmountFailure | SchemaFailure>> {
     assertWholeCount(params.intervalCount, 'intervalCount', 365);
     assertWholeCount(params.trialPeriodDays, 'trialPeriodDays', 365);
+    const texts = checkStripeTexts({ name: params.name, description: params.description });
+    if (isFailure(texts)) return texts;
     const metadata = checkMetadata(params.metadata);
     if (isFailure(metadata)) return metadata;
     const planId = createPlanId();
@@ -644,6 +746,8 @@ export class StripeProvider extends BasePaymentProvider {
     planId: PlanId,
     params: { name?: string; metadata?: Record<string, unknown> },
   ): Promise<Result<Plan, NotFound | NotFlat | ReadAmountFailure | SchemaFailure>> {
+    const texts = checkStripeTexts({ name: params.name });
+    if (isFailure(texts)) return texts;
     const checked = checkMetadata(params.metadata);
     if (isFailure(checked)) return checked;
     const row = await this.planRef(planId);
@@ -721,8 +825,12 @@ export class StripeProvider extends BasePaymentProvider {
     idempotencyKey?: string;
   }) {
     assertWholeCount(params.trialPeriodDays, 'trialPeriodDays', 365);
+    const texts = checkStripeTexts({ paymentMethodId: params.paymentMethodId });
+    if (isFailure(texts)) return texts;
     const metadata = checkMetadata(params.metadata);
     if (isFailure(metadata)) return metadata;
+    const requestOptions = requestOptionsOf(params.idempotencyKey);
+    if (isFailure(requestOptions)) return requestOptions;
     const customer = await this.customerRef(params.customerId);
     if (isFailure(customer)) return customer;
     const priceId = await this.priceRef(params.planId);
@@ -747,7 +855,7 @@ export class StripeProvider extends BasePaymentProvider {
               planId: params.planId,
             }),
           },
-          params.idempotencyKey === undefined ? undefined : { idempotencyKey: params.idempotencyKey },
+          requestOptions,
         ),
       declinedOrConflictOf,
     );
@@ -786,8 +894,14 @@ export class StripeProvider extends BasePaymentProvider {
       idempotencyKey?: string;
     },
   ) {
+    const texts = checkStripeTexts({ paymentMethodId: params.paymentMethodId });
+    if (isFailure(texts)) return texts;
+    const proration = parse(prorationBehaviorSchema, params.prorationBehavior);
+    if (isFailure(proration)) return proration;
     const metadata = checkMetadata(params.metadata);
     if (isFailure(metadata)) return metadata;
+    const requestOptions = requestOptionsOf(params.idempotencyKey);
+    if (isFailure(requestOptions)) return requestOptions;
     const current = await this.subscriptionRef(subscriptionId);
     if (isFailure(current)) return current;
     const priceId = params.planId === undefined ? undefined : await this.priceRef(params.planId);
@@ -814,12 +928,7 @@ export class StripeProvider extends BasePaymentProvider {
 
     const stripeSubscription = await this.call(
       'stripe.subscriptions.update',
-      () =>
-        this.stripe.subscriptions.update(
-          current.providerSubscriptionId,
-          update,
-          params.idempotencyKey === undefined ? undefined : { idempotencyKey: params.idempotencyKey },
-        ),
+      () => this.stripe.subscriptions.update(current.providerSubscriptionId, update, requestOptions),
       declinedOrConflictOf,
     );
     if (isFailure(stripeSubscription)) return stripeSubscription;
@@ -838,10 +947,12 @@ export class StripeProvider extends BasePaymentProvider {
     subscriptionId: SubscriptionId,
     options: { immediately?: boolean; reason?: string; idempotencyKey?: string },
   ) {
+    const texts = checkStripeTexts({ reason: options.reason });
+    if (isFailure(texts)) return texts;
+    const requestOptions = requestOptionsOf(options.idempotencyKey);
+    if (isFailure(requestOptions)) return requestOptions;
     const current = await this.subscriptionRef(subscriptionId);
     if (isFailure(current)) return current;
-    const requestOptions =
-      options.idempotencyKey === undefined ? undefined : { idempotencyKey: options.idempotencyKey };
     const cancellationDetails = options.reason === undefined ? undefined : { comment: options.reason };
 
     const stripeSubscription = await this.call(
@@ -906,7 +1017,9 @@ export class StripeProvider extends BasePaymentProvider {
     subscriptionId: SubscriptionId;
     planId: PlanId;
     prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
-  }): Promise<Result<SubscriptionPreview, NotFound | ReadAmountFailure>> {
+  }): Promise<Result<SubscriptionPreview, NotFound | ReadAmountFailure | SchemaFailure>> {
+    const proration = parse(prorationBehaviorSchema, params.prorationBehavior);
+    if (isFailure(proration)) return proration;
     const current = await this.subscriptionRef(params.subscriptionId);
     if (isFailure(current)) return current;
     const priceId = await this.priceRef(params.planId);
@@ -1048,6 +1161,8 @@ export class StripeProvider extends BasePaymentProvider {
     description?: string;
     metadata?: Record<string, unknown>;
   }) {
+    const texts = checkStripeTexts({ paymentMethodId: params.paymentMethodId, description: params.description });
+    if (isFailure(texts)) return texts;
     const metadata = checkMetadata(params.metadata);
     if (isFailure(metadata)) return metadata;
     const customer = await this.customerRef(params.customerId);
@@ -1132,7 +1247,7 @@ export class StripeProvider extends BasePaymentProvider {
    * The answer holds the Stripe refund id, its status and Stripe's `failure_reason`. A `pending`, `requires_action`, `failed` or
    * `canceled` refund is returned, not thrown. A key reused with different parameters returns
    * `IdempotencyConflict`; any other Stripe error throws a `PaymentProviderError`.
-   * `metadata` holding a `bigint` or U+0000 is `InvalidInput` (`schema.invalid_input`) before any request.
+   * `metadata` holding a `bigint` or U+0000, or an `idempotencyKey` a header cannot carry, is `InvalidInput` (`schema.invalid_input`) before any request.
    */
   async refundPayment(
     paymentId: PaymentId,
@@ -1144,8 +1259,12 @@ export class StripeProvider extends BasePaymentProvider {
       metadata?: Record<string, unknown>;
     },
   ): Promise<Result<ProviderRefundResult, NotFound | Conflict | SendAmountFailure | SchemaFailure>> {
+    const texts = checkStripeTexts({ refundId: params.refundId });
+    if (isFailure(texts)) return texts;
     const metadata = checkMetadata(params.metadata);
     if (isFailure(metadata)) return metadata;
+    const idempotencyKey = parse(idempotencyKeySchema, params.idempotencyKey);
+    if (isFailure(idempotencyKey)) return idempotencyKey;
     const row = await this.paymentRef(paymentId);
     if (isFailure(row)) return row;
     // The caller names the payment and builds the amount: an amount in another currency is its bug.
@@ -1171,7 +1290,7 @@ export class StripeProvider extends BasePaymentProvider {
             // Ours win over the caller's: `findRefund` matches on `refundId`
             metadata: toStripeMetadata({ ...params.metadata, paymentId: row.id, refundId: params.refundId }),
           },
-          { idempotencyKey: params.idempotencyKey },
+          { idempotencyKey },
         ),
       idempotencyConflictOf,
     );
@@ -1229,7 +1348,9 @@ export class StripeProvider extends BasePaymentProvider {
   async attachPaymentMethod(params: {
     customerId: CustomerId;
     paymentMethodId: string;
-  }): Promise<Result<PaymentMethodInfo, Declined | NotFound>> {
+  }): Promise<Result<PaymentMethodInfo, Declined | NotFound | SchemaFailure>> {
+    const texts = checkStripeTexts({ paymentMethodId: params.paymentMethodId });
+    if (isFailure(texts)) return texts;
     const customer = await this.customerRef(params.customerId);
     if (isFailure(customer)) return customer;
 
@@ -1242,8 +1363,11 @@ export class StripeProvider extends BasePaymentProvider {
     return this.toPaymentMethodInfo(method, await this.defaultPaymentMethodOf(customer.providerCustomerId));
   }
 
-  async detachPaymentMethod(paymentMethodId: string): Promise<void> {
+  async detachPaymentMethod(paymentMethodId: string): Promise<Result<undefined, SchemaFailure>> {
+    const texts = checkStripeTexts({ paymentMethodId });
+    if (isFailure(texts)) return texts;
     await this.call('stripe.payment_methods.detach', () => this.stripe.paymentMethods.detach(paymentMethodId));
+    return;
   }
 
   async listPaymentMethods(customerId: CustomerId) {
@@ -1260,6 +1384,8 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   async setDefaultPaymentMethod(params: { customerId: CustomerId; paymentMethodId: string }) {
+    const texts = checkStripeTexts({ paymentMethodId: params.paymentMethodId });
+    if (isFailure(texts)) return texts;
     const customer = await this.customerRef(params.customerId);
     if (isFailure(customer)) return customer;
 
@@ -1324,6 +1450,8 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   async createSetupIntent(customerId: CustomerId, options: { idempotencyKey?: string } = {}) {
+    const requestOptions = requestOptionsOf(options.idempotencyKey);
+    if (isFailure(requestOptions)) return requestOptions;
     const customer = await this.customerRef(customerId);
     if (isFailure(customer)) return customer;
 
@@ -1337,7 +1465,7 @@ export class StripeProvider extends BasePaymentProvider {
             automatic_payment_methods: { enabled: true },
             metadata: toStripeMetadata({ userId: customer.userId, customerId: customer.id }),
           },
-          options.idempotencyKey === undefined ? undefined : { idempotencyKey: options.idempotencyKey },
+          requestOptions,
         ),
       idempotencyConflictOf,
     );
@@ -1358,6 +1486,10 @@ export class StripeProvider extends BasePaymentProvider {
   }) {
     // The package's `createPaymentIntentInputSchema` lets this through (`automatic` defaults to true): returned
     if (params.automatic && params.paymentMethodId === undefined) return PaymentMethodRequired();
+    const texts = checkStripeTexts({ paymentMethodId: params.paymentMethodId });
+    if (isFailure(texts)) return texts;
+    const requestOptions = requestOptionsOf(params.idempotencyKey);
+    if (isFailure(requestOptions)) return requestOptions;
     const customer = await this.customerRef(params.customerId);
     if (isFailure(customer)) return customer;
     const amount = stripeAmountOf(params.amount);
@@ -1378,7 +1510,7 @@ export class StripeProvider extends BasePaymentProvider {
               ? { confirm: true, off_session: true }
               : { automatic_payment_methods: { enabled: true } }),
           },
-          params.idempotencyKey === undefined ? undefined : { idempotencyKey: params.idempotencyKey },
+          requestOptions,
         ),
       declinedOrConflictOf,
     );
@@ -1390,7 +1522,12 @@ export class StripeProvider extends BasePaymentProvider {
     return { clientSecret: paymentIntent.client_secret, paymentIntentId: paymentIntent.id };
   }
 
-  async createCustomerPortalSession(providerCustomerId: string, returnUrl: string): Promise<{ url: string }> {
+  async createCustomerPortalSession(
+    providerCustomerId: string,
+    returnUrl: string,
+  ): Promise<Result<{ url: string }, SchemaFailure>> {
+    const texts = checkStripeTexts({ providerCustomerId, returnUrl });
+    if (isFailure(texts)) return texts;
     const session = await this.call('stripe.billing_portal.sessions.create', () =>
       this.stripe.billingPortal.sessions.create({ customer: providerCustomerId, return_url: returnUrl }),
     );
@@ -1425,8 +1562,19 @@ export class StripeProvider extends BasePaymentProvider {
     metadata?: Record<string, string>;
     /** Enable Stripe Tax (must be configured on the account) so EU VAT is calculated at checkout. */
     automaticTax?: boolean;
-  }): Promise<{ url: string; sessionId: string }> {
+  }): Promise<Result<{ url: string; sessionId: string }, SchemaFailure>> {
     assertWholeCount(params.trialPeriodDays, 'trialPeriodDays', 730);
+    const texts = checkStripeTexts({
+      priceId: params.priceId,
+      successUrl: params.successUrl,
+      cancelUrl: params.cancelUrl,
+      providerCustomerId: params.providerCustomerId,
+      customerEmail: params.customerEmail,
+      clientReferenceId: params.clientReferenceId,
+    });
+    if (isFailure(texts)) return texts;
+    const metadata = checkMetadata(params.metadata);
+    if (isFailure(metadata)) return metadata;
     const session = await this.call('stripe.checkout.sessions.create', () =>
       this.stripe.checkout.sessions.create({
         mode: 'subscription',
@@ -1458,6 +1606,7 @@ export class StripeProvider extends BasePaymentProvider {
   /**
    * The tax Stripe calculates for the line items. Precondition: every line item is in `currency` (one
    * calculation has one currency); one in another currency throws an invariant failure before any request.
+   * At most `MAX_BATCH_ITEMS` (1,000) line items, and as many tax ids: more is `InvalidInput` (`schema.invalid_input`).
    */
   async calculateTax(params: {
     customerId: CustomerId;
@@ -1502,8 +1651,13 @@ export class StripeProvider extends BasePaymentProvider {
         }[];
       }
     | MoneyFailure
+    | SchemaFailure
     | FailureOf<typeof TaxAddressIncomplete>
   > {
+    const lists = parse(taxListsSchema, { lineItems: params.lineItems, taxIds: params.customerDetails?.taxIds });
+    if (isFailure(lists)) return lists;
+    const texts = checkStripeTexts(taxTextsOf(params));
+    if (isFailure(texts)) return texts;
     const request = toTaxCalculationParams(params);
     if (isFailure(request)) return request;
     const calculation = await this.call('stripe.tax.calculations.create', () =>
@@ -1549,11 +1703,17 @@ export class StripeProvider extends BasePaymentProvider {
    *
    * The totals are read from the line items of the recorded transaction: negative for a refund.
    *
+   * At most `MAX_BATCH_ITEMS` (1,000) line items, and as many tax ids: more is `InvalidInput` (`schema.invalid_input`).
+   *
    * Preconditions (an invariant failure before any request): every line item is in `currency`, and a
    * `quantity`, when given, is a whole number of 1 or more.
    */
   async createTaxTransaction(params: TaxTransactionParams) {
+    const lists = parse(taxListsSchema, { lineItems: params.lineItems, taxIds: params.customerDetails?.taxIds });
+    if (isFailure(lists)) return lists;
     assertQuantities(params.lineItems);
+    const texts = checkStripeTexts(taxTextsOf(params));
+    if (isFailure(texts)) return texts;
     const transaction =
       params.type === 'refund' ? await this.reverseTaxTransaction(params) : await this.recordTaxSale(params);
     if (isFailure(transaction)) return transaction;

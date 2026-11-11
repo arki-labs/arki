@@ -9,13 +9,21 @@ import { Currency, CurrencyMismatchError, Money, ProviderAmount, sum, UnknownCur
 
 import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../core/types.js';
-import type { TaxExemptionId } from './primitives.js';
+import type { TaxExemptionId, TaxPlanInterval } from './primitives.js';
 import type { TaxExemptionRepository, TaxJurisdictionRepository, TaxRecordRepository } from './repository.js';
 import type { TaxJurisdiction } from './types.js';
-import { getCustomerTaxSummaryInputSchema, taxRecordRowSchema } from './contracts.js';
+import {
+  calculateSubscriptionTaxInputSchema,
+  getCustomerTaxSummaryInputSchema,
+  taxCustomerDetailsSchema,
+  taxLineTextSchema,
+  taxRecordRowSchema,
+  taxRecordRowsSchema,
+} from './contracts.js';
 import { TaxCurrencyMismatch, TaxLineCurrencyMismatch, TaxRefundSaleNotFound } from './failures.js';
 import { checkTaxIdFormat } from './tax-id.js';
 import { nonNegativeMoneySchema } from '../core/money.js';
+import { MAX_BATCH_ITEMS } from '../core/pg-values.js';
 
 /** What `TaxService` reads. A `TaxExemptionRepository` and a `TaxJurisdictionRepository` fit. */
 export type TaxServiceReads = {
@@ -25,6 +33,19 @@ export type TaxServiceReads = {
 };
 
 const logger = getLogger('arki:payments:tax');
+
+/**
+ * Stripe refuses text with a lone surrogate (such as `'\ud800'`) as an invalid request. Returns
+ * `InvalidInput` for such text in the line items or the customer's details (or for more than
+ * `MAX_BATCH_ITEMS` line items), so the request never goes out.
+ */
+function refuseUnsendable(lineItems: TaxCalculationInput['lineItems'], customerDetails: TaxCalculationInput['customerDetails']) {
+  const lines = parse(z.array(taxLineTextSchema).max(MAX_BATCH_ITEMS), lineItems);
+  if (isFailure(lines)) return lines;
+  const details = parse(taxCustomerDetailsSchema.optional(), customerDetails);
+  if (isFailure(details)) return details;
+  return;
+}
 
 type TaxBreakdownLine = Exclude<Awaited<ReturnType<StripeProvider['calculateTax']>>, Failure>['taxBreakdown'][number];
 
@@ -193,6 +214,8 @@ export class TaxService {
    * `input.currency` returns `TaxLineCurrencyMismatch` before anything is read or asked.
    */
   async calculateTax(input: TaxCalculationInput) {
+    const unsendable = refuseUnsendable(input.lineItems, input.customerDetails);
+    if (unsendable) return unsendable;
     const currency = stripeCurrency(input.currency);
     if (isFailure(currency)) return currency;
     const mismatch = lineInOtherCurrency(input.lineItems, currency);
@@ -352,6 +375,10 @@ export class TaxService {
     /** For a `refund`: the `reference` of the recorded sale it reverses. Required there, ignored for a sale. */
     originalReference?: string;
   }) {
+    const type = parse(taxRecordRowSchema.shape.type, params.type);
+    if (isFailure(type)) return type;
+    const unsendable = refuseUnsendable(params.lineItems, params.customerDetails);
+    if (unsendable) return unsendable;
     const currency = stripeCurrency(params.currency);
     if (isFailure(currency)) return currency;
     const mismatch = lineInOtherCurrency(params.lineItems, currency);
@@ -398,7 +425,7 @@ export class TaxService {
       subscriptionId: params.subscriptionId,
       occurredAt: createdAt,
     }));
-    const storable = parse(z.array(taxRecordRowSchema), rows);
+    const storable = parse(taxRecordRowsSchema, rows);
     if (isFailure(storable)) return storable;
 
     const existing = await this.reads.records.findByReference(params.type, params.reference);
@@ -515,10 +542,12 @@ export class TaxService {
   async calculateSubscriptionTax(params: {
     customerId: CustomerId;
     planAmount: Money;
-    planInterval: 'monthly' | 'yearly' | 'weekly' | 'daily';
+    planInterval: TaxPlanInterval;
     taxCode?: string;
     customerDetails?: TaxCalculationInput['customerDetails'];
   }) {
+    const interval = parse(calculateSubscriptionTaxInputSchema.shape.planInterval, params.planInterval);
+    if (isFailure(interval)) return interval;
     return this.calculateTax({
       customerId: params.customerId,
       lineItems: [{

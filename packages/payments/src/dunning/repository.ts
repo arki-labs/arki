@@ -19,6 +19,7 @@ import type { UserId } from '../core/user-id.js';
 import {
   INT4_MAX,
   isPgInstant,
+  MAX_BATCH_ITEMS,
   pgInstantSchema,
   pgJsonRecordSchema,
   pgJsonSchema,
@@ -39,12 +40,23 @@ import type {
   UpdateDunningTemplateInput,
 } from './contracts.js';
 import {
+  campaignTriggerSchema,
+  communicationChannelSchema,
+  communicationStatusSchema,
   createCustomerSegmentInputSchema,
   createDunningCampaignInputSchema,
   createDunningTemplateInputSchema,
   dunningActorSchema,
+  dunningCampaignStatusSchema,
+  dunningCampaignTypeSchema,
+  executionStatusSchema,
+  listCommunicationsQuerySchema,
+  listCustomerSegmentsQuerySchema,
+  listDunningCampaignsQuerySchema,
+  listExecutionsQuerySchema,
   MAX_DUNNING_DAYS,
   MAX_DUNNING_HOURS,
+  riskCategorySchema,
   updateCustomerSegmentInputSchema,
   updateDunningCampaignInputSchema,
   updateDunningTemplateInputSchema,
@@ -110,6 +122,7 @@ export type CommunicationReferenceMissing =
  * `instant` column takes only the years 1 to 9999).
  */
 const executionValuesSchema = z.looseObject({
+  status: executionStatusSchema.optional(),
   triggerType: pgVarcharSchema(100).optional(),
   triggerData: pgJsonRecordSchema.optional(),
   result: pgJsonRecordSchema.nullish(),
@@ -127,6 +140,8 @@ const executionValuesSchema = z.looseObject({
  * write: an `instant` column takes only the years 1 to 9999.
  */
 const communicationValuesSchema = z.looseObject({
+  channel: communicationChannelSchema.optional(),
+  status: communicationStatusSchema.optional(),
   recipient: pgVarcharSchema(255).optional(),
   subject: pgVarcharSchema(500).nullish(),
   content: pgTextSchema.optional(),
@@ -194,6 +209,35 @@ const segmentValuesSchema = z.looseObject({
   criteria: pgJsonRecordSchema.optional(),
 });
 
+/**
+ * The enum and sort fields of each list query, from the list contracts: a status, type or channel no row
+ * has (SQLSTATE 22P02) or a `sortBy` that names no column returns `schema.invalid_input` before any query.
+ */
+const campaignListChoicesSchema = listDunningCampaignsQuerySchema.pick({ type: true, status: true, sortBy: true });
+const segmentListChoicesSchema = listCustomerSegmentsQuerySchema.pick({ type: true, sortBy: true });
+const executionListChoicesSchema = listExecutionsQuerySchema.pick({ status: true, sortBy: true });
+const communicationListChoicesSchema = listCommunicationsQuerySchema.pick({
+  channel: true,
+  status: true,
+  sortBy: true,
+});
+
+/** The ids that name the segments of a campaign filter: at most `MAX_BATCH_ITEMS`. */
+const segmentIdsFilterSchema = z.array(z.string()).max(MAX_BATCH_ITEMS);
+
+/** The most characters of an id column (`varchar(256)`): a reference longer than that is in no row. */
+const ID_MAX_LENGTH = 256;
+
+/**
+ * The money of rows this package stored, summed per currency. Precondition (an invariant failure otherwise):
+ * every row holds an ISO 4217 code and units that are a safe whole number, which the insert and the SUM keep.
+ */
+function storedRevenue(rows: readonly { currency: string; units: number | string }[]) {
+  const revenue = sumMinorByCurrency(rows);
+  invariant(!isFailure(revenue), '[@arki/payments] a stored analytics row holds money that cannot be read');
+  return revenue;
+}
+
 /** The precondition of a page size, an offset or a row count: a whole number Postgres takes in LIMIT and OFFSET. */
 function assertCount(value: number, name: string): void {
   invariant(Number.isSafeInteger(value) && value >= 0, () => `[@arki/payments] ${name} must be a whole number of 0 or more`);
@@ -241,7 +285,9 @@ async function insertOrMissing<Row, Missing>(
   insert: (tx: DunningDatabase) => Promise<Row>,
   references: readonly Reference<Missing>[],
 ): Promise<Row | Missing> {
-  const unstorable = references.find(reference => !findable(reference.value));
+  const unstorable = references.find(
+    reference => !findable(reference.value) || (reference.value?.length ?? 0) > ID_MAX_LENGTH,
+  );
   if (unstorable) return unstorable.missing();
   try {
     return await db.transaction(async tx => insert(tx));
@@ -295,8 +341,10 @@ export class DunningCampaignRepository {
    * One page of campaigns. Preconditions (anything else throws an invariant failure and runs no query):
    * `limit` and `offset` are whole numbers of 0 or more. A `search` holding U+0000 matches no campaign.
    */
-  async findMany(query: ListDunningCampaignsQuery): Promise<DunningCampaign[]> {
+  async findMany(query: ListDunningCampaignsQuery): Promise<DunningCampaign[] | SchemaFailure>{
     const { limit, offset, type, status, search, sortBy, sortOrder } = query;
+    const choices = parse(campaignListChoicesSchema, query);
+    if (isFailure(choices)) return choices;
     assertCount(limit, 'limit');
     assertCount(offset, 'offset');
     if (!findable(search)) return [];
@@ -404,7 +452,10 @@ export class DunningCampaignRepository {
     });
   }
 
-  async findByType(type: DunningCampaignType): Promise<DunningCampaign[]> {
+  /** The active campaigns of the type. A type no campaign has returns `schema.invalid_input`. */
+  async findByType(type: DunningCampaignType): Promise<DunningCampaign[] | SchemaFailure> {
+    const checked = parse(dunningCampaignTypeSchema, type);
+    if (isFailure(checked)) return checked;
     return this.db
       .select()
       .from(this.dunningCampaigns)
@@ -414,12 +465,17 @@ export class DunningCampaignRepository {
   /**
    * The active campaigns of the trigger type, highest priority first. With segment ids, only the campaigns
    * that target one of them; a segment id no row can hold (U+0000) targets none, so a list of only such ids
-   * answers `[]` without a query.
+   * answers `[]` without a query. A trigger type no campaign has, or more than `MAX_BATCH_ITEMS` (1,000)
+   * segment ids, returns `schema.invalid_input`.
    */
   async findActiveForTrigger(
     triggerType: CampaignTrigger['type'],
     customerSegmentIds?: CustomerSegmentId[],
-  ): Promise<DunningCampaign[]> {
+  ): Promise<DunningCampaign[] | SchemaFailure> {
+    const checkedType = parse(campaignTriggerSchema.shape.type, triggerType);
+    if (isFailure(checkedType)) return checkedType;
+    const checkedIds = parse(segmentIdsFilterSchema.optional(), customerSegmentIds);
+    if (isFailure(checkedIds)) return checkedIds;
     // The trigger-type lookup hits a JSONB field (`trigger->>'type'`) and the
     // segment intersection uses a JSONB EXISTS subquery — both have no
     // structured-filter equivalent and stay as RAW.
@@ -449,7 +505,8 @@ export class DunningCampaignRepository {
 
   /**
    * Set the campaign's status. An actor id that is not a `usr_` id Postgres can store returns
-   * `schema.invalid_input`; an unknown id (also one no row can hold) returns `undefined`. Nothing is written then.
+   * `schema.invalid_input`, and so does a status no campaign has; an unknown id (also one no row can hold)
+   * returns `undefined`. Nothing is written then.
    */
   async updateStatus(
     id: DunningCampaignId,
@@ -458,6 +515,8 @@ export class DunningCampaignRepository {
   ): Promise<DunningCampaign | undefined | SchemaFailure> {
     const actor = parse(dunningActorSchema, updatedBy);
     if (isFailure(actor)) return actor;
+    const checkedStatus = parse(dunningCampaignStatusSchema, status);
+    if (isFailure(checkedStatus)) return checkedStatus;
     if (!findable(id)) return undefined;
     const [campaign] = await this.db
       .update(this.dunningCampaigns)
@@ -533,7 +592,7 @@ export class DunningCampaignRepository {
     assertComparable(since, 'since');
     if (!findable(campaignId)) {
       const none = { executions: 0, customersReached: 0, communicationsSent: 0, paymentsRecovered: 0, conversionRate: 0, roi: 0 };
-      return { ...none, revenueRecovered: sumMinorByCurrency([]) };
+      return { ...none, revenueRecovered: storedRevenue([]) };
     }
     const inRange = and(
       gte(this.dunningCampaignAnalytics.date, since),
@@ -565,7 +624,7 @@ export class DunningCampaignRepository {
       .where(inRange)
       .groupBy(this.dunningCampaignAnalytics.currency);
 
-    return { ...counters, revenueRecovered: sumMinorByCurrency(recovered) };
+    return { ...counters, revenueRecovered: storedRevenue(recovered) };
   }
 }
 
@@ -748,9 +807,11 @@ export class DunningExecutionRepository {
    * `limit` and `offset` are whole numbers of 0 or more; `scheduledAfter` and `scheduledBefore` fall in
    * the years 1 to 9999. A campaign or customer id no row can hold (U+0000) matches none: `[]`.
    */
-  async findMany(query: ListExecutionsQuery): Promise<DunningExecution[]> {
+  async findMany(query: ListExecutionsQuery): Promise<DunningExecution[] | SchemaFailure>{
     const { limit, offset, campaignId, customerId, status, scheduledAfter, scheduledBefore, sortBy, sortOrder } =
       query;
+    const choices = parse(executionListChoicesSchema, query);
+    if (isFailure(choices)) return choices;
     assertCount(limit, 'limit');
     assertCount(offset, 'offset');
     assertComparable(scheduledAfter, 'scheduledAfter');
@@ -848,7 +909,7 @@ export class DunningExecutionRepository {
     errorMessage?: string,
     customScheduledAt?: Instant,
   ): Promise<DunningExecution | undefined | SchemaFailure> {
-    const values = parse(executionValuesSchema, { result, errorMessage, scheduledAt: customScheduledAt });
+    const values = parse(executionValuesSchema, { status, result, errorMessage, scheduledAt: customScheduledAt });
     if (isFailure(values)) return values;
     if (!findable(id)) return undefined;
     const updateData: Partial<DunningExecution> = {
@@ -1021,9 +1082,11 @@ export class DunningCommunicationRepository {
    * query): `limit` and `offset` are whole numbers of 0 or more; `sentAfter` and `sentBefore` fall in the
    * years 1 to 9999. An execution or customer id no row can hold (U+0000) matches none: `[]`.
    */
-  async findMany(query: ListCommunicationsQuery): Promise<DunningCommunication[]> {
+  async findMany(query: ListCommunicationsQuery): Promise<DunningCommunication[] | SchemaFailure>{
     const { limit, offset, executionId, customerId, channel, status, sentAfter, sentBefore, sortBy, sortOrder } =
       query;
+    const choices = parse(communicationListChoicesSchema, query);
+    if (isFailure(choices)) return choices;
     assertCount(limit, 'limit');
     assertCount(offset, 'offset');
     assertComparable(sentAfter, 'sentAfter');
@@ -1121,7 +1184,7 @@ export class DunningCommunicationRepository {
       trackingData?: Record<string, unknown>;
     } = {},
   ): Promise<DunningCommunication | null | SchemaFailure> {
-    const values = parse(communicationValuesSchema, updates);
+    const values = parse(communicationValuesSchema, { ...updates, status });
     if (isFailure(values)) return values;
     if (!findable(id)) return null;
     const [communication] = await this.db
@@ -1209,8 +1272,10 @@ export class CustomerSegmentRepository {
    * One page of segments. Preconditions (anything else throws an invariant failure and runs no query):
    * `limit` and `offset` are whole numbers of 0 or more. A `search` holding U+0000 matches no segment.
    */
-  async findMany(query: ListCustomerSegmentsQuery): Promise<CustomerSegmentRow[]> {
+  async findMany(query: ListCustomerSegmentsQuery): Promise<CustomerSegmentRow[] | SchemaFailure>{
     const { limit, offset, type, isActive, search, sortBy, sortOrder } = query;
+    const choices = parse(segmentListChoicesSchema, query);
+    if (isFailure(choices)) return choices;
     assertCount(limit, 'limit');
     assertCount(offset, 'offset');
     if (!findable(search)) return [];
@@ -1459,9 +1524,14 @@ export class CustomerRiskProfileRepository {
     );
   }
 
-  /** The profiles in the category, highest score first. `limit` is a whole number of 0 or more (a precondition: anything else throws an invariant failure). */
-  async findByRiskCategory(category: RiskCategory, limit = 100): Promise<CustomerRiskProfile[]> {
+  /**
+   * The profiles in the category, highest score first. `limit` is a whole number of 0 or more (a precondition:
+   * anything else throws an invariant failure). A category no profile has returns `schema.invalid_input`.
+   */
+  async findByRiskCategory(category: RiskCategory, limit = 100): Promise<CustomerRiskProfile[] | SchemaFailure> {
     assertCount(limit, 'limit');
+    const checked = parse(riskCategorySchema, category);
+    if (isFailure(checked)) return checked;
     const table = this.customerRiskProfiles;
     const profiles = await this.db
       .select()

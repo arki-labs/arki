@@ -9,6 +9,8 @@ import type {
   ExemptionStatus,
   ExemptionType,
   JurisdictionType,
+  TaxAuditAction,
+  TaxAuditEntity,
   TaxBusinessType,
   TaxCalculationMode,
   TaxConfigStatus,
@@ -236,8 +238,8 @@ function buildTaxTables({ schema }: CreateTaxTablesDeps) {
     'tax_audit_entries',
     {
       id: idColumns(taxAuditEntryIdFactory).primaryColumn(),
-      action: varchar('action', { length: 20 }).$type<'calculate' | 'apply' | 'refund' | 'exempt' | 'report'>().notNull(),
-      entity: varchar('entity', { length: 20 }).$type<'payment' | 'subscription' | 'customer' | 'exemption'>().notNull(),
+      action: varchar('action', { length: 20 }).$type<TaxAuditAction>().notNull(),
+      entity: varchar('entity', { length: 20 }).$type<TaxAuditEntity>().notNull(),
       entityId: varchar('entity_id', { length: 255 }).notNull(),
       details: jsonb('details')
         .$type<{

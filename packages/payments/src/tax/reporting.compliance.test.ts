@@ -294,6 +294,15 @@ describe('compliance status and deadlines', () => {
   }, 10_000);
 });
 
+describe('an export format outside csv, json and xml', () => {
+  it('is refused as schema.invalid_input before any query', async () => {
+    for (const format of ['a\u0000b', '\uD800', 'x'.repeat(300), 'pdf']) {
+      // @ts-expect-error a hostile format: the type only lets the three formats in
+      expect(await reporting.exportTaxData({ format, period })).toMatchObject({ code: InvalidInput.code });
+    }
+  });
+});
+
 describe('audit entries the table cannot store', () => {
   // An entityId over 255, U+0000 or a bigint in details used to reach Postgres (22001, 22P05) or throw from the driver
   it('return schema.invalid_input and store nothing; an id already used returns payments.tax_row_exists', async () => {
@@ -305,6 +314,15 @@ describe('audit entries the table cannot store', () => {
     // A lone surrogate is refused by the jsonb column (raw 22P02)
     expect(await reporting.createAuditEntry({ ...entry, details: { reason: 'a\uD800' } })).toMatchObject({ code: InvalidInput.code });
     expect(await repos.audit.record({ ...entry, id: 'txa_a\u0000b' })).toMatchObject({ code: InvalidInput.code });
+    // An action or entity outside the lists (or over the column's 20 characters) used to reach Postgres as a raw 22001, 22021 or 22P02
+    for (const hostile of ['a\u0000b', 'x'.repeat(300), 'nope']) {
+      // @ts-expect-error a hostile action: the type only lets the five actions in
+      expect(await reporting.createAuditEntry({ ...entry, action: hostile })).toMatchObject({ code: InvalidInput.code });
+      // @ts-expect-error a hostile entity: the type only lets the four entities in
+      expect(await reporting.createAuditEntry({ ...entry, entity: hostile })).toMatchObject({ code: InvalidInput.code });
+      // @ts-expect-error a hostile entity: no entry can hold it, so the trail is empty
+      expect(await reporting.getAuditTrail(hostile, 'cust_audit')).toEqual([]);
+    }
     expect(await reporting.getAuditTrail('customer', 'cust_audit')).toEqual([]);
 
     const stored = orThrow(await repos.audit.record(entry));

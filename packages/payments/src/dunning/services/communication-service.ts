@@ -2,10 +2,10 @@ import { and, desc, eq, gt, isNull, ne, notExists, or } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import type { Instant } from '@arki/date';
-import type { SchemaFailure } from '@arki/failure';
+import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { z } from '@arki/contracts';
 import { fromDate, now, toDate } from '@arki/date';
-import { invariant, isFailure, orThrow, unreachable, UnexpectedFailure } from '@arki/failure';
+import { invariant, isFailure, orThrow, unreachable } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { parse } from '@arki/schema';
 
@@ -86,15 +86,45 @@ const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
 /** A provider call's timeout: whole milliseconds from 1 to 2^31 - 1 (a longer timer fires at once). */
 const providerTimeoutSchema = z.number().int().min(1).max(INT4_MAX);
 
-/** Throws `payments.configuration_invalid` at boot for a `timeoutMs` no timer can wait; `undefined` keeps the default. */
-function checkTimeout(setting: string, timeoutMs: number | undefined): void {
-  if (timeoutMs === undefined || providerTimeoutSchema.safeParse(timeoutMs).success) return;
-  throw new UnexpectedFailure(
-    PaymentsConfigurationInvalid({
-      setting,
-      problem: `${String(timeoutMs)} is not a whole number of milliseconds from 1 to ${INT4_MAX}`,
-    }),
-  );
+/** `payments.configuration_invalid`: a setting the app passed when it built a provider or the service. */
+type ConfigurationInvalid = FailureOf<typeof PaymentsConfigurationInvalid>;
+
+/** `payments.configuration_invalid` for a `timeoutMs` no timer can wait; `undefined` when it is fine or unset (the default applies). */
+function timeoutProblem(setting: string, timeoutMs: number | undefined): ConfigurationInvalid | undefined {
+  if (timeoutMs === undefined || providerTimeoutSchema.safeParse(timeoutMs).success) return undefined;
+  return PaymentsConfigurationInvalid({
+    setting,
+    problem: `${String(timeoutMs)} is not a whole number of milliseconds from 1 to ${INT4_MAX}`,
+  });
+}
+
+/**
+ * A value `fetch` can send in a header (an API key, a token, a header value): `fetch` refuses a NUL,
+ * a line break or a character above U+00FF before anything is sent.
+ */
+const headerValueSchema = z
+  .string()
+  .regex(/^[^\0\n\r\u0100-\uFFFF]*$/, 'holds a NUL, a line break or a character above U+00FF, which no HTTP header can carry');
+
+/** A header name `fetch` accepts: an HTTP token. */
+const headerNameSchema = z.string().regex(/^[\w!#$%&'*+.^`|~-]+$/, 'is not an HTTP header name');
+
+/** A provider API origin `fetch` can call: an http(s) URL with no user name or password (`fetch` refuses those). */
+const apiBaseUrlSchema = z.url({ protocol: /^https?$/ }).refine(
+  // Zod runs a refinement after a failed format check too, so it parses only text a URL can be
+  url => URL.canParse(url) && new URL(url).username === '' && new URL(url).password === '',
+  'must be an http or https URL with no user name or password',
+);
+
+/**
+ * `payments.configuration_invalid` for `setting` when `value` fails `schema`, else `undefined`, so a
+ * setting `fetch` would refuse before sending fails at boot, never as an outage on every send. The
+ * value is not echoed: it may be a secret.
+ */
+function settingProblem(setting: string, schema: z.ZodType, value: unknown): ConfigurationInvalid | undefined {
+  const checked = schema.safeParse(value);
+  if (checked.success) return undefined;
+  return PaymentsConfigurationInvalid({ setting, problem: checked.error.issues.map(issue => issue.message).join('; ') });
 }
 
 /** The channel and provider name a provider call is about: the bounded span attributes and failure data. */
@@ -157,6 +187,13 @@ const providerMessageIdSchema = z
   .min(1)
   .regex(/^\P{Cs}*$/u, 'The message id has a lone UTF-16 surrogate');
 
+/** The ids a communication row stores: each is a varchar(255) column, and Postgres refuses more (SQLSTATE 22001) or U+0000. */
+const communicationRefsSchema = z.object({
+  executionId: pgVarcharSchema(255),
+  customerId: pgVarcharSchema(255),
+  templateId: pgVarcharSchema(255),
+});
+
 /** A date the provider sends as text; text that is not a date is refused. */
 const providerDateSchema = z.string().pipe(z.coerce.date());
 
@@ -203,11 +240,11 @@ function invalidBody(target: ProviderTarget, reply: ProviderReply, cause: Schema
   return NotificationProviderResponseInvalid({ ...target, upstreamStatus: reply.status }, { cause });
 }
 
-/** Replaces each `{{key}}` with its personalization. */
+/** Replaces each `{{key}}` with its personalization, inserted literally (`$&` in a value stays `$&`). */
 function applyPersonalizations(template: string, personalizations: Record<string, string>): string {
   let processed = template;
   for (const [key, value] of Object.entries(personalizations)) {
-    processed = processed.replaceAll(`{{${key}}}`, value);
+    processed = processed.replaceAll(`{{${key}}}`, () => value);
   }
 
   return processed;
@@ -221,27 +258,41 @@ const resendEmailSchema = jsonTextSchema.pipe(
   z.looseObject({ last_event: z.string().nullish(), created_at: providerDateSchema }),
 );
 
+/** The settings of an {@link EmailProvider}. */
+export type EmailProviderConfig = {
+  apiKey: string;
+  fromEmail: string;
+  fromName: string;
+  /** How long one Resend call may take. Default 30 000 ms. */
+  timeoutMs?: number;
+  /** The Resend API origin. Default `https://api.resend.com`. */
+  apiBaseUrl?: string;
+};
+
 /**
  * Email communication provider with Resend integration. Each send runs in a
- * `payments.notification.send` span (channel and provider only). The constructor throws
- * `payments.configuration_invalid` for a `timeoutMs` that is not a whole number from 1 to 2^31 - 1.
+ * `payments.notification.send` span (channel and provider only). Build it with
+ * {@link EmailProvider.create}.
  */
 export class EmailProvider implements CommunicationProvider {
   readonly channel = 'email' as const;
   private readonly target: ProviderTarget = { channel: 'email', provider: 'resend' };
 
-  constructor(
-    private config: {
-      apiKey: string;
-      fromEmail: string;
-      fromName: string;
-      /** How long one Resend call may take. Default 30 000 ms. */
-      timeoutMs?: number;
-      /** The Resend API origin. Default `https://api.resend.com`. */
-      apiBaseUrl?: string;
-    },
-  ) {
-    checkTimeout('email.timeoutMs', config.timeoutMs);
+  private constructor(private config: EmailProviderConfig) {}
+
+  /**
+   * Builds the provider, or returns `payments.configuration_invalid` for a `timeoutMs` that is not a
+   * whole number from 1 to 2^31 - 1, an `apiKey` no HTTP header can carry, or an `apiBaseUrl` that is
+   * not an http(s) URL without credentials: `fetch` would refuse those before sending, so
+   * `unavailable` means a real outage.
+   */
+  static create(config: EmailProviderConfig): EmailProvider | ConfigurationInvalid {
+    return (
+      timeoutProblem('email.timeoutMs', config.timeoutMs) ??
+      settingProblem('email.apiKey', headerValueSchema, config.apiKey) ??
+      (config.apiBaseUrl === undefined ? undefined : settingProblem('email.apiBaseUrl', apiBaseUrlSchema, config.apiBaseUrl)) ??
+      new EmailProvider(config)
+    );
   }
 
   private get baseUrl(): string {
@@ -355,26 +406,42 @@ const twilioMessageSchema = jsonTextSchema.pipe(
   }),
 );
 
+/** The settings of an {@link SMSProvider}. */
+export type SMSProviderConfig = {
+  accountSid: string;
+  authToken: string;
+  fromNumber: string;
+  /** How long one Twilio call may take. Default 30 000 ms. */
+  timeoutMs?: number;
+  /** The Twilio API origin. Default `https://api.twilio.com`. */
+  apiBaseUrl?: string;
+};
+
 /**
  * SMS communication provider with Twilio integration. Each send runs in a
- * `payments.notification.send` span (channel and provider only).
+ * `payments.notification.send` span (channel and provider only). Build it with
+ * {@link SMSProvider.create}.
  */
 export class SMSProvider implements CommunicationProvider {
   readonly channel = 'sms' as const;
   private readonly target: ProviderTarget = { channel: 'sms', provider: 'twilio' };
 
-  constructor(
-    private config: {
-      accountSid: string;
-      authToken: string;
-      fromNumber: string;
-      /** How long one Twilio call may take. Default 30 000 ms. */
-      timeoutMs?: number;
-      /** The Twilio API origin. Default `https://api.twilio.com`. */
-      apiBaseUrl?: string;
-    },
-  ) {
-    checkTimeout('sms.timeoutMs', config.timeoutMs);
+  private constructor(private config: SMSProviderConfig) {}
+
+  /**
+   * Builds the provider, or returns `payments.configuration_invalid` for a `timeoutMs` that is not a
+   * whole number from 1 to 2^31 - 1, an `accountSid` or `authToken` no HTTP header can carry, or an
+   * `apiBaseUrl` that is not an http(s) URL without credentials.
+   */
+  static create(config: SMSProviderConfig): SMSProvider | ConfigurationInvalid {
+    // `btoa` throws for a character above U+00FF; `fetch` refuses an invalid origin before sending
+    return (
+      timeoutProblem('sms.timeoutMs', config.timeoutMs) ??
+      settingProblem('sms.accountSid', headerValueSchema, config.accountSid) ??
+      settingProblem('sms.authToken', headerValueSchema, config.authToken) ??
+      (config.apiBaseUrl === undefined ? undefined : settingProblem('sms.apiBaseUrl', apiBaseUrlSchema, config.apiBaseUrl)) ??
+      new SMSProvider(config)
+    );
   }
 
   private get accountUrl(): string {
@@ -564,8 +631,11 @@ export class InAppProvider implements CommunicationProvider {
   }
 }
 
-/** A webhook recipient: an http or https URL. */
-const webhookUrlSchema = z.url({ protocol: /^https?$/ });
+/**
+ * A webhook recipient: an http or https URL with no user name or password. `fetch` throws for one
+ * with credentials before sending, which would read as an outage.
+ */
+const webhookUrlSchema = apiBaseUrlSchema;
 
 /** The JSON object a webhook step's content may hold; other content is sent as `{ message }`. */
 const webhookPayloadSchema = jsonTextSchema.pipe(z.record(z.string(), z.unknown()));
@@ -580,50 +650,59 @@ const allowedHostSchema = z
     message: 'must be a bare hostname such as hooks.example.com',
   });
 
+/** The settings of a {@link WebhookProvider}. */
+export type WebhookProviderConfig = {
+  /** The hostnames a webhook may reach, compared exactly (lowercased) with the URL's host. Never empty. */
+  allowedHosts: readonly string[];
+  defaultHeaders: Record<string, string>;
+  /** How long one webhook call may take: whole milliseconds from 1 to 2^31 - 1. */
+  timeoutMs: number;
+};
+
 /**
  * Webhook communication provider for external integrations. The URL comes from customer metadata,
  * so a send reaches only a host on the operator's `allowedHosts` list, and the reply's body is
  * never read or kept: only its HTTP status. Each send runs in a `payments.notification.send` span
- * (channel and provider only, never the URL).
+ * (channel and provider only, never the URL). Build it with {@link WebhookProvider.create}.
  */
 export class WebhookProvider implements CommunicationProvider {
   readonly channel = 'webhook' as const;
   private readonly target: ProviderTarget = { channel: 'webhook', provider: 'webhook' };
   private readonly allowedHosts: ReadonlySet<string>;
 
+  private constructor(private config: WebhookProviderConfig) {
+    this.allowedHosts = new Set(config.allowedHosts.map(host => host.toLowerCase()));
+  }
+
   /**
-   * Throws `payments.configuration_invalid` for an empty `allowedHosts`, an entry that is not a bare
-   * hostname, or a `timeoutMs` that is not a whole number from 1 to 2^31 - 1.
+   * Builds the provider, or returns `payments.configuration_invalid` for an empty `allowedHosts`, an
+   * entry that is not a bare hostname, a `defaultHeaders` name or value `fetch` would refuse, or a
+   * `timeoutMs` that is not a whole number from 1 to 2^31 - 1.
    */
-  constructor(
-    private config: {
-      /** The hostnames a webhook may reach, compared exactly (lowercased) with the URL's host. Never empty. */
-      allowedHosts: readonly string[];
-      defaultHeaders: Record<string, string>;
-      /** How long one webhook call may take: whole milliseconds from 1 to 2^31 - 1. */
-      timeoutMs: number;
-    },
-  ) {
-    checkTimeout('webhook.timeoutMs', config.timeoutMs);
+  static create(config: WebhookProviderConfig): WebhookProvider | ConfigurationInvalid {
+    const timeout = timeoutProblem('webhook.timeoutMs', config.timeoutMs);
+    if (timeout) return timeout;
     if (config.allowedHosts.length === 0) {
-      throw new UnexpectedFailure(
-        PaymentsConfigurationInvalid({
-          setting: 'webhook.allowedHosts',
-          problem: 'the webhook channel is enabled with no allowed hosts',
-        }),
-      );
+      return PaymentsConfigurationInvalid({
+        setting: 'webhook.allowedHosts',
+        problem: 'the webhook channel is enabled with no allowed hosts',
+      });
     }
     for (const host of config.allowedHosts) {
       if (!allowedHostSchema.safeParse(host).success) {
-        throw new UnexpectedFailure(
-          PaymentsConfigurationInvalid({
-            setting: 'webhook.allowedHosts',
-            problem: `${JSON.stringify(host)} is not a bare hostname`,
-          }),
-        );
+        return PaymentsConfigurationInvalid({
+          setting: 'webhook.allowedHosts',
+          problem: `${JSON.stringify(host)} is not a bare hostname`,
+        });
       }
     }
-    this.allowedHosts = new Set(config.allowedHosts.map(host => host.toLowerCase()));
+    for (const [name, value] of Object.entries(config.defaultHeaders)) {
+      const problem =
+        settingProblem('webhook.defaultHeaders', headerNameSchema, name) ??
+        settingProblem(`webhook.defaultHeaders.${name}`, headerValueSchema, value);
+      if (problem) return problem;
+    }
+    return new WebhookProvider(config);
   }
 
   async send(request: CommunicationRequest) {
@@ -725,7 +804,8 @@ export class CommunicationOrchestrationService {
    * `NotificationChannelUnavailable`, a recipient from customer data the `recipient` column cannot
    * store (over 255 characters, or holding U+0000) returns `schema.invalid_input`, and an execution,
    * step or customer with no row returns its not-found failure (`CommunicationReferenceMissing`); each
-   * writes nothing and sends nothing. A provider that cannot be reached throws
+   * writes nothing and sends nothing; so does an execution, customer or template id the columns cannot
+   * store (over 255 characters, or holding U+0000). A provider that cannot be reached throws
    * (`PaymentProviderError('unavailable')`) after the row is marked `failed`; when marking the row
    * fails too, an `AggregateError` holds both errors, the send error first.
    */
@@ -735,6 +815,13 @@ export class CommunicationOrchestrationService {
     customer: CustomerData,
     personalizations: Record<string, string> = {},
   ) {
+    const refs = parse(communicationRefsSchema, {
+      executionId: execution.id,
+      customerId: execution.customerId,
+      templateId: template.id,
+    });
+    if (isFailure(refs)) return refs;
+
     const provider = this.providers.get(template.communication.channel);
     if (!provider) {
       return NotificationChannelUnavailable({ channel: template.communication.channel });
@@ -965,9 +1052,10 @@ export class CommunicationOrchestrationService {
 
   /**
    * List communications with filtering. `limit` and `offset` are whole numbers of 0 or more and the
-   * times fall in the years 1 to 9999 (preconditions: anything else throws an invariant failure).
+   * times fall in the years 1 to 9999 (preconditions: anything else throws an invariant failure). A
+   * `status` or `sortBy` outside its list returns `schema.invalid_input`.
    */
-  async listCommunications(query: ListCommunicationsQuery): Promise<DunningCommunication[]> {
+  async listCommunications(query: ListCommunicationsQuery) {
     return this.communicationRepo.findMany(query);
   }
 
@@ -1131,35 +1219,37 @@ function metadataText(value: unknown): string {
  *
  * Apps inject channel-provider config rather than the package reading
  * `env` directly — preserves the @arki/payments package as
- * config-injectable and env-agnostic.
+ * config-injectable and env-agnostic. A channel setting no provider can use (see
+ * {@link EmailProvider.create}, {@link SMSProvider.create}, {@link WebhookProvider.create}) returns
+ * `payments.configuration_invalid`; nothing is thrown.
  */
 export function createCommunicationOrchestrationService(
   db: DunningDatabase,
   tables: Pick<DunningTables, 'dunningCommunications' | 'dunningExecutions'>,
   config: CommunicationOrchestrationConfig = {},
-) {
+): CommunicationOrchestrationService | ConfigurationInvalid {
   const service = new CommunicationOrchestrationService(db, tables);
 
   if (config.email) {
-    service.registerProvider(
-      new EmailProvider({
-        apiKey: config.email.apiKey,
-        fromEmail: config.email.fromEmail,
-        fromName: config.email.fromName ?? 'Payments',
-        timeoutMs: config.email.timeoutMs,
-      }),
-    );
+    const email = EmailProvider.create({
+      apiKey: config.email.apiKey,
+      fromEmail: config.email.fromEmail,
+      fromName: config.email.fromName ?? 'Payments',
+      timeoutMs: config.email.timeoutMs,
+    });
+    if (isFailure(email)) return email;
+    service.registerProvider(email);
   }
 
   if (config.sms) {
-    service.registerProvider(
-      new SMSProvider({
-        accountSid: config.sms.accountSid,
-        authToken: config.sms.authToken,
-        fromNumber: config.sms.fromNumber,
-        timeoutMs: config.sms.timeoutMs,
-      }),
-    );
+    const sms = SMSProvider.create({
+      accountSid: config.sms.accountSid,
+      authToken: config.sms.authToken,
+      fromNumber: config.sms.fromNumber,
+      timeoutMs: config.sms.timeoutMs,
+    });
+    if (isFailure(sms)) return sms;
+    service.registerProvider(sms);
   }
 
   if (config.inApp) {
@@ -1167,15 +1257,15 @@ export function createCommunicationOrchestrationService(
   }
 
   if (config.webhook) {
-    service.registerProvider(
-      new WebhookProvider({
-        allowedHosts: config.webhook.allowedHosts,
-        defaultHeaders: config.webhook.defaultHeaders ?? {
-          'X-Source': config.webhook.sourceHeader ?? 'dunning-system',
-        },
-        timeoutMs: config.webhook.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
-      }),
-    );
+    const webhook = WebhookProvider.create({
+      allowedHosts: config.webhook.allowedHosts,
+      defaultHeaders: config.webhook.defaultHeaders ?? {
+        'X-Source': config.webhook.sourceHeader ?? 'dunning-system',
+      },
+      timeoutMs: config.webhook.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
+    });
+    if (isFailure(webhook)) return webhook;
+    service.registerProvider(webhook);
   }
 
   return service;

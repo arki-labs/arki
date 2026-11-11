@@ -272,6 +272,12 @@ export class IntegrationTester<
     return this.currentTransaction;
   }
 
+  /**
+   * The seeded test user for `role`.
+   *
+   * @throws Error `Tester not initialized. Call setup() first.` when called before `setup()` has
+   *   seeded the users: a test helper misuse, not an outcome to handle.
+   */
   getUser(role: 'user' | 'moderator' | 'admin'): TestUser {
     const configuredUsers = this.users;
     return configuredUsers[role];

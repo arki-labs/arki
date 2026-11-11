@@ -16,12 +16,11 @@ import { money, UnknownCurrency } from '@arki/money';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
 import { createCustomerId } from '../primitives.js';
 import { InvalidWebhookSignature, PaymentProviderError } from './provider-error.js';
-import { StripeProvider } from './stripe-provider.js';
-import { createFakeStripeHttp } from './stripe-test-support.js';
+import { createFakeStripeHttp, stripeProviderOf } from './stripe-test-support.js';
 
 function provider(respond: (request: RecordedStripeRequest) => { status?: number; body: unknown }) {
   const http = createFakeStripeHttp(respond);
-  const stripe = new StripeProvider(
+  const stripe = stripeProviderOf(
     { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
     { httpClient: http.client, maxNetworkRetries: 0 },
   );

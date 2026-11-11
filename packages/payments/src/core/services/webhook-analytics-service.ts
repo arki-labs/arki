@@ -6,7 +6,7 @@ import { getLogger } from '@arki/log';
 
 import type { PaymentRepository } from '../repository.js';
 import type { PaymentProviderType, WebhookEventType, WebhookId } from '../types.js';
-import { misconfigured } from '../failures.js';
+import { PaymentsConfigurationInvalid } from '../failures.js';
 
 const logger = getLogger('arki:payments:webhook');
 
@@ -77,29 +77,37 @@ const alertThresholdsSchema = z.object({
 
 type WebhookAlertThresholds = z.output<typeof alertThresholdsSchema>;
 
+const DEFAULT_ALERT_THRESHOLDS: WebhookAlertThresholds = {
+  errorRate: 5, // Percentage
+  slowProcessing: 5000, // Milliseconds
+  maxAlerts: 100,
+};
+
 export class WebhookAnalyticsService {
   private alerts = new Map<string, WebhookAlert>();
   private processingTimes: number[] = [];
 
-  /**
-   * Throws `payments.configuration_invalid` for thresholds that are not finite numbers of 0 or more,
-   * or a `maxAlerts` that is not a whole number from 1 to 100,000.
-   */
-  constructor(
+  private constructor(
     private readonly paymentRepository: PaymentRepository,
-    private readonly alertThresholds: WebhookAlertThresholds = {
-      errorRate: 5, // Percentage
-      slowProcessing: 5000, // Milliseconds
-      maxAlerts: 100,
-    }
+    private readonly alertThresholds: WebhookAlertThresholds,
+  ) {}
+
+  /**
+   * Builds the service. Returns `payments.configuration_invalid` for thresholds that are not finite
+   * numbers of 0 or more, or a `maxAlerts` that is not a whole number from 1 to 100,000.
+   */
+  static create(
+    paymentRepository: PaymentRepository,
+    alertThresholds: WebhookAlertThresholds = DEFAULT_ALERT_THRESHOLDS,
   ) {
     const checked = alertThresholdsSchema.safeParse(alertThresholds);
     if (!checked.success) {
-      throw misconfigured(
-        'webhookAnalytics.alertThresholds',
-        checked.error.issues.map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`).join('; '),
-      );
+      return PaymentsConfigurationInvalid({
+        setting: 'webhookAnalytics.alertThresholds',
+        problem: checked.error.issues.map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`).join('; '),
+      });
     }
+    return new WebhookAnalyticsService(paymentRepository, checked.data);
   }
 
   /**
@@ -541,9 +549,10 @@ export class WebhookAnalyticsService {
   }
 }
 
+/** Builds a `WebhookAnalyticsService`: the same as `WebhookAnalyticsService.create`, which returns `payments.configuration_invalid` for bad thresholds. */
 export function createWebhookAnalyticsService(
   paymentRepository: PaymentRepository,
   alertThresholds?: WebhookAlertThresholds
 ) {
-  return new WebhookAnalyticsService(paymentRepository, alertThresholds);
+  return WebhookAnalyticsService.create(paymentRepository, alertThresholds);
 }

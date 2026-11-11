@@ -26,7 +26,7 @@ import { UnknownCurrency } from '@arki/money';
 import { CommandConflict, initJournal } from '@arki/journal';
 
 import type { AppDb, AppTx } from '../../test-support.js';
-import type { WebhookEvent, WebhookEventType, WebhookValidationResult } from '../types.js';
+import type { WebhookEvent, WebhookEventType } from '../types.js';
 import type { WebhookEventStore, WebhookRefunds, WebhookValidator, WebhookWrites } from './webhook-handler.js';
 import type { WebhookValidationOptions } from './webhook-security.js';
 import { createRefundsJournal } from '../../refunds/journal.js';
@@ -131,8 +131,11 @@ function writesOn(database: AppDb) {
   return typed.core.writes(runnerOn(database));
 }
 
+/** What a validator answers: the checked delivery, or `WebhookRejected`. */
+type Validation = Awaited<ReturnType<WebhookValidator['validateWebhook']>>;
+
 /** A validator that returns `result` and records the options it was called with. */
-function validatorReturning(result: WebhookValidationResult) {
+function validatorReturning(result: Validation) {
   const calls: WebhookValidationOptions[] = [];
   const validator: WebhookValidator = {
     validateWebhook(_provider, _payload, _signature, _timestamp, _sourceIp, _secret, options = {}) {
@@ -143,8 +146,7 @@ function validatorReturning(result: WebhookValidationResult) {
   return { validator, calls };
 }
 
-const valid: WebhookValidationResult = {
-  isValid: true,
+const valid: Validation = {
   provider: 'stripe',
   eventType: 'subscription.created',
   data: { object: 'subscription' },
@@ -155,14 +157,16 @@ const valid: WebhookValidationResult = {
  * often the event runs. `body` is what each run does after it is counted.
  */
 function countingHandler(
-  options: { result?: WebhookValidationResult; skipIpValidation?: boolean; maxRetries?: number } = {},
+  options: { result?: Validation; skipIpValidation?: boolean; maxRetries?: number } = {},
   body: (run: number) => Promise<void> = () => Promise.resolve(),
 ) {
   const { validator, calls } = validatorReturning(options.result ?? valid);
-  const handler = new WebhookHandler(storeOn(db), validator, writesOn(db), {
-    ...(options.skipIpValidation === undefined ? {} : { skipIpValidation: options.skipIpValidation }),
-    ...(options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries }),
-  });
+  const handler = orThrow(
+    WebhookHandler.create(storeOn(db), validator, writesOn(db), {
+      ...(options.skipIpValidation === undefined ? {} : { skipIpValidation: options.skipIpValidation }),
+      ...(options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries }),
+    }),
+  );
   const counter = { runs: 0 };
   handler.registerEventHandler('subscription.created', async () => {
     counter.runs += 1;
@@ -393,7 +397,7 @@ describe('WebhookHandler.retryFailedWebhooks', () => {
 
 describe('WebhookHandler before the claim', () => {
   it('acknowledges an event type it does not handle and stores nothing', async () => {
-    const { handler, counter } = countingHandler({ result: { isValid: true, provider: 'stripe', data: {} } });
+    const { handler, counter } = countingHandler({ result: { provider: 'stripe', eventType: undefined, data: {} } });
 
     const result = await deliver(handler, 'evt_unhandled');
 
@@ -404,7 +408,7 @@ describe('WebhookHandler before the claim', () => {
 
   it('rejects an event that fails validation, without asking for a resend, and stores nothing', async () => {
     const { handler, counter } = countingHandler({
-      result: { isValid: false, provider: 'stripe', error: 'Invalid webhook signature' },
+      result: WebhookRejected({ check: 'signature', reason: 'Invalid webhook signature', retryable: false }),
     });
 
     const result = await deliver(handler, 'evt_invalid');
@@ -412,7 +416,7 @@ describe('WebhookHandler before the claim', () => {
     expect(WebhookRejected.is(result)).toBe(true);
     expect(result).toMatchObject({
       code: 'payments.webhook_rejected',
-      data: { reason: 'Invalid webhook signature', retryable: false },
+      data: { check: 'signature', reason: 'Invalid webhook signature', retryable: false },
     });
     expect(counter.runs).toBe(0);
     expect(await db.select().from(webhookEvents)).toHaveLength(0);
@@ -438,13 +442,12 @@ function stateHandler(
   refunds?: WebhookRefunds,
 ) {
   const { validator } = validatorReturning({
-    isValid: true,
     provider: 'stripe',
     eventType,
     data: { id: 'evt_x', type: 'x', data: { object } },
   });
   const writes: WebhookWrites = writesOn(db);
-  return new WebhookHandler(store, validator, writes, {}, refunds);
+  return orThrow(WebhookHandler.create(store, validator, writes, {}, refunds));
 }
 
 /** A Stripe Subscription object, as `customer.subscription.*` events carry it. */
@@ -1151,7 +1154,7 @@ describe('WebhookHandler: what the webhook_events row cannot hold is refused bef
 
   it('an event row deleted while it ran returns webhook_event_not_found instead of a success', async () => {
     const { validator } = validatorReturning(valid);
-    const handler = new WebhookHandler(new PaymentRepository(db, core), validator, writesOn(db));
+    const handler = orThrow(WebhookHandler.create(new PaymentRepository(db, core), validator, writesOn(db)));
     handler.registerEventHandler('subscription.created', async ({ webhookId }) => {
       await db.delete(webhookEvents).where(eq(webhookEvents.id, webhookId));
     });
@@ -1200,7 +1203,7 @@ describe('WebhookHandler.retryFailedWebhooks and events given up on', () => {
   });
 });
 
-describe('WebhookHandler: a count or a duration it cannot use fails when it is built', () => {
+describe('WebhookHandler: a count or a duration it cannot use is refused when it is built', () => {
   it.each([
     ['a NaN lease, which would throw on the first resend', { processingLeaseMs: Number.NaN }],
     ['a lease past one year', { processingLeaseMs: 365 * 24 * 60 * 60 * 1000 + 1 }],
@@ -1209,8 +1212,8 @@ describe('WebhookHandler: a count or a duration it cannot use fails when it is b
     ['a negative retry delay', { retryDelayMs: -1 }],
   ])('%s is payments.configuration_invalid', (_what, config) => {
     const { validator } = validatorReturning(valid);
-    expect(() => new WebhookHandler(storeOn(db), validator, writesOn(db), config)).toThrow(
-      expect.objectContaining({ code: 'payments.configuration_invalid' }),
-    );
+    expect(WebhookHandler.create(storeOn(db), validator, writesOn(db), config)).toMatchObject({
+      code: 'payments.configuration_invalid',
+    });
   });
 });

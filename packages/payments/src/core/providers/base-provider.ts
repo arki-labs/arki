@@ -65,7 +65,8 @@ export type ProviderRefundResult = {
 /**
  * What every payment provider implements. A call that takes `metadata` returns `SchemaFailure`
  * (`schema.invalid_input`) before any request for metadata a jsonb column cannot store (a `bigint`
- * anywhere, U+0000 in a key or a string).
+ * anywhere, U+0000 in a key or a string). A call that takes an `idempotencyKey` returns it for a key
+ * an HTTP header cannot carry unchanged (empty, over 255 characters, or not printable ASCII).
  */
 export abstract class BasePaymentProvider {
   protected config: PaymentProviderConfig;
@@ -158,7 +159,7 @@ export abstract class BasePaymentProvider {
       reason?: string;
       idempotencyKey?: string;
     },
-  ): Promise<Result<Subscription, Conflict | NotFound>>;
+  ): Promise<Result<Subscription, Conflict | NotFound | SchemaFailure>>;
 
   abstract reactivateSubscription(subscriptionId: SubscriptionId): Promise<Result<Subscription, NotFound>>;
 
@@ -170,7 +171,7 @@ export abstract class BasePaymentProvider {
     subscriptionId: SubscriptionId;
     planId: PlanId;
     prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
-  }): Promise<Result<SubscriptionPreview, NotFound | BadAmount>>;
+  }): Promise<Result<SubscriptionPreview, NotFound | BadAmount | SchemaFailure>>;
 
   // Payment Management
   abstract createPayment(params: {
@@ -206,16 +207,16 @@ export abstract class BasePaymentProvider {
   abstract attachPaymentMethod(params: {
     customerId: CustomerId;
     paymentMethodId: string;
-  }): Promise<Result<PaymentMethodInfo, Declined | NotFound>>;
+  }): Promise<Result<PaymentMethodInfo, Declined | NotFound | SchemaFailure>>;
 
-  abstract detachPaymentMethod(paymentMethodId: string): Promise<void>;
+  abstract detachPaymentMethod(paymentMethodId: string): Promise<Result<undefined, SchemaFailure>>;
 
   abstract listPaymentMethods(customerId: CustomerId): Promise<Result<PaymentMethodInfo[], NotFound>>;
 
   abstract setDefaultPaymentMethod(params: {
     customerId: CustomerId;
     paymentMethodId: string;
-  }): Promise<Result<undefined, NotFound>>;
+  }): Promise<Result<undefined, NotFound | SchemaFailure>>;
 
   // Webhook Validation
   abstract validateWebhook(
@@ -235,7 +236,7 @@ export abstract class BasePaymentProvider {
         clientSecret: string;
         setupIntentId: string;
       },
-      Conflict | NotFound
+      Conflict | NotFound | SchemaFailure
     >
   >;
 
@@ -255,7 +256,7 @@ export abstract class BasePaymentProvider {
         clientSecret: string;
         paymentIntentId: string;
       },
-      Declined | Conflict | NotFound | NoPaymentMethod | BadAmount
+      Declined | Conflict | NotFound | NoPaymentMethod | BadAmount | SchemaFailure
     >
   >;
 

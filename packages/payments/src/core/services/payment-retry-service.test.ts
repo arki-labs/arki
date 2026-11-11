@@ -23,11 +23,12 @@ import type { RetryStrategy } from './payment-retry-service.js';
 import { coreReads, runnerOn, seedPayment, seedSubscription, subscriptionRow } from '../../service-test-support.js';
 import { countEvents, eventTypesOf, openDb, typed } from '../../test-support.js';
 import { PaymentWithoutSubscription } from '../failures.js';
+import { MAX_BATCH_ITEMS } from '../pg-values.js';
 import { createPaymentId } from '../primitives.js';
 import { CardDeclined, ReferenceNotFound } from '../providers/provider-error.js';
 import { PaymentRetryService } from './payment-retry-service.js';
 
-type Provider = ConstructorParameters<typeof PaymentRetryService>[0];
+type Provider = Parameters<typeof PaymentRetryService.create>[0];
 
 /** One retry, due at once. */
 const oneRetryNow: RetryStrategy = {
@@ -61,6 +62,11 @@ function providerWhereRetryEnds(retryStatus: PaymentStatus): Provider {
   };
 }
 
+/** A service built from strategies that are valid. */
+function build(...args: Parameters<typeof PaymentRetryService.create>) {
+  return orThrow(PaymentRetryService.create(...args));
+}
+
 /** Runs the one scheduled retry of a failed payment on a subscription in `status`. */
 async function retryOn(status: SubscriptionStatus, retryStatus: PaymentStatus) {
   const subscription = await seedSubscription(writes, 'active');
@@ -68,7 +74,7 @@ async function retryOn(status: SubscriptionStatus, retryStatus: PaymentStatus) {
     await orThrow(writes.markSubscriptionPastDue({ subscriptionId: subscription.id }));
   }
   const payment = await seedPayment(writes, subscription.id);
-  const service = new PaymentRetryService(providerWhereRetryEnds(retryStatus), reads, writes, [oneRetryNow]);
+  const service = build(providerWhereRetryEnds(retryStatus), reads, writes, [oneRetryNow]);
 
   await orThrow(service.scheduleRetries(payment.id, 'card_declined'));
   const eventsBefore = await countEvents(db);
@@ -145,7 +151,7 @@ describe('a retry the card declines', () => {
   async function declinedRetryWith(strategy: RetryStrategy) {
     const subscription = await seedSubscription(writes, 'active');
     const payment = await seedPayment(writes, subscription.id);
-    const service = new PaymentRetryService(declining, reads, writes, [strategy]);
+    const service = build(declining, reads, writes, [strategy]);
     await orThrow(service.scheduleRetries(payment.id, 'card_declined'));
     const eventsBefore = await countEvents(db);
 
@@ -178,7 +184,7 @@ describe('a retry the card declines', () => {
 /** A retry schedule is refused, with nothing scheduled, when there is nothing to retry or no subscription to keep. */
 describe('scheduleRetries refusals', () => {
   it('returns ReferenceNotFound for an unknown payment', async () => {
-    const service = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes, [oneRetryNow]);
+    const service = build(providerWhereRetryEnds('succeeded'), reads, writes, [oneRetryNow]);
     const paymentId = orThrow(createPaymentId());
 
     const result = await service.scheduleRetries(paymentId, 'card_declined');
@@ -189,7 +195,7 @@ describe('scheduleRetries refusals', () => {
   });
 
   it('returns PaymentWithoutSubscription for a one-off payment', async () => {
-    const service = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes, [oneRetryNow]);
+    const service = build(providerWhereRetryEnds('succeeded'), reads, writes, [oneRetryNow]);
     const payment = await seedPayment(writes, null);
 
     const result = await service.scheduleRetries(payment.id, 'card_declined');
@@ -200,7 +206,7 @@ describe('scheduleRetries refusals', () => {
   });
 
   it('picks the strategy by the stored subscription status: a paused subscription gets no retries', async () => {
-    const service = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes, [oneRetryNow]);
+    const service = build(providerWhereRetryEnds('succeeded'), reads, writes, [oneRetryNow]);
     const subscription = await seedSubscription(writes, 'paused');
     const payment = await seedPayment(writes, subscription.id);
 
@@ -210,7 +216,7 @@ describe('scheduleRetries refusals', () => {
 
 describe('getRetryAnalytics', () => {
   it('counts only the attempts created inside the window, comparing instants without throwing', async () => {
-    const service = new PaymentRetryService(providerWhereRetryEnds('failed'), reads, writes, [oneRetryNow]);
+    const service = build(providerWhereRetryEnds('failed'), reads, writes, [oneRetryNow]);
     const subscription = await seedSubscription(writes, 'active');
     const payment = await seedPayment(writes, subscription.id);
     await orThrow(service.scheduleRetries(payment.id, 'card_declined'));
@@ -225,7 +231,7 @@ describe('getRetryAnalytics', () => {
   });
 
   it('sums the stored amount of each payment a retry recovered', async () => {
-    const service = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes, [oneRetryNow]);
+    const service = build(providerWhereRetryEnds('succeeded'), reads, writes, [oneRetryNow]);
     const subscription = await seedSubscription(writes, 'active');
     const payment = await seedPayment(writes, subscription.id, '19.99', 'USD');
     await orThrow(service.scheduleRetries(payment.id, 'card_declined'));
@@ -241,15 +247,15 @@ describe('getRetryAnalytics', () => {
 
 describe('retry strategies belong to one service', () => {
   it('adding or changing a strategy on one service leaves the defaults of the next one alone', () => {
-    const first = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes);
+    const first = build(providerWhereRetryEnds('succeeded'), reads, writes);
     const defaults = structuredClone(first.getRetryStrategies());
     const [standard] = defaults;
     if (!standard) throw new Error('the package ships default strategies');
 
-    first.addRetryStrategy({ ...oneRetryNow, name: 'only_this_instance' });
-    first.updateRetryStrategy(standard.name, { maxAttempts: 9 });
+    expect(first.addRetryStrategy({ ...oneRetryNow, name: 'only_this_instance' })).toBeUndefined();
+    expect(first.updateRetryStrategy(standard.name, { maxAttempts: 9 })).toBeUndefined();
 
-    const second = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes);
+    const second = build(providerWhereRetryEnds('succeeded'), reads, writes);
     expect(second.getRetryStrategies()).toEqual(defaults);
   });
 });
@@ -263,21 +269,30 @@ describe('a strategy the schedule cannot follow fails where it is set', () => {
   ];
 
   it.each(unusable)('%s is payments.configuration_invalid, and changes nothing', (_what, change) => {
-    const service = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes);
+    const service = build(providerWhereRetryEnds('succeeded'), reads, writes);
     const before = structuredClone(service.getRetryStrategies());
     const [first] = before;
     if (!first) throw new Error('the package ships default strategies');
 
     expect(
-      () =>
-        new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes, [{ ...oneRetryNow, ...change }]),
-    ).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
-    expect(() => service.addRetryStrategy({ ...oneRetryNow, ...change })).toThrow(
-      expect.objectContaining({ code: 'payments.configuration_invalid' }),
-    );
-    expect(() => service.updateRetryStrategy(first.name, change)).toThrow(
-      expect.objectContaining({ code: 'payments.configuration_invalid' }),
-    );
+      PaymentRetryService.create(providerWhereRetryEnds('succeeded'), reads, writes, [{ ...oneRetryNow, ...change }]),
+    ).toMatchObject({ code: 'payments.configuration_invalid' });
+    expect(service.addRetryStrategy({ ...oneRetryNow, ...change })).toMatchObject({
+      code: 'payments.configuration_invalid',
+    });
+    expect(service.updateRetryStrategy(first.name, change)).toMatchObject({ code: 'payments.configuration_invalid' });
     expect(service.getRetryStrategies()).toEqual(before);
+  });
+
+  it('more than MAX_BATCH_ITEMS strategies, or delays in one, are payments.configuration_invalid', () => {
+    const many = Array.from({ length: MAX_BATCH_ITEMS + 1 }, (_, index) => ({ ...oneRetryNow, name: `s${index}` }));
+    const manyDelays = { ...oneRetryNow, delayMinutes: Array.from({ length: MAX_BATCH_ITEMS + 1 }, () => 1) };
+
+    expect(PaymentRetryService.create(providerWhereRetryEnds('succeeded'), reads, writes, many)).toMatchObject({
+      code: 'payments.configuration_invalid',
+    });
+    expect(PaymentRetryService.create(providerWhereRetryEnds('succeeded'), reads, writes, [manyDelays])).toMatchObject({
+      code: 'payments.configuration_invalid',
+    });
   });
 });

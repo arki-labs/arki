@@ -15,8 +15,10 @@ import type { RefundsTables } from './tables.js';
 import type { Refund } from './types.js';
 import { fromMinorColumn, toMinorColumn } from '../core/money.js';
 import { isPgInstant, pgTextSchema } from '../core/pg-values.js';
+import { refundReasonValues, refundStatusValues } from './primitives.js';
 import { invariant } from '@arki/failure';
 import { is } from '@arki/schema';
+import { z } from '@arki/contracts';
 
 /**
  * Structural database type for the refunds repository. Only uses
@@ -42,6 +44,10 @@ function fitsAmountColumn(amount: Money): boolean {
   const whole = amount.toScale(amount.currency.scale, 'halfEven');
   return whole.eq(amount) && whole.abs().toMinorBigInt() <= BigInt(Number.MAX_SAFE_INTEGER);
 }
+
+/** The refund statuses and reasons a row can hold: another text matches no row, and Postgres refuses it as an enum (SQLSTATE 22P02). */
+const refundStatusSchema = z.enum(refundStatusValues);
+const refundReasonSchema = z.enum(refundReasonValues);
 
 export type RefundsDatabase =
   | NodePgDatabase<AnyRelations>
@@ -90,7 +96,9 @@ export class RefundRepository {
       .orderBy(desc(this.refunds.createdAt));
   }
 
+  /** Empty too for a text that is not a refund status, without a query. */
   async findByStatus(status: RefundStatus): Promise<Refund[]> {
+    if (!is(status, refundStatusSchema)) return [];
     return this.db
       .select()
       .from(this.refunds)
@@ -214,7 +222,7 @@ export class RefundRepository {
    * The refunds that match every filter given, newest first. `startDate` and `endDate` fall in the years
    * 1 to 9999, and `minAmount` and `maxAmount` are whole minor units of their currency, at most 2^53 - 1 of
    * them, as the amount column holds; anything else throws `FailureError` (`invariant`) before a query.
-   * A `userId` no row can hold (U+0000) matches none.
+   * A `userId` no row can hold (U+0000), or a `status` or `reason` that is not a refund status or reason, matches none.
    */
   async searchRefunds(filters: {
     status?: RefundStatus;
@@ -236,6 +244,8 @@ export class RefundRepository {
       'searchRefunds needs amount bounds in whole minor units, at most 2^53 - 1 of them',
     );
     if (!findable(filters.userId)) return [];
+    if (filters.status !== undefined && !is(filters.status, refundStatusSchema)) return [];
+    if (filters.reason !== undefined && !is(filters.reason, refundReasonSchema)) return [];
     const conditions = [];
 
     if (filters.status) {

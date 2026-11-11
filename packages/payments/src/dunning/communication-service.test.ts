@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { add, fromDate, now, toMillis } from '@arki/date';
 import { findDatabaseError } from '@arki/db/errors';
-import { FAILURE_ERROR_CODES, InvalidInput, orThrow, UnexpectedFailure } from '@arki/failure';
+import { FAILURE_ERROR_CODES, InvalidInput, isFailure, orThrow } from '@arki/failure';
 
 import type { DunningExecutionId } from './primitives.js';
 import type {
@@ -36,7 +36,7 @@ import {
   NotificationProviderTimeout,
   NotificationWebhookHostNotAllowed,
 } from './failures.js';
-import { createDunningExecutionId, createDunningTemplateId } from './primitives.js';
+import { createDunningCommunicationId, createDunningExecutionId, createDunningTemplateId } from './primitives.js';
 import { createDunningCommunicationRepository } from './repository.js';
 import { DunningCampaignService } from './services/campaign-service.js';
 import {
@@ -88,8 +88,8 @@ const request: CommunicationRequest = {
   personalizations: { customer_name: 'Ada' },
 };
 
-function email(timeoutMs = 2000) {
-  return new EmailProvider({
+function emailResult(timeoutMs = 2000) {
+  return EmailProvider.create({
     apiKey: 're_test',
     fromEmail: 'billing@example.com',
     fromName: 'Billing',
@@ -98,8 +98,12 @@ function email(timeoutMs = 2000) {
   });
 }
 
-function sms(timeoutMs = 2000) {
-  return new SMSProvider({
+function email(timeoutMs = 2000) {
+  return orThrow(emailResult(timeoutMs));
+}
+
+function smsResult(timeoutMs = 2000) {
+  return SMSProvider.create({
     accountSid: 'AC123',
     authToken: 'secret',
     fromNumber: '+15550000000',
@@ -108,19 +112,23 @@ function sms(timeoutMs = 2000) {
   });
 }
 
-/** The local test server is the only host the webhook may reach. */
-function webhook(timeoutMs = 2000) {
-  return new WebhookProvider({ allowedHosts: ['127.0.0.1'], defaultHeaders: {}, timeoutMs });
+function sms(timeoutMs = 2000) {
+  return orThrow(smsResult(timeoutMs));
 }
 
-/** The code of the failure a boot-time setup throws. */
+/** The local test server is the only host the webhook may reach. */
+function webhookResult(timeoutMs = 2000) {
+  return WebhookProvider.create({ allowedHosts: ['127.0.0.1'], defaultHeaders: {}, timeoutMs });
+}
+
+function webhook(timeoutMs = 2000) {
+  return orThrow(webhookResult(timeoutMs));
+}
+
+/** The code of the failure a boot-time setup returns; nothing is thrown. */
 function bootFailureCode(build: () => unknown): string | undefined {
-  try {
-    build();
-  } catch (error) {
-    return error instanceof UnexpectedFailure ? error.code : undefined;
-  }
-  return undefined;
+  const built = build();
+  return isFailure(built) ? built.code : undefined;
 }
 
 const dunning = createDunningTables({
@@ -190,6 +198,17 @@ describe('EmailProvider (Resend)', () => {
     expect(JSON.parse(lastRequest?.body ?? '{}')).toMatchObject({
       subject: 'Payment failed for Ada',
       html: 'Hello Ada, please update your card',
+    });
+  });
+
+  it('inserts a personalization literally: $& and $` in a value are not replacement patterns', async () => {
+    answerWith({ status: 200, body: JSON.stringify({ id: 'email_124' }) });
+
+    orThrow(await email().send({ ...request, personalizations: { customer_name: "A$&B$`C$'D$$" } }));
+
+    expect(JSON.parse(lastRequest?.body ?? '{}')).toMatchObject({
+      subject: "Payment failed for A$&B$`C$'D$$",
+      html: "Hello A$&B$`C$'D$$, please update your card",
     });
   });
 
@@ -273,12 +292,44 @@ describe('a provider that cannot be reached, or a message id it cannot be asked 
   };
 
   it('send and getDeliveryStatus throw PaymentProviderError unavailable (retryable), with the network error as cause', async () => {
-    const provider = new EmailProvider(offline);
+    const provider = orThrow(EmailProvider.create(offline));
 
     await expect(provider.send(request)).rejects.toSatisfy(unavailable);
     await expect(provider.getDeliveryStatus('email_123')).rejects.toSatisfy(
       error => unavailable(error) && error instanceof Error && error.cause instanceof Error,
     );
+  });
+
+  it('an apiKey, token or apiBaseUrl fetch would refuse before sending fails at boot, so unavailable means a real outage', () => {
+    const base = { apiKey: 're_test', fromEmail: 'billing@example.com', fromName: 'Billing' };
+    const smsBase = { accountSid: 'AC123', authToken: 'secret', fromNumber: '+15550000000' };
+    for (const apiKey of ['re_\nInjected: 1', 're_\u0000', 're_\u2028', 're_\uD800']) {
+      expect(bootFailureCode(() => EmailProvider.create({ ...base, apiKey }))).toBe('payments.configuration_invalid');
+      expect(bootFailureCode(() => SMSProvider.create({ ...smsBase, authToken: apiKey }))).toBe(
+        'payments.configuration_invalid',
+      );
+      expect(bootFailureCode(() => SMSProvider.create({ ...smsBase, accountSid: apiKey }))).toBe(
+        'payments.configuration_invalid',
+      );
+    }
+    for (const apiBaseUrl of ['not a url', 'ftp://api.resend.com', 'https://user:pass@api.resend.com', '']) {
+      expect(bootFailureCode(() => EmailProvider.create({ ...base, apiBaseUrl }))).toBe(
+        'payments.configuration_invalid',
+      );
+      expect(bootFailureCode(() => SMSProvider.create({ ...smsBase, apiBaseUrl }))).toBe(
+        'payments.configuration_invalid',
+      );
+    }
+    const badHeaders: Record<string, string>[] = [{ 'Bad Name': 'v' }, { 'X-Ok': 'line\r\nbreak' }];
+    for (const defaultHeaders of badHeaders) {
+      expect(
+        bootFailureCode(() => WebhookProvider.create({ allowedHosts: ['127.0.0.1'], defaultHeaders, timeoutMs: 1000 })),
+      ).toBe('payments.configuration_invalid');
+    }
+    // Latin-1 text a header carries is accepted
+    expect(
+      orThrow(EmailProvider.create({ ...base, apiKey: 're_\u00E9', apiBaseUrl: 'https://api.resend.com' })).channel,
+    ).toBe('email');
   });
 
   it('a message id with a lone UTF-16 surrogate returns schema.invalid_input and makes no request', async () => {
@@ -437,14 +488,26 @@ describe('WebhookProvider', () => {
   });
 
   it('an empty allowedHosts, or an entry that is not a bare hostname, fails at boot with payments.configuration_invalid', () => {
-    const empty = () => new WebhookProvider({ allowedHosts: [], defaultHeaders: {}, timeoutMs: 1000 });
+    const empty = () => WebhookProvider.create({ allowedHosts: [], defaultHeaders: {}, timeoutMs: 1000 });
     const withScheme = () =>
-      new WebhookProvider({ allowedHosts: ['https://hooks.example.com'], defaultHeaders: {}, timeoutMs: 1000 });
+      WebhookProvider.create({ allowedHosts: ['https://hooks.example.com'], defaultHeaders: {}, timeoutMs: 1000 });
     const factory = () => createCommunicationOrchestrationService(db, tables, { webhook: { allowedHosts: [] } });
 
     expect(bootFailureCode(empty)).toBe('payments.configuration_invalid');
     expect(bootFailureCode(withScheme)).toBe('payments.configuration_invalid');
     expect(bootFailureCode(factory)).toBe('payments.configuration_invalid');
+  });
+
+  it('a recipient URL with a user name or password returns schema.invalid_input and sends nothing, where fetch would throw', async () => {
+    const before = requestCount;
+
+    const refused = await webhook().send({
+      ...request,
+      recipient: origin.replace('http://', 'http://user:pw@') + '/hook',
+    });
+
+    expect(refused).toMatchObject({ code: 'schema.invalid_input' });
+    expect(requestCount).toBe(before);
   });
 
   it('tracking data with a bigint returns schema.invalid_input and sends nothing, where JSON.stringify would throw', async () => {
@@ -458,9 +521,9 @@ describe('WebhookProvider', () => {
 
   it('a timeoutMs no timer can wait fails at boot with payments.configuration_invalid, for every timed provider', () => {
     for (const timeoutMs of [Number.NaN, 0, -1, 1.5, Number.POSITIVE_INFINITY, 2 ** 31]) {
-      expect(bootFailureCode(() => webhook(timeoutMs))).toBe('payments.configuration_invalid');
-      expect(bootFailureCode(() => email(timeoutMs))).toBe('payments.configuration_invalid');
-      expect(bootFailureCode(() => sms(timeoutMs))).toBe('payments.configuration_invalid');
+      expect(bootFailureCode(() => webhookResult(timeoutMs))).toBe('payments.configuration_invalid');
+      expect(bootFailureCode(() => emailResult(timeoutMs))).toBe('payments.configuration_invalid');
+      expect(bootFailureCode(() => smsResult(timeoutMs))).toBe('payments.configuration_invalid');
     }
     const factory = () =>
       createCommunicationOrchestrationService(db, tables, {
@@ -473,7 +536,7 @@ describe('WebhookProvider', () => {
   });
 
   it('the webhook channel is off unless it is configured', async () => {
-    const service = createCommunicationOrchestrationService(db, tables);
+    const service = orThrow(createCommunicationOrchestrationService(db, tables));
 
     expect(await service.validateProviders()).toEqual({});
   });
@@ -741,12 +804,14 @@ describe('CommunicationOrchestrationService.sendCommunication', () => {
   it('a provider that cannot be reached is thrown as unavailable after the row is marked failed', async () => {
     const service = new CommunicationOrchestrationService(db, tables);
     service.registerProvider(
-      new EmailProvider({
-        apiKey: 're_test',
-        fromEmail: 'billing@example.com',
-        fromName: 'Billing',
-        apiBaseUrl: 'http://127.0.0.1:1',
-      }),
+      orThrow(
+        EmailProvider.create({
+          apiKey: 're_test',
+          fromEmail: 'billing@example.com',
+          fromName: 'Billing',
+          apiBaseUrl: 'http://127.0.0.1:1',
+        }),
+      ),
     );
     const { execution, template } = await scheduledExecution();
 
@@ -762,12 +827,14 @@ describe('CommunicationOrchestrationService.sendCommunication', () => {
   it('when marking the row failed fails too, both errors are thrown, the send error first', async () => {
     const service = new CommunicationOrchestrationService(db, tables);
     service.registerProvider(
-      new EmailProvider({
-        apiKey: 're_test',
-        fromEmail: 'billing@example.com',
-        fromName: 'Billing',
-        apiBaseUrl: 'http://127.0.0.1:1',
-      }),
+      orThrow(
+        EmailProvider.create({
+          apiKey: 're_test',
+          fromEmail: 'billing@example.com',
+          fromName: 'Billing',
+          apiBaseUrl: 'http://127.0.0.1:1',
+        }),
+      ),
     );
     const { execution, template } = await scheduledExecution();
     // New writes of `failed` are refused; rows other tests already failed stay as they are
@@ -1092,5 +1159,25 @@ describe('the communication doors answer an id, time or JSON Postgres would refu
       providerResponse: null,
       trackingData: null,
     });
+  });
+});
+
+describe('the communication doors refuse a choice no row has (hostile-input gate)', () => {
+  it('listCommunications and updateCommunicationStatus return schema.invalid_input for a sortBy or status outside their lists', async () => {
+    const service = orThrow(createCommunicationOrchestrationService(db, tables));
+
+    expect(
+      // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+      await service.listCommunications({ limit: 20, offset: 0, sortBy: 'bad column', sortOrder: 'desc' }),
+    ).toMatchObject({
+      code: 'schema.invalid_input',
+    });
+    expect(
+      await service.updateCommunicationStatus({
+        communicationId: orThrow(createDunningCommunicationId()),
+        // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+        status: '\u0000',
+      }),
+    ).toMatchObject({ code: 'schema.invalid_input' });
   });
 });

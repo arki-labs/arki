@@ -342,13 +342,13 @@ export class SubscriptionManager {
 
   /**
    * What a move to `newPlanId` would cost, from the provider. Returns the preview, or a failure:
-   * `ReferenceNotFound`, `PlanInactive`, or what the provider returned.
+   * `ReferenceNotFound`, `PlanInactive`, or what the provider returned (its `InvalidInput` among them).
    */
   async previewSubscriptionChange(
     subscriptionId: SubscriptionId,
     newPlanId: PlanId,
     options: SubscriptionChangeOptions = {},
-  ): Promise<Result<SubscriptionPreview, NotFound | Inactive | MoneyFailure>> {
+  ): Promise<Result<SubscriptionPreview, NotFound | Inactive | MoneyFailure | SchemaFailure>> {
     const subscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
     if (!subscription) return ReferenceNotFound({ kind: 'subscription', id: subscriptionId, missing: 'row' });
 

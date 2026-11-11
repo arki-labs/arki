@@ -117,7 +117,7 @@ describe('customer risk profile queries', () => {
   it('findByRiskCategory filters on the jsonb category and sorts by the jsonb score', async () => {
     await db.insert(dunning.customerRiskProfiles).values(profile('high', 80, ['seg_a']));
 
-    const found = await repositories.customerRiskProfiles.findByRiskCategory('high');
+    const found = orThrow(await repositories.customerRiskProfiles.findByRiskCategory('high'));
 
     expect(found.map(row => row.riskScore.category)).toEqual(['high']);
     expect(await repositories.customerRiskProfiles.findByRiskCategory('low')).toEqual([]);
@@ -166,12 +166,9 @@ describe('campaign and segment queries', () => {
   });
 
   it('findMany sorts campaigns by a schema column', async () => {
-    const found = await repositories.campaigns.findMany({
-      limit: 10,
-      offset: 0,
-      sortBy: 'name',
-      sortOrder: 'desc',
-    });
+    const found = orThrow(
+      await repositories.campaigns.findMany({ limit: 10, offset: 0, sortBy: 'name', sortOrder: 'desc' }),
+    );
 
     expect(found.map(campaign => campaign.name)).toEqual(['Retry']);
   });

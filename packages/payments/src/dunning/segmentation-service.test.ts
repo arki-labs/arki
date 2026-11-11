@@ -471,3 +471,17 @@ describe('the segmentation doors answer an id holding U+0000 as unknown (audit 4
     expect(orThrow(await service.calculateCustomerRiskScore(known.id))).toMatchObject({ category: expect.any(String) });
   });
 });
+
+describe('the segmentation doors refuse a choice no row has (hostile-input gate)', () => {
+  it('listSegments and getCustomersByRiskCategory return schema.invalid_input for a sortBy, type or category outside their lists', async () => {
+    const page = { limit: 20, offset: 0, sortBy: 'createdAt', sortOrder: 'desc' } as const;
+    const nul = '\u0000';
+
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await service.listSegments({ ...page, sortBy: 'id; drop table x' })).toMatchObject({ code: 'schema.invalid_input' });
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await service.listSegments({ ...page, type: nul })).toMatchObject({ code: 'schema.invalid_input' });
+    // @ts-expect-error a value outside the declared type, as a hostile caller sends it
+    expect(await service.getCustomersByRiskCategory(nul)).toMatchObject({ code: 'schema.invalid_input' });
+  });
+});

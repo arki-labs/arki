@@ -8,7 +8,12 @@
  * two of them.
  */
 
+import type { SchemaFailure } from '@arki/failure';
+import { z } from '@arki/contracts';
+import { isFailure } from '@arki/failure';
 import { MoneyBag } from '@arki/money/bag';
+import { currencyCodeSchema } from '@arki/money/zod';
+import { parse } from '@arki/schema';
 
 import type { DunningCampaignId } from './primitives.js';
 import { fromMinorColumn } from '../core/money.js';
@@ -25,12 +30,33 @@ export function analyticsRowId(campaignId: DunningCampaignId, day: string, curre
   return `${campaignId}-${day}-${currency.toUpperCase()}`;
 }
 
+/** One analytics row's money: an ISO 4217 code in any case, and whole minor units (a safe integer, or the digits of one). */
+const minorRowSchema = z.object({
+  currency: z
+    .string()
+    .transform(code => code.toUpperCase())
+    .pipe(currencyCodeSchema),
+  units: z.union([
+    z.number().int(),
+    z
+      .string()
+      .regex(/^-?\d{1,16}$/)
+      .refine(digits => Math.abs(Number(digits)) <= Number.MAX_SAFE_INTEGER, 'Units must be a safe integer'),
+  ]),
+});
+
 /**
  * Sums `(currency, minor units)` pairs into one bag, a balance per currency. It folds row by row
  * instead of spreading the rows into one call, so any number of rows fits (a spread past about
- * 150,000 arguments throws `RangeError`). Throws `NumericRangeError` or `UnknownCurrencyError` for a
- * stored row whose units or currency `fromMinorColumn` cannot read.
+ * 150,000 arguments throws `RangeError`); the rows are a stored result set, not a caller batch, so
+ * they have no `MAX_BATCH_ITEMS` cap. A row whose currency is not an ISO 4217 code, or whose units are
+ * not a safe whole number (a fraction, `NaN`, past 2^53 - 1, text that is not digits), returns
+ * `schema.invalid_input` and sums nothing.
  */
-export function sumMinorByCurrency(rows: readonly { currency: string; units: number | string }[]): MoneyBag {
+export function sumMinorByCurrency(
+  rows: readonly { currency: string; units: number | string }[],
+): MoneyBag | SchemaFailure {
+  const checked = parse(z.array(minorRowSchema), rows);
+  if (isFailure(checked)) return checked;
   return rows.reduce((bag, row) => bag.plus(fromMinorColumn(row.units, row.currency)), MoneyBag.of());
 }

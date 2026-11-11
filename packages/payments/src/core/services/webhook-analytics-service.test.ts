@@ -22,7 +22,7 @@ let service: WebhookAnalyticsService;
 
 beforeAll(async () => {
   ({ client } = await openDb());
-  service = new WebhookAnalyticsService(new PaymentRepository(drizzle({ client, relations }), core));
+  service = orThrow(WebhookAnalyticsService.create(new PaymentRepository(drizzle({ client, relations }), core)));
 });
 
 afterAll(async () => {
@@ -81,7 +81,9 @@ describe('WebhookAnalyticsService refuses numbers it cannot use', () => {
   it.each([Number.NaN, -1, Number.POSITIVE_INFINITY])(
     'recordProcessingTime(%s) breaks the stated precondition and records nothing',
     processingTime => {
-      const fresh = new WebhookAnalyticsService(new PaymentRepository(drizzle({ client, relations }), core));
+      const fresh = orThrow(
+        WebhookAnalyticsService.create(new PaymentRepository(drizzle({ client, relations }), core)),
+      );
 
       expect(() => fresh.recordProcessingTime(processingTime)).toThrow(
         expect.objectContaining({ code: FAILURE_ERROR_CODES.invariant }),
@@ -95,9 +97,12 @@ describe('WebhookAnalyticsService refuses numbers it cannot use', () => {
     ['a negative slow-processing time', { errorRate: 5, slowProcessing: -1, maxAlerts: 100 }],
     ['a fractional alert count', { errorRate: 5, slowProcessing: 5000, maxAlerts: 1.5 }],
     ['no room for any alert', { errorRate: 5, slowProcessing: 5000, maxAlerts: 0 }],
-  ])('%s fails when the service is built, as payments.configuration_invalid', (_what, thresholds) => {
-    expect(
-      () => new WebhookAnalyticsService(new PaymentRepository(drizzle({ client, relations }), core), thresholds),
-    ).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
+  ])('%s is returned as payments.configuration_invalid when the service is built', (_what, thresholds) => {
+    const built = WebhookAnalyticsService.create(
+      new PaymentRepository(drizzle({ client, relations }), core),
+      thresholds,
+    );
+
+    expect(built).toMatchObject({ code: 'payments.configuration_invalid' });
   });
 });

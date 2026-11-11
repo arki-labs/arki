@@ -17,8 +17,7 @@ import type { Payment } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
 import { createCustomerId, createPaymentId } from '../primitives.js';
 import { IdempotencyConflict } from './provider-error.js';
-import { StripeProvider } from './stripe-provider.js';
-import { createFakeStripeHttp } from './stripe-test-support.js';
+import { createFakeStripeHttp, stripeProviderOf } from './stripe-test-support.js';
 
 const CREATED = 1_767_225_600;
 
@@ -49,7 +48,7 @@ function paymentRow(overrides: Partial<Payment> = {}): Payment {
 
 function provider(row: Payment, respond: (request: RecordedStripeRequest) => { status?: number; body: unknown }) {
   const http = createFakeStripeHttp(respond);
-  const stripe = new StripeProvider(
+  const stripe = stripeProviderOf(
     { apiKey: 'sk_test_units', webhookSecret: 'whsec_units', environment: 'sandbox' },
     {
       references: {
@@ -353,7 +352,7 @@ const calculation = (request: RecordedStripeRequest) => ({
 
 function taxProvider() {
   const http = createFakeStripeHttp(calculation);
-  const stripe = new StripeProvider(
+  const stripe = stripeProviderOf(
     { apiKey: 'sk_test_units', webhookSecret: 'whsec_units', environment: 'sandbox' },
     { httpClient: http.client, maxNetworkRetries: 0 },
   );

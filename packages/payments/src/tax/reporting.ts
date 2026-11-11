@@ -1,14 +1,14 @@
 import type { Instant } from '@arki/date';
 import { compareAsc, fromDate, now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
-import type { FailureOf } from '@arki/failure';
+import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure, unreachable } from '@arki/failure';
-import { is } from '@arki/schema';
+import { is, parse } from '@arki/schema';
 import { Money, sum } from '@arki/money';
 
 import type { PaymentRepository } from '../core/repository.js';
 import type { CustomerId } from '../core/types.js';
-import type { ExemptionType } from './primitives.js';
+import type { ExemptionType, TaxAuditAction, TaxAuditEntity } from './primitives.js';
 import type {
   TaxAuditRepository,
   TaxConfigurationRepository,
@@ -17,7 +17,7 @@ import type {
   TaxRecordRepository,
 } from './repository.js';
 import type { ExportTaxDataInput } from './contracts.js';
-import { getCustomerAnnualSummaryInputSchema } from './contracts.js';
+import { exportTaxDataInputSchema, getCustomerAnnualSummaryInputSchema } from './contracts.js';
 import type { TaxExemption } from './types.js';
 import { moneyJsonSchema, nonNegativeMoneySchema } from '../core/money.js';
 import { StoredTaxInvalid } from './failures.js';
@@ -117,8 +117,8 @@ type StoredTaxFailure = FailureOf<typeof StoredTaxInvalid>;
 export type TaxAuditEntry = {
   id: string;
   timestamp: Instant;
-  action: 'calculate' | 'apply' | 'refund' | 'exempt' | 'report';
-  entity: 'payment' | 'subscription' | 'customer' | 'exemption';
+  action: TaxAuditAction;
+  entity: TaxAuditEntity;
   entityId: string;
   details: {
     before?: unknown;
@@ -477,6 +477,8 @@ export class TaxReportingService {
    * CSV values are quoted when they need it, and text that a spreadsheet would run as a formula is
    * prefixed with a quote. XML text is escaped, and characters XML 1.0 cannot hold are dropped.
    *
+   * A `format` that is not `csv`, `json` or `xml` returns `InvalidInput` (`schema.invalid_input`) before any query.
+   *
    * `period.startDate` and `period.endDate` fall in the years 1 to 9999 (UTC): another time throws
    * `FailureError` (`invariant`) before the first query. `year`, `quarter` and `month` only name the file.
    */
@@ -491,7 +493,10 @@ export class TaxReportingService {
         filename: string;
       }
     | StoredTaxFailure
+    | SchemaFailure
   > {
+    const format = parse(exportTaxDataInputSchema.shape.format, params.format);
+    if (isFailure(format)) return format;
     const aggregate = await this.aggregateLocalTransactions(params.period);
     if (isFailure(aggregate)) return aggregate;
     const exemptions = params.includeExemptions

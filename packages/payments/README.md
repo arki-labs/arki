@@ -13,13 +13,17 @@ bun add @arki/payments
 Build the provider once at app boot, with the keys from your env. Then branch on what a call returns. A refused card is a returned value, not a throw.
 
 ```ts skip="needs Stripe keys and a customer with a saved card"
+import { orThrow } from '@arki/failure';
 import { StripeProvider } from '@arki/payments';
 
-const provider = new StripeProvider({
-  apiKey: process.env.STRIPE_SECRET_KEY ?? '',
-  webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
-  environment: 'sandbox',
-});
+// `create` returns `payments.configuration_invalid` for a bad setting (`maxNetworkRetries`); at boot, stop on it
+const provider = orThrow(
+  StripeProvider.create({
+    apiKey: process.env.STRIPE_SECRET_KEY ?? '',
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
+    environment: 'sandbox',
+  }),
+);
 ```
 
 The branch itself runs without Stripe. A provider call that charges a card returns this value when the bank says no:
@@ -171,7 +175,7 @@ Not instrumented: repositories and journal commands (the app's database driver a
 - `handleCommunicationWebhook` parses its payload with `communicationWebhookSchema` and returns `DunningCommunicationNotFound` (`payments.dunning_communication_not_found`, 404) for a provider message id no communication has.
 - A dunning write that names a row that does not exist returns that row's not-found failure, never a foreign-key error: `DunningCampaignNotFound`, `DunningTemplateNotFound`, `DunningExecutionNotFound`, or `ReferenceNotFound` for a customer, subscription or payment. A campaign or step that sent a communication cannot be deleted: `DunningTemplateInUse`.
 - A customer has one risk profile (a unique index on `customer_id`). `upsert` replaces it in one statement.
-- A notification provider that cannot be reached throws `PaymentProviderError` with code `unavailable`, like the payment providers.
+- A refund notification that did not go out (mail transport failure, Slack non-2xx, network error or timeout) returns `NotificationFailed` (`payments.notification_failed`, 502); a refund that is not a stored row is a caller bug and rejects with the `@arki/money` error. A dunning communication provider that cannot be reached at all throws `PaymentProviderError` with code `unavailable`; a provider setting `fetch` would refuse (an API key no header can carry, an API URL with credentials) throws `payments.configuration_invalid` when the provider is built.
 - The tax contracts and every tax repository write refuse what Postgres refuses, as `schema.invalid_input`: text holding U+0000 (also inside stored JSON), text longer than its `varchar` column, a bigint in JSON, a time outside the years 1 to 9999, a tax record with a negative amount or a rate of 10000 or more. A tax read given U+0000 finds nothing. A new row with an `id` another row has returns `TaxRowExists` (`payments.tax_row_exists`, 409).
 - `TaxService.createTaxTransaction` checks the records it will write before Stripe is asked, so Stripe never records a transaction the records cannot hold. A line item in another currency than the sale returns `TaxLineCurrencyMismatch` (`payments.tax_line_currency_mismatch`, 422), from `calculateTax` too.
 - A tax jurisdiction that a child jurisdiction or an exemption names cannot be deleted: `deleteJurisdiction` returns `TaxJurisdictionInUse` (`payments.tax_jurisdiction_in_use`, 409).

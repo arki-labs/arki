@@ -80,6 +80,14 @@ export const pgJsonSchema = z
   .refine(value => !holdsNul(value), 'JSON cannot contain the NUL character (U+0000)')
   .refine(value => !holdsLoneSurrogate(value), 'JSON cannot contain a lone surrogate (such as U+D800 alone)');
 
+/**
+ * The most items one call takes in a batch argument (a list of records, ids or references). A bigger
+ * batch is refused as `schema.invalid_input`; split it into calls of at most this many. Founder
+ * decision 2026-11-09: a documented cap, not unbounded batches (one SQL statement holds at most
+ * 65,535 parameters, and a long loop holds the event loop).
+ */
+export const MAX_BATCH_ITEMS = 1000;
+
 /** The largest value of a Postgres `integer` (int4) column, 2^31 - 1. A larger one is refused with SQLSTATE 22003. */
 export const INT4_MAX = 2_147_483_647;
 

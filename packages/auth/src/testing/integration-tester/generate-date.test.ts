@@ -148,3 +148,9 @@ describe('shape assertions', () => {
     expect(page.items).toEqual([1]);
   });
 });
+
+describe('getUser before setup', () => {
+  it('throws the documented "Tester not initialized" error: no users are seeded yet', () => {
+    expect(() => offlineTester().getUser('user')).toThrow('Tester not initialized. Call setup() first.');
+  });
+});

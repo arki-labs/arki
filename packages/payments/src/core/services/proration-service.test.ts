@@ -23,6 +23,7 @@ import type { PlanId } from '../primitives.js';
 import { coreReads, runnerOn, seedSubscription } from '../../service-test-support.js';
 import { core, customerId, openDb, planId, typed, userId } from '../../test-support.js';
 import { EffectiveDateOutsidePeriod, PlanCurrencyMismatch, PlanInactive } from '../failures.js';
+import { MAX_BATCH_ITEMS } from '../pg-values.js';
 import { createPlanId, createSubscriptionId } from '../primitives.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
 import { ProrationService } from './proration-service.js';
@@ -208,6 +209,21 @@ describe('the callers of calculateProration hand its failure back', () => {
     expect(Object.keys(result.previews)).toEqual([dollarPlan]);
     // The refusal is the caller's to show ("this plan is in another currency"), not a log line
     expect(result.refused).toMatchObject([{ planId: euroPlan, failure: { code: 'payments.plan_currency_mismatch' } }]);
+  });
+
+  it('previewMultiplePlanChanges refuses more than MAX_BATCH_ITEMS plan ids as schema.invalid_input, before any read', async () => {
+    const service = new ProrationService(coreReads(db));
+    const subscription = await seedSubscription(writes, 'active');
+    const tooMany = Array.from({ length: MAX_BATCH_ITEMS + 1 }, () => planId);
+
+    expect(
+      await service.previewMultiplePlanChanges(subscription.id, tooMany, { prorationBehavior: 'create_prorations' }),
+    ).toMatchObject({ code: 'schema.invalid_input' });
+    const atCap = await service.previewMultiplePlanChanges(subscription.id, tooMany.slice(0, MAX_BATCH_ITEMS), {
+      prorationBehavior: 'create_prorations',
+      effectiveDate,
+    });
+    expect(atCap).toHaveProperty('previews');
   });
 
   it('previewMultiplePlanChanges returns reference_not_found for an unknown subscription, not an empty comparison', async () => {

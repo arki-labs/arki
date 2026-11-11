@@ -17,8 +17,7 @@ import type { RecordedStripeRequest } from './stripe-test-support.js';
 import { createRefundId } from '../../refunds/primitives.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId } from '../primitives.js';
 import { PlanPriceNotFlat } from './provider-error.js';
-import { StripeProvider } from './stripe-provider.js';
-import { createFakeStripeHttp } from './stripe-test-support.js';
+import { createFakeStripeHttp, stripeProviderOf } from './stripe-test-support.js';
 
 const T0 = 1_767_225_600;
 const T1 = 1_769_904_000;
@@ -104,7 +103,7 @@ const references = {
 
 function provider(respond: (request: RecordedStripeRequest) => { status?: number; body: unknown }) {
   const http = createFakeStripeHttp(respond);
-  const stripe = new StripeProvider(
+  const stripe = stripeProviderOf(
     { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
     { references, httpClient: http.client, maxNetworkRetries: 0 },
   );

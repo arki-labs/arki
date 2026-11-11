@@ -7,8 +7,9 @@ import { describe, expect, it } from 'vitest';
 import { FAILURE_ERROR_CODES, FailureError } from '@arki/failure';
 
 import { core, openDb, rejectionOf, userId, users } from '../../test-support.js';
+import { MAX_BATCH_ITEMS } from '../pg-values.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
-import { lockReferences, sameJson, writtenRow } from './support.js';
+import { lockReferences, sameJson, toInstant, toNullableInstant, writtenRow } from './support.js';
 
 describe('sameJson', () => {
   it('compares arrays item by item and objects by key, in any key order', () => {
@@ -26,6 +27,22 @@ describe('writtenRow', () => {
     expect(error).toBeInstanceOf(FailureError);
     expect(error).toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
   });
+});
+
+describe('toInstant and toNullableInstant', () => {
+  it('read back a timestamp the event schema accepted, and keep null', () => {
+    expect(toInstant('2026-01-15T10:00:00Z').toString()).toBe('2026-01-15T10:00:00Z');
+    expect(toNullableInstant('2026-01-15T12:00:00+02:00')?.toString()).toBe('2026-01-15T10:00:00Z');
+    expect(toNullableInstant(null)).toBeNull();
+  });
+
+  it.each(['not a time', '', '2026-01-15', '2026-01-15T10:00:00', '2026-02-30T10:00:00Z'])(
+    'a non-timestamp %j breaks the stated precondition: the invariant failure, never a raw RangeError',
+    text => {
+      expect(() => toNullableInstant(text)).toThrow(expect.objectContaining({ code: FAILURE_ERROR_CODES.invariant }));
+      expect(() => toInstant(text)).toThrow(FailureError);
+    },
+  );
 });
 
 /** The customer's user reference, as `PaymentRepository.createCustomer` checks it. */
@@ -62,5 +79,17 @@ describe('lockReferences', () => {
     await client.close();
 
     expect(lone).toMatchObject({ code: 'payments.reference_not_found', data: { kind: 'user' } });
+  });
+
+  it('breaks its stated invariant for more than MAX_BATCH_ITEMS references, before any query', async () => {
+    const { db, client } = await openDb();
+    const references = Array.from({ length: MAX_BATCH_ITEMS + 1 }, () => userReference(userId));
+
+    const error = await db
+      .transaction(async tx => lockReferences(tx, core.customers, references))
+      .catch((error_: unknown) => error_);
+    await client.close();
+
+    expect(error).toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
   });
 });

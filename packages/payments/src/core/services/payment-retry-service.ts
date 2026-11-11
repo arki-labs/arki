@@ -1,6 +1,7 @@
 import type { Instant } from '@arki/date';
 import { z } from '@arki/contracts';
 import { add, isAfter, isBefore, isSameOrBefore, now, toMillis } from '@arki/date';
+import type { FailureOf } from '@arki/failure';
 import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { MoneyBag } from '@arki/money/bag';
@@ -9,8 +10,9 @@ import type { CoreWrites } from '../journal.js';
 import type { BasePaymentProvider } from '../providers/base-provider.js';
 import type { PaymentRepository } from '../repository.js';
 import type { Payment, PaymentId, Subscription, SubscriptionId } from '../types.js';
-import { misconfigured, PaymentWithoutSubscription } from '../failures.js';
+import { PaymentsConfigurationInvalid, PaymentWithoutSubscription } from '../failures.js';
 import { paymentAmount } from '../money.js';
+import { MAX_BATCH_ITEMS } from '../pg-values.js';
 import { CardDeclined, ReferenceNotFound } from '../providers/provider-error.js';
 
 const logger = getLogger('arki:payments:retry');
@@ -18,29 +20,32 @@ const logger = getLogger('arki:payments:retry');
 /**
  * A retry strategy. At most 10 attempts, so even an exponential backoff (the first delay doubled per
  * attempt) stays inside the dates `@arki/date` can hold; each delay is whole minutes, at most a year.
+ * Each list holds at most `MAX_BATCH_ITEMS` (1,000) items.
  */
 const retryStrategySchema = z.object({
   name: z.string().min(1),
   maxAttempts: z.number().int().min(1).max(10),
   backoffStrategy: z.enum(['linear', 'exponential', 'custom']),
-  delayMinutes: z.array(z.number().int().min(0).max(525_600)),
+  delayMinutes: z.array(z.number().int().min(0).max(525_600)).max(MAX_BATCH_ITEMS),
   conditions: z.object({
-    paymentMethods: z.array(z.string()),
-    failureReasons: z.array(z.string()),
-    subscriptionStatuses: z.array(z.string()),
+    paymentMethods: z.array(z.string()).max(MAX_BATCH_ITEMS),
+    failureReasons: z.array(z.string()).max(MAX_BATCH_ITEMS),
+    subscriptionStatuses: z.array(z.string()).max(MAX_BATCH_ITEMS),
   }),
 });
 
 export type RetryStrategy = z.output<typeof retryStrategySchema>;
 
-/** Throws `payments.configuration_invalid` for `setting` when a strategy breaks `retryStrategySchema`. */
-function checkStrategies(strategies: readonly RetryStrategy[], setting: string): void {
-  const checked = z.array(retryStrategySchema).safeParse(strategies);
+type ConfigurationInvalid = FailureOf<typeof PaymentsConfigurationInvalid>;
+
+/** Nothing, or `payments.configuration_invalid` for `setting` when a strategy breaks `retryStrategySchema`. */
+function checkStrategies(strategies: readonly RetryStrategy[], setting: string): ConfigurationInvalid | undefined {
+  const checked = z.array(retryStrategySchema).max(MAX_BATCH_ITEMS).safeParse(strategies);
   if (checked.success) return;
-  throw misconfigured(
+  return PaymentsConfigurationInvalid({
     setting,
-    checked.error.issues.map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`).join('; '),
-  );
+    problem: checked.error.issues.map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`).join('; '),
+  });
 }
 
 export type RetryAttempt = {
@@ -129,16 +134,32 @@ export class PaymentRetryService {
   private retryAttempts = new Map<string, RetryAttempt>();
   private strategies: RetryStrategy[];
 
-  constructor(
+  /** Use `PaymentRetryService.create`: it checks the strategies first. */
+  private constructor(
     private readonly paymentProvider: RetryProvider,
     private readonly paymentRepository: RetryReads,
     private readonly writes: CoreWrites,
-    strategies: RetryStrategy[] = DEFAULT_RETRY_STRATEGIES,
+    strategies: RetryStrategy[],
   ) {
-    checkStrategies(strategies, 'retry.strategies');
     // A copy: `addRetryStrategy` and `updateRetryStrategy` change this instance only, never the
     // shared defaults or the caller's array
     this.strategies = structuredClone(strategies);
+  }
+
+  /**
+   * Build the service. Returns it, or `payments.configuration_invalid` when a strategy has more than
+   * 10 attempts or a delay that is not whole minutes from 0 to a year. `strategies` default to the
+   * built-in ones; it holds at most `MAX_BATCH_ITEMS` (1,000) strategies.
+   */
+  static create(
+    paymentProvider: RetryProvider,
+    paymentRepository: RetryReads,
+    writes: CoreWrites,
+    strategies: RetryStrategy[] = DEFAULT_RETRY_STRATEGIES,
+  ): PaymentRetryService | ConfigurationInvalid {
+    const invalid = checkStrategies(strategies, 'retry.strategies');
+    if (invalid) return invalid;
+    return new PaymentRetryService(paymentProvider, paymentRepository, writes, strategies);
   }
 
   /**
@@ -477,30 +498,34 @@ export class PaymentRetryService {
   }
 
   /**
-   * Add a strategy, or replace the one with its name. Throws `payments.configuration_invalid`, and
-   * changes nothing, for a strategy with more than 10 attempts or a delay that is not whole minutes from 0 to a year.
+   * Add a strategy, or replace the one with its name. Returns nothing, or `payments.configuration_invalid`
+   * (and changes nothing) for a strategy with more than 10 attempts or a delay that is not whole minutes from 0 to a year.
    */
-  addRetryStrategy(strategy: RetryStrategy): void {
-    checkStrategies([strategy], 'retry.strategy');
+  addRetryStrategy(strategy: RetryStrategy): ConfigurationInvalid | undefined {
+    const invalid = checkStrategies([strategy], 'retry.strategy');
+    if (invalid) return invalid;
     const existingIndex = this.strategies.findIndex((s) => s.name === strategy.name);
     if (existingIndex === -1) {
       this.strategies.push(strategy);
     } else {
       this.strategies[existingIndex] = strategy;
     }
+    return;
   }
 
   getRetryStrategies(): RetryStrategy[] {
     return [...this.strategies];
   }
 
-  /** Change the named strategy. Throws `payments.configuration_invalid`, and changes nothing, when the result breaks the rules of `addRetryStrategy`. */
-  updateRetryStrategy(name: string, updates: Partial<RetryStrategy>): void {
+  /** Change the named strategy. Returns nothing, or `payments.configuration_invalid` (and changes nothing) when the result breaks the rules of `addRetryStrategy`. */
+  updateRetryStrategy(name: string, updates: Partial<RetryStrategy>): ConfigurationInvalid | undefined {
     const strategy = this.strategies.find((s) => s.name === name);
     if (strategy) {
-      checkStrategies([{ ...strategy, ...updates }], 'retry.strategy');
+      const invalid = checkStrategies([{ ...strategy, ...updates }], 'retry.strategy');
+      if (invalid) return invalid;
       Object.assign(strategy, updates);
     }
+    return;
   }
 }
 
@@ -509,6 +534,6 @@ export function createPaymentRetryService(
   paymentRepository: PaymentRepository,
   writes: CoreWrites,
   strategies?: RetryStrategy[],
-): PaymentRetryService {
-  return new PaymentRetryService(paymentProvider, paymentRepository, writes, strategies);
+): PaymentRetryService | ConfigurationInvalid {
+  return PaymentRetryService.create(paymentProvider, paymentRepository, writes, strategies);
 }

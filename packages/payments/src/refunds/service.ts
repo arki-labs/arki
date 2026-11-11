@@ -18,7 +18,7 @@ import type { RefundId } from './primitives.js';
 import type { RefundRepository, RefundsDatabase } from './repository.js';
 import type { RefundsTables } from './tables.js';
 import type { Refund, RefundApprovalData, RefundRejectionData, RefundRequestData } from './types.js';
-import { misconfigured } from '../core/failures.js';
+import { PaymentsConfigurationInvalid } from '../core/failures.js';
 import { nonNegativeMoneySchema, paymentAmount } from '../core/money.js';
 import { refundRejectionReasonSchema } from './contracts.js';
 import {
@@ -37,7 +37,7 @@ import { pendingRefundIndexName } from './tables.js';
  * The largest refund approved without a person, per currency: `{ USD: '10.00', JPY: '1500' }`.
  * Each amount is exact text in its own currency, so 10 USD and 1500 JPY are both "small".
  * A currency missing here has no small-refund rule: its refunds wait for a person.
- * Parsed once when the service is built; a bad code or amount throws there, not on a refund.
+ * Parsed once when the service is built; a bad code or amount is returned there as `payments.configuration_invalid`, not on a refund.
  */
 export const refundAutoApproveLimitsSchema = z.record(currencyCodeSchema, z.string()).transform((limits, ctx) => {
   const parsed = new Map<string, Money>();
@@ -72,7 +72,7 @@ export type RefundServiceConfig = {
   systemUserId: UserId;
   /**
    * Refund window in milliseconds. Defaults to 90 days. A whole number of 0 or more: anything else
-   * (NaN, a fraction, a negative number) throws `payments.configuration_invalid` when the service is built.
+   * (NaN, a fraction, a negative number) makes `RefundService.create` return `payments.configuration_invalid`.
    */
   refundWindowMs?: number;
   /** Small refunds approved without a person. Defaults to `DEFAULT_REFUND_AUTO_APPROVE_LIMITS`. */
@@ -130,28 +130,46 @@ export class RefundService {
   private readonly systemUserId: UserId;
   private readonly autoApproveLimits: ReadonlyMap<string, Money>;
 
-  constructor(
+  private constructor(
     private readonly refundRepository: RefundReads,
     private readonly writes: RefundWrites,
     private readonly paymentRepository: PaymentReads,
-    config: RefundServiceConfig,
+    systemUserId: UserId,
+    refundWindow: number,
+    autoApproveLimits: ReadonlyMap<string, Money>,
   ) {
-    // A NaN window compared false and turned the window off: a bad one is a configuration fault
+    this.systemUserId = systemUserId;
+    this.refundWindow = refundWindow;
+    this.autoApproveLimits = autoApproveLimits;
+  }
+
+  /**
+   * Build the service. A bad setting is returned as `PaymentsConfigurationInvalid`
+   * (`payments.configuration_invalid`): a `refundWindowMs` that is not a whole number of 0 or more
+   * (a NaN window compared false and turned the window off), or an `autoApproveLimits` with a bad
+   * currency code or amount.
+   */
+  static create(
+    refundRepository: RefundReads,
+    writes: RefundWrites,
+    paymentRepository: PaymentReads,
+    config: RefundServiceConfig,
+  ): RefundService | FailureOf<typeof PaymentsConfigurationInvalid> {
     const window = refundWindowMsSchema.safeParse(config.refundWindowMs ?? 90 * 24 * 60 * 60 * 1000);
     if (!window.success) {
-      throw misconfigured('refunds.refundWindowMs', `must be a whole number of milliseconds, 0 or more; got ${String(config.refundWindowMs)}`);
+      return PaymentsConfigurationInvalid({
+        setting: 'refunds.refundWindowMs',
+        problem: `must be a whole number of milliseconds, 0 or more; got ${String(config.refundWindowMs)}`,
+      });
     }
-    this.refundWindow = window.data;
-    this.systemUserId = config.systemUserId;
-    // A bad limit is a configuration fault: `payments.configuration_invalid` when the service is built
     const limits = refundAutoApproveLimitsSchema.safeParse(config.autoApproveLimits ?? DEFAULT_REFUND_AUTO_APPROVE_LIMITS);
     if (!limits.success) {
-      throw misconfigured(
-        'refunds.autoApproveLimits',
-        limits.error.issues.map(issue => `${issue.path.join('.') || '(limits)'}: ${issue.message}`).join('; '),
-      );
+      return PaymentsConfigurationInvalid({
+        setting: 'refunds.autoApproveLimits',
+        problem: limits.error.issues.map(issue => `${issue.path.join('.') || '(limits)'}: ${issue.message}`).join('; '),
+      });
     }
-    this.autoApproveLimits = limits.data;
+    return new RefundService(refundRepository, writes, paymentRepository, config.systemUserId, window.data, limits.data);
   }
 
   async requestRefund(
@@ -316,6 +334,7 @@ export class RefundService {
   }
 }
 
+/** A `RefundService` over the refunds table, or the `PaymentsConfigurationInvalid` of `RefundService.create`. */
 export function createRefundService(
   db: RefundsDatabase,
   tables: Pick<RefundsTables, 'refunds'>,
@@ -323,5 +342,5 @@ export function createRefundService(
   paymentRepository: PaymentRepository,
   config: RefundServiceConfig,
 ) {
-  return new RefundService(createRefundRepository(db, tables), writes, paymentRepository, config);
+  return RefundService.create(createRefundRepository(db, tables), writes, paymentRepository, config);
 }

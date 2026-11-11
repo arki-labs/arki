@@ -1,5 +1,9 @@
 import Stripe from 'stripe';
 
+import { isFailure } from '@arki/failure';
+
+import { StripeProvider } from './stripe-provider.js';
+
 /** One request the Stripe SDK sent, as Stripe would have received it. */
 export type RecordedStripeRequest = {
   method: string;
@@ -46,4 +50,14 @@ export function createFakeStripeHttp(respond: (request: RecordedStripeRequest) =
   };
 
   return { client: Stripe.createFetchHttpClient(fakeFetch), requests };
+}
+
+/**
+ * A `StripeProvider` for a test: `StripeProvider.create` with the config failure thrown, since a test
+ * that builds a provider with a good setting must get one.
+ */
+export function stripeProviderOf(...args: Parameters<typeof StripeProvider.create>): StripeProvider {
+  const provider = StripeProvider.create(...args);
+  if (isFailure(provider)) throw new Error(`Test provider config rejected: ${provider.code}`);
+  return provider;
 }

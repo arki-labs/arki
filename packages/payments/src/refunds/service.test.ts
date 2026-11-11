@@ -36,7 +36,7 @@ import type { RefundWrites } from './journal.js';
 import type { RefundReason } from './primitives.js';
 import type { RefundAutoApproveLimits } from './service.js';
 import { createPaymentId } from '../core/primitives.js';
-import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support.js';
+import { coreReads, refundReads, refundRow, refundServiceOf, runnerOn, seedPayment } from '../service-test-support.js';
 import { adminId, countEvents, eventTypesOf, openDb, refundsTables, typed, userId } from '../test-support.js';
 import {
   DuplicatePendingRefund,
@@ -57,7 +57,7 @@ let coreWrites: CoreWrites;
 let writes: RefundWrites;
 
 function serviceWith(autoApproveLimits?: RefundAutoApproveLimits) {
-  return new RefundService(refundReads(db), writes, coreReads(db), {
+  return refundServiceOf(refundReads(db), writes, coreReads(db), {
     systemUserId: adminId,
     ...(autoApproveLimits === undefined ? {} : { autoApproveLimits }),
   });
@@ -144,7 +144,7 @@ describe('requestRefund', () => {
   it('a refund for a payment past the refund window is returned as RefundWindowExceeded and pays nothing back', async () => {
     const payment = await seedPayment(coreWrites, null, '100');
     const eventsBefore = await countEvents(db);
-    const noWindow = new RefundService(refundReads(db), writes, coreReads(db), {
+    const noWindow = refundServiceOf(refundReads(db), writes, coreReads(db), {
       systemUserId: adminId,
       refundWindowMs: 0,
     });
@@ -282,18 +282,21 @@ describe('auto-approval limits per currency', () => {
     },
   );
 
-  it('turns down a limit that is not an amount of its currency when the service is built, not on a refund', () => {
-    expect(() => serviceWith({ USD: '10.001' })).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
-    expect(() => serviceWith({ NOPE: '10' })).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
+  it('returns payments.configuration_invalid for a limit that is not an amount of its currency when the service is built, not on a refund', () => {
+    for (const autoApproveLimits of [{ USD: '10.001' }, { NOPE: '10' }] as Record<string, string>[]) {
+      expect(
+        RefundService.create(refundReads(db), writes, coreReads(db), { systemUserId: adminId, autoApproveLimits }),
+      ).toMatchObject({ code: 'payments.configuration_invalid' });
+    }
   });
 
   // A NaN window compared false on every refund, so the window was silently off
   it.each([Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY])(
-    'turns down a refund window of %s milliseconds when the service is built',
+    'returns payments.configuration_invalid for a refund window of %s milliseconds when the service is built',
     refundWindowMs => {
       expect(
-        () => new RefundService(refundReads(db), writes, coreReads(db), { systemUserId: adminId, refundWindowMs }),
-      ).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
+        RefundService.create(refundReads(db), writes, coreReads(db), { systemUserId: adminId, refundWindowMs }),
+      ).toMatchObject({ code: 'payments.configuration_invalid' });
     },
   );
 });
@@ -513,7 +516,7 @@ describe('two requests at once for one payment', () => {
 
   /** Only a database-level rule can stop this: the service's own reads see no refund yet. */
   it('the database refuses the second pending refund even when the service check sees nothing', async () => {
-    const blind = new RefundService(
+    const blind = refundServiceOf(
       { ...refundReads(db), findByPaymentId: () => Promise.resolve([]) },
       writes,
       coreReads(db),
@@ -582,7 +585,7 @@ describe('transaction failures before a refund is requested', () => {
     TransactionRejected({ sqlState: '23505' }),
   ])('preserves $code and its cause without retrying', async failure => {
     let attempts = 0;
-    const service = new RefundService(
+    const service = refundServiceOf(
       refundReads(db),
       {
         ...writes,

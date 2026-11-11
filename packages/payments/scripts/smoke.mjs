@@ -8,7 +8,7 @@
 
 import { createHmac } from 'node:crypto';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import * as core from '../dist/core/index.js';
 import { fromMinorColumn, positiveMoneySchema, toMinorColumn } from '../dist/core/money.js';
@@ -77,7 +77,7 @@ const wrongIp = await security.validateWebhook(
 );
 
 // No request leaves the process: checking a webhook signature is local work
-const stripe = new StripeProvider({ apiKey: 'sk_test_smoke', webhookSecret: secret, environment: 'sandbox' });
+const stripe = orThrow(StripeProvider.create({ apiKey: 'sk_test_smoke', webhookSecret: secret, environment: 'sandbox' }));
 const stripeValid = await stripe.validateWebhook(payload, sign(payload, timestamp), String(timestamp), '1.2.3.4');
 const stripeForged = await stripe.validateWebhook(
   payload,
@@ -111,18 +111,18 @@ const badWebhook = revenueCatWebhookSchema.safeParse({ event: { type: 5 } });
 const money = fromMinorColumn(1999, 'usd');
 
 const checks = [
-  ['a correctly signed stripe webhook is valid', good.isValid, true],
+  ['a correctly signed stripe webhook is valid', isFailure(good), false],
   [
     'the same webhook twice is refused as a replay',
-    `${replay.isValid}:${String(replay.error).includes('replay')}`,
-    'false:true',
+    `${replay.code}:${replay.data?.check}`,
+    'payments.webhook_rejected:replay',
   ],
-  ['a forged signature is refused', forged.isValid, false],
-  ['a stale signature is refused', stale.isValid, false],
+  ['a forged signature is refused', `${forged.code}:${forged.data?.check}`, 'payments.webhook_rejected:signature'],
+  ['a stale signature is refused', `${stale.code}:${stale.data?.check}`, 'payments.webhook_rejected:signature'],
   [
     'an address outside the allow list is refused',
-    `${wrongIp.isValid}:${String(wrongIp.error).includes('unauthorized IP')}`,
-    'false:true',
+    `${wrongIp.code}:${wrongIp.data?.check}`,
+    'payments.webhook_rejected:source_ip',
   ],
   ['StripeProvider.validateWebhook accepts a correctly signed webhook', stripeValid.isValid, true],
   ['StripeProvider.validateWebhook answers a forged signature as not valid', stripeForged.isValid, false],

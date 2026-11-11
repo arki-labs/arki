@@ -14,6 +14,7 @@ import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import type { RefundWrites } from './journal.js';
+import type { RefundReason, RefundStatus } from './primitives.js';
 import { runnerOn, seedPayment } from '../service-test-support.js';
 import { adminId, openDb, refundsTables, rejectionOf, typed, userId } from '../test-support.js';
 import { RefundRepository } from './repository.js';
@@ -73,6 +74,18 @@ describe('RefundRepository.findByProviderRefundId with U+0000', () => {
     expect(await repo.searchRefunds({ userId: 'usr_\u0000' })).toEqual([]);
     const total = await repo.getTotalRefundedAmount('pay_\u0000', 'USD');
     expect(total.toString()).toBe('0.00 USD');
+  });
+});
+
+describe('RefundRepository with a status or reason that no row can hold', () => {
+  // The columns are enums: Postgres refused any other text with a raw 22P02 (or 22021 for U+0000)
+  it('finds nothing, without a query', async () => {
+    for (const hostile of ['\u0000', 'a\u0000b', '\uD800', 'x'.repeat(300), 'not_a_status']) {
+      const status = hostile as RefundStatus;
+      expect(await repo.findByStatus(status)).toEqual([]);
+      expect(await repo.searchRefunds({ status })).toEqual([]);
+      expect(await repo.searchRefunds({ reason: hostile as RefundReason })).toEqual([]);
+    }
   });
 });
 

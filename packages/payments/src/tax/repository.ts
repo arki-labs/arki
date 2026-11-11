@@ -7,7 +7,6 @@ import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
-import { z } from '@arki/contracts';
 import { is, parse } from '@arki/schema';
 
 import type { TaxConfigId, TaxExemptionId, TaxJurisdictionId, TaxRecordType } from './primitives.js';
@@ -34,6 +33,7 @@ import {
   taxExemptionRowSchema,
   taxJurisdictionRowSchema,
   taxRecordRowSchema,
+  taxRecordRowsSchema,
 } from './contracts.js';
 import { TaxJurisdictionInUse, TaxReferenceNotFound, TaxRowExists } from './failures.js';
 
@@ -757,7 +757,8 @@ export class TaxAuditRepository {
 
   /** The entries about one entity, oldest first. */
   async findByEntity(entity: TaxAuditRow['entity'], entityId: string): Promise<TaxAuditRow[]> {
-    if (!findable(entityId)) return [];
+    // An entity or id no row can hold has no entries
+    if (!is(entity, taxAuditRowSchema.shape.entity) || !findable(entityId)) return [];
     return this.db
       .select()
       .from(this.taxAuditEntries)
@@ -794,12 +795,12 @@ export class TaxRecordRepository {
   }
 
   /**
-   * Write the rows. A row already recorded (same type, reference, jurisdiction and rate) is left as it
-   * was. A row with a value its column cannot store returns `InvalidInput` (`taxRecordRowSchema`), and
+   * Write at most `MAX_BATCH_ITEMS` (1,000) rows; more returns `InvalidInput`. A row already recorded
+   * (same type, reference, jurisdiction and rate) is left as it was. A row with a value its column cannot store returns `InvalidInput` (`taxRecordRowSchema`), and
    * no row is written.
    */
   async recordMany(rows: NewTaxRecord[]): Promise<SchemaFailure | undefined> {
-    const checked = parse(z.array(taxRecordRowSchema), rows);
+    const checked = parse(taxRecordRowsSchema, rows);
     if (isFailure(checked)) return checked;
     if (rows.length === 0) return undefined;
     await this.db.insert(this.taxRecords).values(rows).onConflictDoNothing();
@@ -807,7 +808,8 @@ export class TaxRecordRepository {
   }
 
   async findByReference(type: TaxRecordType, reference: string): Promise<TaxRecord[]> {
-    if (!findable(reference)) return [];
+    // A type or reference no row can hold has no records
+    if (!is(type, taxRecordRowSchema.shape.type) || !findable(reference)) return [];
     return this.db
       .select()
       .from(this.taxRecords)

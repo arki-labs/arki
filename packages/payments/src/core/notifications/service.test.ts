@@ -13,7 +13,7 @@ import type { PGlite } from '@electric-sql/pglite';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
 
 import type { Refund } from '../../refunds/types.js';
 import type { AppDb } from '../../test-support.js';
@@ -23,7 +23,7 @@ import type { NotificationMail } from './service.js';
 import { createRefundId } from '../../refunds/primitives.js';
 import { coreReads, runnerOn, seedPayment, seedSubscription } from '../../service-test-support.js';
 import { openDb, typed, userId } from '../../test-support.js';
-import { NotificationFailed } from '../failures.js';
+import { NotificationFailed, PaymentsConfigurationInvalid } from '../failures.js';
 import { createPaymentId } from '../primitives.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
 import { createNotificationService, MultiChannelNotificationService, SlackNotificationService } from './service.js';
@@ -55,13 +55,15 @@ async function slackHook(status: number | null): Promise<Hook> {
 }
 
 function slackFor(url: string, timeoutMs?: number) {
-  return new SlackNotificationService({
-    webhookUrl: url,
-    adminChannel: '#refunds',
-    supportChannel: '#support',
-    adminUrl: 'https://admin.example.com',
-    timeoutMs,
-  });
+  return orThrow(
+    SlackNotificationService.create({
+      webhookUrl: url,
+      adminChannel: '#refunds',
+      supportChannel: '#support',
+      adminUrl: 'https://admin.example.com',
+      timeoutMs,
+    }),
+  );
 }
 
 /** A refund of 10.00 USD of `paymentId`, as the refunds table holds it. */
@@ -96,18 +98,20 @@ function refundOf(paymentId: PaymentId): Refund {
 /** An email service whose transport records each mail and answers with `answer(mail)`. */
 function emailWith(answer: (mail: NotificationMail) => unknown = () => ({ id: 'sent' })) {
   const sent: NotificationMail[] = [];
-  const service = createNotificationService({
-    type: 'email',
-    email: {
-      adminEmails: ['admin@example.com'],
-      supportEmail: 'support@example.com',
-      send: mail => {
-        sent.push(mail);
-        return Promise.resolve(answer(mail));
+  const service = orThrow(
+    createNotificationService({
+      type: 'email',
+      email: {
+        adminEmails: ['admin@example.com'],
+        supportEmail: 'support@example.com',
+        send: mail => {
+          sent.push(mail);
+          return Promise.resolve(answer(mail));
+        },
+        reads: coreReads(db),
       },
-      reads: coreReads(db),
-    },
-  });
+    }),
+  );
   return { service, sent };
 }
 
@@ -266,6 +270,27 @@ describe('MultiChannelNotificationService', () => {
   });
 });
 
+describe('the refund must be a stored row (the documented precondition)', () => {
+  // The refund commands store only whole minor units of a known currency; only a hand-built Refund breaks it
+  it.each([
+    ['a fractional amount', { refundAmountMinor: 10.5 }],
+    ['a NaN amount', { refundAmountMinor: Number.NaN }],
+    ['an unknown currency', { currency: 'ZZZ' }],
+  ])('%s throws an invariant failure before anything is sent', async (_what, change) => {
+    const { service: email, sent } = emailWith();
+    const multi = new MultiChannelNotificationService([email]);
+    const refund = { ...refundOf(orThrow(createPaymentId())), ...change };
+
+    await expect(email.sendRefundFailureAlert?.(refund, new Error('boom'))).rejects.toMatchObject({
+      code: FAILURE_ERROR_CODES.invariant,
+    });
+    await expect(multi.sendRefundApprovalRequest(refund)).rejects.toMatchObject({
+      code: FAILURE_ERROR_CODES.invariant,
+    });
+    expect(sent).toHaveLength(0);
+  });
+});
+
 const sendNothing = () => Promise.resolve();
 
 describe('createNotificationService refuses a config that cannot send, when it is built', () => {
@@ -295,7 +320,47 @@ describe('createNotificationService refuses a config that cannot send, when it i
         }),
     ],
     ['multi with no channel', () => createNotificationService({ type: 'multi' })],
-  ])('%s throws payments.configuration_invalid', (_name, build) => {
-    expect(build).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
+  ])('%s returns payments.configuration_invalid and builds nothing', (_name, build) => {
+    expect(PaymentsConfigurationInvalid.is(build())).toBe(true);
+  });
+
+  it('names the setting and the bad field', () => {
+    const refused = createNotificationService({
+      type: 'email',
+      email: { adminEmails: ['a@example.com'], supportEmail: 'support', send: sendNothing, reads: coreReads(db) },
+    });
+
+    expect(refused).toMatchObject({
+      code: 'payments.configuration_invalid',
+      data: { setting: 'notifications.email', problem: expect.stringContaining('supportEmail') },
+    });
+  });
+
+  it('refuses more than MAX_BATCH_ITEMS admin addresses', () => {
+    const adminEmails = Array.from({ length: 1001 }, (_, index) => `a${index}@example.com`);
+
+    expect(
+      PaymentsConfigurationInvalid.is(
+        createNotificationService({
+          type: 'email',
+          email: { adminEmails, supportEmail: 'support@example.com', send: sendNothing, reads: coreReads(db) },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('refuses a multi whose slack part is bad, and a bad email part', () => {
+    const slack = { webhookUrl: '', adminChannel: '#a', supportChannel: '#s', adminUrl: 'https://admin.example.com' };
+    const email = { adminEmails: [], supportEmail: 'support@example.com', send: sendNothing, reads: coreReads(db) };
+
+    expect(PaymentsConfigurationInvalid.is(createNotificationService({ type: 'multi', slack }))).toBe(true);
+    expect(PaymentsConfigurationInvalid.is(createNotificationService({ type: 'multi', email }))).toBe(true);
+  });
+
+  it('a status mail for a payment id holding U+0000 finds no payment, without a query', async () => {
+    const { service } = emailWith();
+    const refund = { ...refundOf(orThrow(createPaymentId())), paymentId: 'pay_a\u0000b' as PaymentId };
+
+    expect(ReferenceNotFound.is(await service.sendRefundStatusUpdate?.(refund, 'completed'))).toBe(true);
   });
 });

@@ -14,11 +14,11 @@ import type { IdGenerationFailure } from '@arki/contracts';
 import type { Failure, SchemaFailure } from '@arki/failure';
 import type { CommandFailure, DbHandle } from '@arki/journal';
 import { z } from '@arki/contracts';
-import { instant } from '@arki/date';
+import { instantSchema } from '@arki/date/zod';
 import { invariant, isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
-import { holdsLoneSurrogate, pgTextSchema } from '../pg-values.js';
+import { holdsLoneSurrogate, MAX_BATCH_ITEMS, pgTextSchema } from '../pg-values.js';
 
 /**
  * Text a journal event carries. Event data is stored in a jsonb column, which refuses U+0000
@@ -41,13 +41,25 @@ export function toIso(value: Instant): string {
   return value.toString();
 }
 
-/** Reducers build the `Instant` an `instant` column stores. */
+/**
+ * The `Instant` an `instant` column stores, from a time in event data. Reducers call it on fields the
+ * event schema already checked (`z.iso.datetime()`), so the precondition is: `iso` is an ISO 8601
+ * timestamp with `Z` or an offset. Anything else is a caller bug and throws an invariant failure
+ * (`ARKI_FAILURE_E008`), never a raw `RangeError`.
+ */
 export function toInstant(iso: string): Instant {
-  return instant(iso);
+  const parsed = instantSchema().safeParse(iso);
+  invariant(parsed.success, () => `toInstant: ${JSON.stringify(iso)} is not an ISO 8601 timestamp with Z or an offset`);
+  return parsed.data;
 }
 
+/**
+ * `toInstant` for a nullable field: `null` stays `null`. Same precondition: a string is an ISO 8601
+ * timestamp with `Z` or an offset, as the subscription event schemas guarantee; anything else throws
+ * an invariant failure (`ARKI_FAILURE_E008`).
+ */
 export function toNullableInstant(iso: string | null): Instant | null {
-  return iso === null ? null : instant(iso);
+  return iso === null ? null : toInstant(iso);
 }
 
 /**
@@ -149,12 +161,19 @@ export type RowReference<Missing> = {
  * returns its `missing()` without a query (the lookup would fail with a raw 22021); so does a value with a
  * lone surrogate, which no row holds as given (the driver writes U+FFFD in its place). A `null` or
  * `undefined` value names nothing to check. Run it in the transaction that writes.
+ *
+ * Precondition: at most `MAX_BATCH_ITEMS` (1,000) references; more breaks an `invariant`
+ * (`ARKI_FAILURE_E008`) before any query. Callers pass a fixed handful (one per foreign key they write).
  */
 export async function lockReferences<Missing>(
   db: Pick<DbHandle, 'select'>,
   table: PgTable,
   references: readonly RowReference<Missing>[],
 ): Promise<Missing | undefined> {
+  invariant(
+    references.length <= MAX_BATCH_ITEMS,
+    () => `[@arki/payments] lockReferences takes at most ${MAX_BATCH_ITEMS} references`,
+  );
   const keys = getTableConfig(table).foreignKeys.map(key => key.reference());
   for (const { column, value, missing } of references) {
     if (value === null || value === undefined) continue;

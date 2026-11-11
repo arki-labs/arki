@@ -50,7 +50,14 @@ import {
   WebhookEventNotFound,
 } from './failures.js';
 import { lockReferences } from './journal/support.js';
-import { isPgInstant, pgTextSchema, pgVarcharSchema } from './pg-values.js';
+import { INT4_MAX, isPgInstant, pgTextSchema, pgVarcharSchema } from './pg-values.js';
+import {
+  paymentProviderValues,
+  paymentStatusValues,
+  planTierValues,
+  subscriptionStatusValues,
+  webhookEventTypeValues,
+} from './primitives.js';
 import { ReferenceNotFound } from './providers/provider-error.js';
 import { claimWebhookEvent, reclaimWebhookEvent } from './webhook-claims.js';
 
@@ -63,6 +70,11 @@ type EventExists = FailureOf<typeof WebhookEventExists>;
 const FOREIGN_KEY_VIOLATION = '23503';
 /** SQLSTATE `unique_violation`. */
 const UNIQUE_VIOLATION = '23505';
+
+/** Whether a value is one of a pgEnum column's values. A lookup by any other value finds no row (Postgres would refuse it with a raw 22P02). */
+function isEnumValue(values: readonly string[], value: string): boolean {
+  return values.includes(value);
+}
 
 /** A provider id a `varchar(255)` column can hold. A lookup by any other value finds no row. */
 const providerIdSchema = pgVarcharSchema(255);
@@ -174,7 +186,9 @@ export class PaymentRepository {
     return plan ?? null;
   }
 
+  /** Empty for a tier outside `planTierValues`, with no query. */
   async findPlansByTier(tier: PlanTier): Promise<Plan[]> {
+    if (!isEnumValue(planTierValues, tier)) return [];
     return this.db
       .select()
       .from(this.plans)
@@ -311,12 +325,13 @@ export class PaymentRepository {
     return customer ?? null;
   }
 
-  /** Null too for an id no row can hold (U+0000, or past 255 characters). */
+  /** Null too for an id no row can hold (U+0000, or past 255 characters), or a provider outside `paymentProviderValues`. */
   async findCustomerByProviderCustomerId(
     providerCustomerId: string,
     provider: PaymentProviderType,
   ): Promise<Customer | null> {
     if (!providerIdSchema.safeParse(providerCustomerId).success) return null;
+    if (!isEnumValue(paymentProviderValues, provider)) return null;
     const [customer] = await this.db
       .select()
       .from(this.customers)
@@ -470,7 +485,9 @@ export class PaymentRepository {
     return subscription ?? null;
   }
 
+  /** Empty for a status outside `subscriptionStatusValues`, with no query. */
   async findSubscriptionsByStatus(status: SubscriptionStatus): Promise<Subscription[]> {
+    if (!isEnumValue(subscriptionStatusValues, status)) return [];
     return this.readSubscriptions({
       where: eq(this.subscriptions.status, status),
       orderBy: [desc(this.subscriptions.createdAt)],
@@ -479,7 +496,7 @@ export class PaymentRepository {
 
   /**
    * Subscriptions in `status` (`active` when left out) whose current period ends between the two
-   * times, both included. Both times must fall in the years 1 to 9999 (a precondition: anything
+   * times, both included. Empty for a status outside `subscriptionStatusValues`, with no query. Both times must fall in the years 1 to 9999 (a precondition: anything
    * else throws).
    */
   async findSubscriptionsEndingInRange(
@@ -489,6 +506,7 @@ export class PaymentRepository {
   ): Promise<Subscription[]> {
     assertComparable(startDate, 'startDate');
     assertComparable(endDate, 'endDate');
+    if (!isEnumValue(subscriptionStatusValues, status)) return [];
     return this.readSubscriptions({
       where: and(
         gte(this.subscriptions.currentPeriodEnd, startDate),
@@ -570,7 +588,9 @@ export class PaymentRepository {
     return payment ?? null;
   }
 
+  /** Empty for a status outside `paymentStatusValues`, with no query. */
   async findPaymentsByStatus(status: PaymentStatus): Promise<Payment[]> {
+    if (!isEnumValue(paymentStatusValues, status)) return [];
     return this.readPayments({
       where: eq(this.payments.status, status),
       orderBy: [desc(this.payments.createdAt)],
@@ -678,12 +698,13 @@ export class PaymentRepository {
     return webhookEvent ?? null;
   }
 
-  /** Null too for an id no row can hold (U+0000, or past 255 characters). */
+  /** Null too for an id no row can hold (U+0000, or past 255 characters), or a provider outside `paymentProviderValues`. */
   async findWebhookEventByProviderEventId(
     providerEventId: string,
     provider: PaymentProviderType,
   ): Promise<WebhookEvent | null> {
     if (!providerIdSchema.safeParse(providerEventId).success) return null;
+    if (!isEnumValue(paymentProviderValues, provider)) return null;
     const [webhookEvent] = await this.db
       .select()
       .from(this.webhookEvents)
@@ -694,7 +715,8 @@ export class PaymentRepository {
 
   /**
    * The oldest `limit` unprocessed events; with `belowAttempts`, only those with fewer attempts.
-   * Both are whole numbers of 0 or more (a precondition: anything else throws).
+   * Both are whole numbers of 0 or more (a precondition: anything else throws). A `belowAttempts` past
+   * the 32-bit integer range matches every event, as the `attempts` column cannot hold more.
    */
   async findUnprocessedWebhookEvents(limit = 100, belowAttempts?: number): Promise<WebhookEvent[]> {
     assertCount(limit, 'limit');
@@ -705,7 +727,7 @@ export class PaymentRepository {
       .where(
         and(
           eq(this.webhookEvents.processed, false),
-          belowAttempts === undefined ? undefined : lt(this.webhookEvents.attempts, belowAttempts),
+          belowAttempts === undefined || belowAttempts > INT4_MAX ? undefined : lt(this.webhookEvents.attempts, belowAttempts),
         ),
       )
       .orderBy(this.webhookEvents.createdAt)
@@ -734,7 +756,9 @@ export class PaymentRepository {
       .limit(limit);
   }
 
+  /** Empty for a type outside `webhookEventTypeValues`, with no query. */
   async findWebhookEventsByType(eventType: WebhookEventType): Promise<WebhookEvent[]> {
+    if (!isEnumValue(webhookEventTypeValues, eventType)) return [];
     return this.db
       .select()
       .from(this.webhookEvents)

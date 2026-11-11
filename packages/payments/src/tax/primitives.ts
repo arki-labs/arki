@@ -37,7 +37,13 @@ export const exemptionTypeValues = ['customer', 'product', 'jurisdiction', 'thre
 export const exemptionStatusValues = ['active', 'expired', 'revoked', 'pending_review'] as const;
 
 export const taxRecordTypeValues = ['sale', 'refund'] as const;
+export const taxPlanIntervalValues = ['monthly', 'yearly', 'weekly', 'daily'] as const;
+export const taxAuditActionValues = ['calculate', 'apply', 'refund', 'exempt', 'report'] as const;
+export const taxAuditEntityValues = ['payment', 'subscription', 'customer', 'exemption'] as const;
 
+export type TaxPlanInterval = (typeof taxPlanIntervalValues)[number];
+export type TaxAuditAction = (typeof taxAuditActionValues)[number];
+export type TaxAuditEntity = (typeof taxAuditEntityValues)[number];
 export type TaxRecordType = (typeof taxRecordTypeValues)[number];
 export type TaxConfigStatus = (typeof taxConfigStatusValues)[number];
 export type TaxCalculationMode = (typeof taxCalculationModeValues)[number];

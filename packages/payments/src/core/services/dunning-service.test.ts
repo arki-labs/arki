@@ -15,7 +15,7 @@ import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { isInstant } from '@arki/date';
-import { orThrow, UnexpectedFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { CommandConflict } from '@arki/journal';
 
 import type { AppDb } from '../../test-support.js';
@@ -31,11 +31,12 @@ import {
   unexpectedCall,
 } from '../../service-test-support.js';
 import { countEvents, eventTypesOf, openDb, typed, userId } from '../../test-support.js';
+import { MAX_BATCH_ITEMS } from '../pg-values.js';
 import { createPaymentId, createSubscriptionId } from '../primitives.js';
 import { CardDeclined, ReferenceNotFound } from '../providers/provider-error.js';
 import { DunningService } from './dunning-service.js';
 
-type Provider = ConstructorParameters<typeof DunningService>[0];
+type Provider = Parameters<typeof DunningService.create>[0];
 
 let db: AppDb;
 let client: PGlite;
@@ -67,14 +68,14 @@ const senders: DunningSenders = {
   },
 };
 
-/** The code of the configuration failure building or reconfiguring the service throws. */
-function bootFailureCode(build: () => unknown): string | undefined {
-  try {
-    build();
-  } catch (error) {
-    return error instanceof UnexpectedFailure ? error.code : undefined;
-  }
-  return undefined;
+/** The code of a returned failure, or nothing for a value that is not one. */
+function failureCode(result: unknown): string | undefined {
+  return isFailure(result) ? result.code : undefined;
+}
+
+/** A service built from a configuration that is valid. */
+function build(...args: Parameters<typeof DunningService.create>) {
+  return orThrow(DunningService.create(...args));
 }
 
 /** A provider where a retried payment ends in `retryStatus`, and pause and cancel go through. */
@@ -105,7 +106,7 @@ function providerWhereRetryEnds(retryStatus: PaymentStatus): Provider {
 }
 
 function dunningWith(rule: DunningRule, retryStatus: PaymentStatus = 'succeeded') {
-  return new DunningService(providerWhereRetryEnds(retryStatus), reads, writes, { rules: [rule] }, senders);
+  return build(providerWhereRetryEnds(retryStatus), reads, writes, { rules: [rule] }, senders);
 }
 
 /** A subscription whose payment just failed, with dunning started. */
@@ -245,7 +246,7 @@ describe('processDunningEvents', () => {
     async step => {
       const refusing = (subscriptionId: string) =>
         Promise.resolve(ReferenceNotFound({ kind: 'subscription', id: subscriptionId, missing: 'row' }));
-      const service = new DunningService(
+      const service = build(
         { ...providerWhereRetryEnds('succeeded'), pauseSubscription: refusing, cancelSubscription: refusing },
         reads,
         writes,
@@ -262,7 +263,7 @@ describe('processDunningEvents', () => {
   );
 
   it('a retry the card declines changes nothing: the subscription stays past due and no event is written', async () => {
-    const service = new DunningService(
+    const service = build(
       { ...providerWhereRetryEnds('succeeded'), confirmPayment: () => Promise.resolve(CardDeclined({})) },
       reads,
       writes,
@@ -297,7 +298,7 @@ describe('processDunningEvents', () => {
 describe('a refused dunning step is reported to the caller, not only logged', () => {
   it('a pause the provider refuses comes back as refused with its failure, and the row stays past due', async () => {
     const unknownToProvider = ReferenceNotFound({ kind: 'subscription', id: 'sub_gone', missing: 'provider_id' });
-    const service = new DunningService(
+    const service = build(
       { ...providerWhereRetryEnds('succeeded'), pauseSubscription: () => Promise.resolve(unknownToProvider) },
       reads,
       writes,
@@ -313,7 +314,7 @@ describe('a refused dunning step is reported to the caller, not only logged', ()
   });
 
   it('a retry the card declines and a recovered payment on a canceled subscription are both reported', async () => {
-    const declined = new DunningService(
+    const declined = build(
       { ...providerWhereRetryEnds('succeeded'), confirmPayment: () => Promise.resolve(CardDeclined({})) },
       reads,
       writes,
@@ -343,7 +344,7 @@ describe('a refused dunning step is reported to the caller, not only logged', ()
 describe('a dunning step that throws', () => {
   it('stays scheduled for the next run instead of counting as done', async () => {
     const outage = new Error('provider is down');
-    const service = new DunningService(
+    const service = build(
       { ...providerWhereRetryEnds('succeeded'), pauseSubscription: () => Promise.reject(outage) },
       reads,
       writes,
@@ -427,7 +428,7 @@ describe('what dunning does not own', () => {
       pauseSubscription: unexpectedCall('pauseSubscription'),
       cancelSubscription: unexpectedCall('cancelSubscription'),
     };
-    const service = new DunningService(provider, reads, writes, { rules: [ruleDoing('email')] }, senders);
+    const service = build(provider, reads, writes, { rules: [ruleDoing('email')] }, senders);
     const id = await failedPaymentOn(service);
     const eventsBefore = await countEvents(db);
 
@@ -475,13 +476,12 @@ describe('a step that needs a sender the app did not pass fails at boot', () => 
   const provider = () => providerWhereRetryEnds('succeeded');
 
   it('an email rule without sendEmail, the default rules without senders, or a webhook rule without sendWebhook', () => {
-    expect(bootFailureCode(() => new DunningService(provider(), reads, writes, { rules: [ruleDoing('email')] }))).toBe(
+    expect(failureCode(DunningService.create(provider(), reads, writes, { rules: [ruleDoing('email')] }))).toBe(
       'payments.configuration_invalid',
     );
-    expect(bootFailureCode(() => new DunningService(provider(), reads, writes))).toBe('payments.configuration_invalid');
+    expect(failureCode(DunningService.create(provider(), reads, writes))).toBe('payments.configuration_invalid');
     expect(
-      bootFailureCode(
-        () => new DunningService(provider(), reads, writes, { rules: [ruleDoing('webhook')] }, { sendEmail: senders.sendEmail }),
+      failureCode(DunningService.create(provider(), reads, writes, { rules: [ruleDoing('webhook')] }, { sendEmail: senders.sendEmail }),
       ),
     ).toBe('payments.configuration_invalid');
   });
@@ -489,7 +489,7 @@ describe('a step that needs a sender the app did not pass fails at boot', () => 
   it('an email rule with no template name', () => {
     const noTemplate: DunningRule = { ...ruleDoing('email'), action: { type: 'email', config: {} } };
 
-    expect(bootFailureCode(() => new DunningService(provider(), reads, writes, { rules: [noTemplate] }, senders))).toBe(
+    expect(failureCode(DunningService.create(provider(), reads, writes, { rules: [noTemplate] }, senders))).toBe(
       'payments.configuration_invalid',
     );
   });
@@ -501,22 +501,35 @@ describe('a step that needs a sender the app did not pass fails at boot', () => 
       // A disabled rule is checked too: enabling it later must not be what breaks the schedule
       const disabled: DunningRule = { ...late, enabled: false };
 
-      expect(bootFailureCode(() => new DunningService(provider(), reads, writes, { rules: [late] }))).toBe(
+      expect(failureCode(DunningService.create(provider(), reads, writes, { rules: [late] }))).toBe(
         'payments.configuration_invalid',
       );
-      expect(bootFailureCode(() => new DunningService(provider(), reads, writes, { rules: [disabled] }))).toBe(
+      expect(failureCode(DunningService.create(provider(), reads, writes, { rules: [disabled] }))).toBe(
         'payments.configuration_invalid',
       );
-      const service = new DunningService(provider(), reads, writes, { rules: [ruleDoing('pause_subscription')] });
-      expect(bootFailureCode(() => service.updateConfiguration({ rules: [late] }))).toBe('payments.configuration_invalid');
+      const service = build(provider(), reads, writes, { rules: [ruleDoing('pause_subscription')] });
+      expect(failureCode(service.updateConfiguration({ rules: [late] }))).toBe('payments.configuration_invalid');
       expect(service.getConfiguration().rules.map(rule => rule.trigger.delayDays)).toEqual([0]);
     },
   );
 
-  it('updateConfiguration refuses a rule it has no sender for and keeps the old rules', () => {
-    const service = new DunningService(provider(), reads, writes, { rules: [ruleDoing('pause_subscription')] });
+  it('more than MAX_BATCH_ITEMS rules or retry days are payments.configuration_invalid, at boot and in updateConfiguration', () => {
+    const rules = Array.from({ length: MAX_BATCH_ITEMS + 1 }, () => ruleDoing('pause_subscription'));
+    const retrySchedule = Array.from({ length: MAX_BATCH_ITEMS + 1 }, () => 1);
 
-    expect(bootFailureCode(() => service.updateConfiguration({ rules: [ruleDoing('email')] }))).toBe(
+    expect(failureCode(DunningService.create(provider(), reads, writes, { rules }))).toBe('payments.configuration_invalid');
+    expect(failureCode(DunningService.create(provider(), reads, writes, { rules: [], retrySchedule }))).toBe(
+      'payments.configuration_invalid',
+    );
+    const service = build(provider(), reads, writes, { rules: [ruleDoing('pause_subscription')] });
+    expect(failureCode(service.updateConfiguration({ retrySchedule }))).toBe('payments.configuration_invalid');
+    expect(service.getConfiguration().retrySchedule).not.toHaveLength(MAX_BATCH_ITEMS + 1);
+  });
+
+  it('updateConfiguration refuses a rule it has no sender for and keeps the old rules', () => {
+    const service = build(provider(), reads, writes, { rules: [ruleDoing('pause_subscription')] });
+
+    expect(failureCode(service.updateConfiguration({ rules: [ruleDoing('email')] }))).toBe(
       'payments.configuration_invalid',
     );
     expect(service.getConfiguration().rules.map(rule => rule.action.type)).toEqual(['pause_subscription']);
@@ -556,7 +569,7 @@ describe('a cancel step sends the reason its config names', () => {
       },
     };
     const rule: DunningRule = { ...ruleDoing('cancel_subscription'), action: { type: 'cancel_subscription', config } };
-    const service = new DunningService(provider, reads, writes, { rules: [rule] }, senders);
+    const service = build(provider, reads, writes, { rules: [rule] }, senders);
 
     await failedPaymentOn(service);
     await service.processDunningEvents();

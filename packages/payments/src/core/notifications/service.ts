@@ -2,23 +2,31 @@
  * Refund notifications: an approval request to the admins, a status mail to the customer, and a
  * failure alert to support. Email goes through a transport the app passes in (payments sends no
  * mail of its own); Slack posts to an incoming-webhook URL. A send that did not go out returns
- * `NotificationFailed`; a misconfigured service throws when it is built, never on the first send.
+ * `NotificationFailed`; a misconfigured service is refused when it is built (`payments.configuration_invalid` is returned), never on the first send.
  */
 import type { Failure } from '@arki/failure';
 import { z } from '@arki/contracts';
 import { now } from '@arki/date';
 import { isFailure } from '@arki/failure';
+import { is } from '@arki/schema';
 
 import type { Refund } from '../../refunds/types.js';
 import type { PaymentRepository } from '../repository.js';
 import { refundAmountOf } from '../../refunds/repository.js';
-import { misconfigured, NotificationFailed } from '../failures.js';
+import { NotificationFailed, PaymentsConfigurationInvalid } from '../failures.js';
+import { MAX_BATCH_ITEMS, pgTextSchema } from '../pg-values.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
 import { observePayments } from '../telemetry.js';
 
 /**
  * Sends refund notifications. Each method resolves with nothing when the notification went out,
  * or with an `@arki/failure` value when it did not. The refund itself never depends on it.
+ *
+ * Precondition: `refund` is a row this package stored (the refunds workflow and effects pass the row
+ * they read). The refund commands store only whole minor units of a currency `@arki/money` knows, so
+ * the amount always formats. A hand-built `Refund` with a fractional, `NaN` or unsafe
+ * `refundAmountMinor`, or an unknown `currency`, is a caller bug: the call throws an invariant failure
+ * (`ARKI_FAILURE_E008`, from `fromMinorColumn`) before anything is sent.
  */
 export type NotificationService = {
   sendRefundApprovalRequest?(refund: Refund): Promise<void | Failure>;
@@ -39,7 +47,7 @@ export type NotificationMail = { to: readonly string[]; subject: string; text: s
 export type SendNotificationMail = (mail: NotificationMail) => Promise<unknown>;
 
 export type EmailNotificationConfig = {
-  /** Who gets the approval requests. At least one address. */
+  /** Who gets the approval requests. At least one address, at most `MAX_BATCH_ITEMS` (1,000). */
   adminEmails: readonly string[];
   /** Who gets the failure alerts. */
   supportEmail: string;
@@ -50,7 +58,7 @@ export type EmailNotificationConfig = {
 };
 
 const emailConfigSchema = z.object({
-  adminEmails: z.array(z.email()).min(1),
+  adminEmails: z.array(z.email()).min(1).max(MAX_BATCH_ITEMS),
   supportEmail: z.email(),
   send: z.custom<SendNotificationMail>(value => typeof value === 'function', 'send must be a function'),
   reads: z.object({
@@ -65,21 +73,28 @@ const emailConfigSchema = z.object({
   }),
 });
 
-/** Throws `payments.configuration_invalid` for `setting` when `config` does not match `schema`; the problem lists each bad field. */
-function checkNotificationConfig(config: unknown, schema: z.ZodType, setting: string): void {
+/** `payments.configuration_invalid` for `setting` when `config` does not match `schema` (the problem lists each bad field), else `undefined`. */
+function notificationConfigProblem(config: unknown, schema: z.ZodType, setting: string) {
   const checked = schema.safeParse(config);
   if (checked.success) return;
-  throw misconfigured(setting, checked.error.issues.map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`).join('; '));
+  return PaymentsConfigurationInvalid({
+    setting,
+    problem: checked.error.issues.map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`).join('; '),
+  });
 }
 
 /** Refund notifications by mail, sent through the transport the app passes in. */
 export class EmailNotificationService implements NotificationService {
   private readonly config: EmailNotificationConfig;
 
-  /** Throws `payments.configuration_invalid` for a config without a transport, reads, an admin address or a valid support address. */
-  constructor(config: EmailNotificationConfig) {
-    checkNotificationConfig(config, emailConfigSchema, 'notifications.email');
+  private constructor(config: EmailNotificationConfig) {
     this.config = config;
+  }
+
+  /** Builds the service. Returns `payments.configuration_invalid` for a config without a transport, reads, an admin address or a valid support address. */
+  static create(config: EmailNotificationConfig) {
+    const problem = notificationConfigProblem(config, emailConfigSchema, 'notifications.email');
+    return problem ?? new EmailNotificationService(config);
   }
 
   async sendRefundApprovalRequest(refund: Refund) {
@@ -97,7 +112,10 @@ export class EmailNotificationService implements NotificationService {
 
   /** Mails the customer of the refund's payment. `ReferenceNotFound` when the payment or its customer is gone. */
   async sendRefundStatusUpdate(refund: Refund, status: string) {
-    const payment = await this.config.reads.findPaymentById(refund.paymentId);
+    // No stored row holds an id with U+0000, and Postgres refuses it as a parameter (SQLSTATE 22021): not found, without a query
+    const payment = is(refund.paymentId, pgTextSchema)
+      ? await this.config.reads.findPaymentById(refund.paymentId)
+      : null;
     if (!payment) return ReferenceNotFound({ kind: 'payment', id: refund.paymentId, missing: 'row' });
 
     const customer = await this.config.reads.findCustomerById(payment.customerId);
@@ -159,10 +177,14 @@ const slackConfigSchema = z.object({
 export class SlackNotificationService implements NotificationService {
   private readonly config: SlackNotificationConfig;
 
-  /** Throws `payments.configuration_invalid` for a config without a valid webhook URL, channels or admin URL. */
-  constructor(config: SlackNotificationConfig) {
-    checkNotificationConfig(config, slackConfigSchema, 'notifications.slack');
+  private constructor(config: SlackNotificationConfig) {
     this.config = config;
+  }
+
+  /** Builds the service. Returns `payments.configuration_invalid` for a config without a valid webhook URL, channels or admin URL. */
+  static create(config: SlackNotificationConfig) {
+    const problem = notificationConfigProblem(config, slackConfigSchema, 'notifications.slack');
+    return problem ?? new SlackNotificationService(config);
   }
 
   async sendRefundApprovalRequest(refund: Refund) {
@@ -287,7 +309,7 @@ const multiConfigSchema = z
   .refine(config => config.email !== undefined || config.slack !== undefined, 'multi needs email, slack or both');
 
 /**
- * Builds the notification service a config names. Throws `payments.configuration_invalid` at boot for a config that
+ * Builds the notification service a config names. Returns `payments.configuration_invalid` for a config that
  * cannot send: no transport, no webhook URL, a bad address, or a `multi` with no channel.
  *
  * @example
@@ -301,19 +323,28 @@ const multiConfigSchema = z
  *   },
  * });
  */
-export function createNotificationService(config: NotificationServiceConfig): NotificationService {
+export function createNotificationService(config: NotificationServiceConfig) {
   switch (config.type) {
     case 'email': {
-      return new EmailNotificationService(config.email);
+      return EmailNotificationService.create(config.email);
     }
     case 'slack': {
-      return new SlackNotificationService(config.slack);
+      return SlackNotificationService.create(config.slack);
     }
     case 'multi': {
-      checkNotificationConfig(config, multiConfigSchema, 'notifications.multi');
+      const problem = notificationConfigProblem(config, multiConfigSchema, 'notifications.multi');
+      if (problem) return problem;
       const services: NotificationService[] = [];
-      if (config.email) services.push(new EmailNotificationService(config.email));
-      if (config.slack) services.push(new SlackNotificationService(config.slack));
+      if (config.email) {
+        const email = EmailNotificationService.create(config.email);
+        if (isFailure(email)) return email;
+        services.push(email);
+      }
+      if (config.slack) {
+        const slack = SlackNotificationService.create(config.slack);
+        if (isFailure(slack)) return slack;
+        services.push(slack);
+      }
       return new MultiChannelNotificationService(services);
     }
   }

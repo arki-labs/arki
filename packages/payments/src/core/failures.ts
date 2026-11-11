@@ -5,7 +5,7 @@
  * from `./providers/provider-error.js`.
  */
 import { z } from '@arki/contracts';
-import { defineFailure, UnexpectedFailure } from '@arki/failure';
+import { defineFailure } from '@arki/failure';
 
 /** What a caller asked a subscription to do, in `SubscriptionInvalidState`. */
 const subscriptionActionSchema = z.enum([
@@ -210,8 +210,8 @@ export const NotificationFailed = /* @__PURE__ */ defineFailure('payments.notifi
 
 /**
  * The host app's setup of a payments service cannot work: a capability a configured step needs was
- * not passed, or a setting is empty or malformed. Thrown when the service is built (at boot), never
- * returned later as a silent no-op.
+ * not passed, or a setting is empty or malformed. Returned when the service is built (at boot) by its
+ * `create` or factory function, never thrown, and never deferred to a later call as a silent no-op.
  *
  * @fix Pass the capability or setting that `setting` names when the app builds the service.
  * @verify bun run test -- src/core/services/dunning-service.test.ts src/dunning/communication-service.test.ts
@@ -222,11 +222,3 @@ export const PaymentsConfigurationInvalid = /* @__PURE__ */ defineFailure('payme
   message: 'Payments setting {setting} is invalid: {problem}',
   remediation: 'Pass the capability or setting it names when the app builds the service.',
 });
-
-/**
- * The thrown form of `payments.configuration_invalid`, for a setting the app passed when it built a
- * service. Boot checks throw this; nothing at runtime does.
- */
-export function misconfigured(setting: string, problem: string) {
-  return new UnexpectedFailure(PaymentsConfigurationInvalid({ setting, problem }));
-}

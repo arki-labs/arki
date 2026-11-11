@@ -25,7 +25,7 @@ import type {
   ListExecutionsQuery,
   UpdateDunningCampaignInput,
 } from '../contracts.js';
-import { dunningCampaignTemplatesSchema } from '../contracts.js';
+import { dunningCampaignTemplatesSchema, executeCampaignInputSchema } from '../contracts.js';
 import type { CustomerSegmentId, DunningCampaignId, DunningCampaignStatus } from '../primitives.js';
 import type { DunningDatabase, ExecutionReferenceMissing } from '../repository.js';
 import { valueList } from '../sql-list.js';
@@ -324,9 +324,10 @@ export class DunningCampaignService {
 
   /**
    * List campaigns with filtering and pagination. `limit` and `offset` are whole numbers of 0 or more (a
-   * precondition: anything else throws an invariant failure); a `search` holding U+0000 matches nothing.
+   * precondition: anything else throws an invariant failure); a `search` holding U+0000 matches nothing. A
+   * `type`, `status` or `sortBy` outside its list returns `schema.invalid_input`.
    */
-  async listCampaigns(query: ListDunningCampaignsQuery): Promise<DunningCampaign[]> {
+  async listCampaigns(query: ListDunningCampaignsQuery): Promise<DunningCampaign[] | SchemaFailure> {
     return this.campaignRepo.findMany(query);
   }
 
@@ -341,7 +342,7 @@ export class DunningCampaignService {
   }
 
   /**
-   * Activate or deactivate a campaign
+   * Activate or deactivate a campaign. A status or actor id Postgres cannot store returns `schema.invalid_input`.
    */
   async updateCampaignStatus(
     campaignId: DunningCampaignId,
@@ -356,7 +357,9 @@ export class DunningCampaignService {
    * each eligible customer. An unknown campaign returns `DunningCampaignNotFound`, a campaign that is
    * not active `DunningCampaignNotActive`, one with no active step `DunningCampaignWithoutSteps`;
    * each writes nothing. A row deleted while the executions are written returns its not-found failure
-   * (`ExecutionReferenceMissing`); the executions written before it stay.
+   * (`ExecutionReferenceMissing`); the executions written before it stay. An input
+   * `executeCampaignInputSchema` refuses (`customFilters.customerIds` or `excludeCustomerIds` with more than
+   * `MAX_BATCH_ITEMS` (1,000) items) returns `schema.invalid_input` and runs nothing.
    */
   async executeCampaign(
     input: ExecuteCampaignInput,
@@ -369,6 +372,8 @@ export class DunningCampaignService {
     | ExecutionReferenceMissing
     | SchemaFailure
   > {
+    const checked = parse(executeCampaignInputSchema, input);
+    if (isFailure(checked)) return checked;
     const campaign = await this.campaignRepo.findById(input.campaignId);
     if (!campaign) {
       return DunningCampaignNotFound({ campaignId: input.campaignId });
@@ -1053,8 +1058,9 @@ export class DunningCampaignService {
   /**
    * One page of executions, filtered and sorted as `query` says. `limit` and `offset` are whole numbers of
    * 0 or more and the times fall in the years 1 to 9999 (preconditions: anything else throws an invariant failure).
+   * A `status` or `sortBy` outside its list returns `schema.invalid_input`.
    */
-  async listExecutions(query: ListExecutionsQuery): Promise<DunningExecution[]> {
+  async listExecutions(query: ListExecutionsQuery): Promise<DunningExecution[] | SchemaFailure> {
     return this.executionRepo.findMany(query);
   }
 
@@ -1077,6 +1083,8 @@ export class DunningCampaignService {
       this.campaignRepo.findTopPerformer(last30Days),
       this.executionRepo.findMany({ limit: 10, offset: 0, sortBy: 'createdAt', sortOrder: 'desc' }),
     ]);
+    // The query is built from constants, so a refusal is a bug
+    const recentExecutionRows = orThrow(recentExecutions);
 
     const topCampaign = top ? await this.campaignRepo.findById(top.campaignId) : null;
     const topRevenue = top ? await this.campaignRepo.getAnalyticsSince(last30Days, top.campaignId) : null;
@@ -1099,7 +1107,7 @@ export class DunningCampaignService {
               revenueRecovered: topRevenue.revenueRecovered,
             }
           : null,
-      recentExecutions,
+      recentExecutions: recentExecutionRows,
     };
   }
 
@@ -1145,12 +1153,13 @@ export class DunningCampaignService {
   }
 
   /**
-   * Find active campaigns for a specific trigger
+   * Find active campaigns for a specific trigger. A trigger type or segment id Postgres cannot store returns
+   * `schema.invalid_input`.
    */
   async findActiveCampaignsForTrigger(
     triggerType: CampaignTrigger['type'],
     customerSegmentIds?: CustomerSegmentId[],
-  ): Promise<DunningCampaign[]> {
+  ): Promise<DunningCampaign[] | SchemaFailure> {
     return this.campaignRepo.findActiveForTrigger(triggerType, customerSegmentIds);
   }
 }

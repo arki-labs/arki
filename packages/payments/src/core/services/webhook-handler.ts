@@ -1,26 +1,26 @@
 import { EventEmitter } from 'node:events';
 
+import type { SchemaInput } from '@arki/schema';
 import { z } from '@arki/contracts';
 import { now, sub } from '@arki/date';
 import { InvalidInput, isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { fromStripeAmount } from '@arki/money/stripe';
-import type { SchemaInput } from '@arki/schema';
 import { parse } from '@arki/schema';
 
+import type { RefundWorkflow } from '../../refunds/workflow.js';
 import type { WebhookProcessingResult } from '../contracts.js';
 import type { CoreWrites } from '../journal.js';
-import type { RefundWorkflow } from '../../refunds/workflow.js';
 import type { PaymentRepository } from '../repository.js';
 import type { PaymentProviderType, PaymentStatus, WebhookEventType, WebhookId } from '../types.js';
 import type { StripeChargeRefund } from './webhook-event-payloads.js';
 import type { WebhookSecurityService } from './webhook-security.js';
 import { refundIdSchema } from '../../refunds/primitives.js';
 import { REFUND_SETTLED_STATUSES, refundRunId } from '../../refunds/workflow.js';
-import { misconfigured } from '../failures.js';
+import { PaymentsConfigurationInvalid } from '../failures.js';
+import { INT4_MAX, pgJsonRecordSchema, pgVarcharSchema } from '../pg-values.js';
 import { createWebhookId, webhookEventTypeValues } from '../primitives.js';
 import { observePayments } from '../telemetry.js';
-import { INT4_MAX, pgJsonRecordSchema, pgVarcharSchema } from '../pg-values.js';
 import {
   parseStripeCharge,
   parseStripeDispute,
@@ -31,7 +31,6 @@ import {
 import {
   WebhookInProgress,
   WebhookPayloadInvalid,
-  WebhookRejected,
   WebhookRetriesExhausted,
   WebhookTargetNotFound,
 } from './webhook-failures.js';
@@ -141,16 +140,30 @@ export class WebhookHandler extends EventEmitter {
   /** Handlers the app registered. One replaces the built-in handling of its event type. */
   private readonly customHandlers = new Map<WebhookEventType, (data: WebhookEventData) => Promise<void>>();
 
-  constructor(
+  private constructor(
     private readonly paymentRepository: WebhookEventStore,
     private readonly webhookSecurity: WebhookValidator,
-    /** Every change of a `payments` or `subscriptions` row goes through the journal: `paymentsJournal.writes(run)`. */
     private readonly writes: WebhookWrites,
-    /** Throws `payments.configuration_invalid` for a count or duration outside its range (see `WebhookHandlerConfig`). */
-    config: Partial<WebhookHandlerConfig> = {},
+    config: WebhookHandlerConfig,
     private readonly refunds?: WebhookRefunds,
   ) {
     super();
+    this.config = config;
+  }
+
+  /**
+   * Builds the handler. Returns `payments.configuration_invalid` (and builds nothing) for a count or
+   * duration outside its range (see `WebhookHandlerConfig`): a bad setting fails here, not on the first delivery.
+   *
+   * @param writes Every change of a `payments` or `subscriptions` row goes through the journal: `paymentsJournal.writes(run)`.
+   */
+  static create(
+    paymentRepository: WebhookEventStore,
+    webhookSecurity: WebhookValidator,
+    writes: WebhookWrites,
+    config: Partial<WebhookHandlerConfig> = {},
+    refunds?: WebhookRefunds,
+  ) {
     const merged = {
       maxRetries: 3,
       retryDelayMs: 1000,
@@ -160,15 +173,16 @@ export class WebhookHandler extends EventEmitter {
       skipIpValidation: false,
       ...config,
     };
-    // A count or a duration the handler cannot use fails here, not on the first delivery
     const checked = webhookHandlerConfigSchema.safeParse(merged);
     if (!checked.success) {
-      throw misconfigured(
-        'webhookHandler',
-        checked.error.issues.map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`).join('; '),
-      );
+      return PaymentsConfigurationInvalid({
+        setting: 'webhookHandler',
+        problem: checked.error.issues
+          .map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`)
+          .join('; '),
+      });
     }
-    this.config = merged;
+    return new WebhookHandler(paymentRepository, webhookSecurity, writes, checked.data, refunds);
   }
 
   /**
@@ -213,9 +227,7 @@ export class WebhookHandler extends EventEmitter {
       { skipIpValidation: this.config.skipIpValidation },
     );
 
-    if (!validation.isValid) {
-      return WebhookRejected({ reason: validation.error ?? 'Webhook validation failed', retryable: false });
-    }
+    if (isFailure(validation)) return validation;
 
     // 2. Read the event's id and type
     const envelope = this.readEnvelope(payload);
@@ -236,7 +248,7 @@ export class WebhookHandler extends EventEmitter {
     if (isFailure(webhookIdResult)) return webhookIdResult;
 
     // The body is stored as jsonb, which cannot hold U+0000: such a body is final, a resend carries it again
-    const data = validation.data ?? {};
+    const data = validation.data;
     const storable = parse(pgJsonRecordSchema, data);
     if (isFailure(storable)) return WebhookPayloadInvalid({ retryable: false }, { cause: storable });
     // An address the column cannot hold (possible with `skipIpValidation`) is not kept
@@ -714,6 +726,7 @@ export class WebhookHandler extends EventEmitter {
   }
 }
 
+/** Builds a `WebhookHandler`: the same as `WebhookHandler.create`, which returns `payments.configuration_invalid` for a bad setting. */
 export function createWebhookHandler(
   paymentRepository: WebhookEventStore,
   webhookSecurity: WebhookValidator,
@@ -721,5 +734,5 @@ export function createWebhookHandler(
   config?: Partial<WebhookHandlerConfig>,
   refunds?: WebhookRefunds,
 ) {
-  return new WebhookHandler(paymentRepository, webhookSecurity, writes, config, refunds);
+  return WebhookHandler.create(paymentRepository, webhookSecurity, writes, config, refunds);
 }

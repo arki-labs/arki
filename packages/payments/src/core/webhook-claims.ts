@@ -18,16 +18,19 @@ import { is, parse } from '@arki/schema';
 import type { CoreTables } from './tables.js';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
 import type { NewWebhookEvent, WebhookEvent, WebhookId } from './types.js';
+import { paymentProviderValues, webhookEventTypeValues } from './primitives.js';
 import { INT4_MAX, isPgInstant, pgInstantSchema, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from './pg-values.js';
 import { WebhookClaimConflict } from './services/webhook-failures.js';
 
 /**
  * The values of a new event row that a column can refuse: the ids and text past their length or
  * holding U+0000, U+0000 or a bigint in `data`, a count past the integer range, a time outside the
- * years 1 to 9999. The enum columns are held by their TypeScript types.
+ * years 1 to 9999. The enum columns take only their enum values.
  */
 const claimableEventSchema = z.looseObject({
   id: pgTextSchema.optional(),
+  provider: z.enum(paymentProviderValues),
+  eventType: z.enum(webhookEventTypeValues),
   providerEventId: pgVarcharSchema(255).min(1),
   data: pgJsonRecordSchema,
   attempts: z.number().int().min(0).max(INT4_MAX).optional(),
