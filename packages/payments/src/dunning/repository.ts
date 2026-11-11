@@ -9,6 +9,7 @@ import { z } from '@arki/contracts';
 import { findDatabaseError } from '@arki/db/errors';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
+import { AmountOutOfRange } from '@arki/money';
 import { is, parse } from '@arki/schema';
 
 import type { Instant } from '@arki/date';
@@ -231,7 +232,8 @@ const ID_MAX_LENGTH = 256;
 
 /**
  * The money of rows this package stored, summed per currency. Precondition (an invariant failure otherwise):
- * every row holds an ISO 4217 code and units that are a safe whole number, which the insert and the SUM keep.
+ * every row holds an ISO 4217 code and units that are a safe whole number. The upsert keeps each row within
+ * 2^53 - 1, and `getAnalyticsSince` returns `money.out_of_range` before this for a sum past it.
  */
 function storedRevenue(rows: readonly { currency: string; units: number | string }[]) {
   const revenue = sumMinorByCurrency(rows);
@@ -529,7 +531,8 @@ export class DunningCampaignRepository {
   }
 
   /**
-   * The analytics of the last `days` calendar days, summed. Precondition (anything else throws an
+   * The analytics of the last `days` calendar days, summed, as `getAnalyticsSince` sums them (also its
+   * `money.out_of_range`). Precondition (anything else throws an
    * invariant failure and runs no query): `days` is a whole number from 0 to `MAX_DUNNING_DAYS` (100 years).
    * A campaign id no row can hold sums no row: zero counts and no money.
    */
@@ -569,7 +572,8 @@ export class DunningCampaignRepository {
   ): Promise<{ campaignId: DunningCampaignId; paymentsRecovered: number; conversionRate: number } | null> {
     assertComparable(since, 'since');
     const analytics = this.dunningCampaignAnalytics;
-    const recovered = sql<number>`COALESCE(SUM(${analytics.paymentsRecovered}), 0)::int`.mapWith(Number);
+    // No `::int`: rows that each hold up to 2^31 - 1 sum past it, which an int cast refuses with SQLSTATE 22003
+    const recovered = sql<number>`COALESCE(SUM(${analytics.paymentsRecovered}), 0)`.mapWith(Number);
     const conversion = sql<number>`COALESCE(AVG(${analytics.conversionRate}), 0)`.mapWith(Number);
 
     const [top] = await this.db
@@ -585,7 +589,9 @@ export class DunningCampaignRepository {
   }
 
   /**
-   * The analytics rows from `since` on, summed. Money stays one balance per currency. Precondition
+   * The analytics rows from `since` on, summed. Money stays one balance per currency. Returns
+   * `AmountOutOfRange` (`money.out_of_range`) when the revenue of one currency sums past 2^53 - 1 minor
+   * units: each row holds at most that much, but many rows can add up past it. Precondition
    * (anything else throws an invariant failure and runs no query): `since` falls in the years 1 to 9999.
    * A campaign id no row can hold (U+0000) sums no row: zero counts and no money, without a query.
    */
@@ -620,10 +626,13 @@ export class DunningCampaignRepository {
       .select({
         currency: this.dunningCampaignAnalytics.currency,
         units: sql<string>`COALESCE(SUM(${this.dunningCampaignAnalytics.revenueRecoveredMinor}), 0)::text`,
+        // Compared in SQL, where the sum is exact: the text above is only read when this is false
+        pastSafeRange: sql<boolean>`COALESCE(SUM(${this.dunningCampaignAnalytics.revenueRecoveredMinor}), 0) > ${Number.MAX_SAFE_INTEGER}`,
       })
       .from(this.dunningCampaignAnalytics)
       .where(inRange)
       .groupBy(this.dunningCampaignAnalytics.currency);
+    if (recovered.some(row => row.pastSafeRange)) return AmountOutOfRange();
 
     return { ...counters, revenueRecovered: storedRevenue(recovered) };
   }

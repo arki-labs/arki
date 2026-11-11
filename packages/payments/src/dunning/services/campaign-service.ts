@@ -1,14 +1,14 @@
 import type { SQL } from 'drizzle-orm';
-import { eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, lte, sql } from 'drizzle-orm';
 
 import type { Instant } from '@arki/date';
-import type { Money, MoneyFailure } from '@arki/money';
+import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
 import { add, fromDate, instant, isAfter, now, sub, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure, orThrow } from '@arki/failure';
-import { Currency } from '@arki/money';
+import { AmountOutOfRange, Currency } from '@arki/money';
 import { ensure, is, parse } from '@arki/schema';
 
 import type { CoreTables } from '../../core/tables.js';
@@ -16,7 +16,8 @@ import type { PaymentRetryService } from '../../core/services/payment-retry-serv
 import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types.js';
 import type { UserId } from '../../core/user-id.js';
 import { customerIdSchema, paymentIdSchema, subscriptionIdSchema } from '../../core/primitives.js';
-import { pgTextSchema } from '../../core/pg-values.js';
+import { INT4_MAX, pgTextSchema } from '../../core/pg-values.js';
+import { CounterExhausted } from '../../core/failures.js';
 import { ReferenceNotFound } from '../../core/providers/provider-error.js';
 import type {
   CreateDunningCampaignInput,
@@ -145,6 +146,9 @@ const paymentRowSchema = z.object({
   amount_minor: z.union([z.number().int(), z.string().regex(/^-?\d+$/)]),
   currency: z.string(),
 });
+
+/** The `integer` counters of a campaign's analytics row that `updateCampaignAnalytics` adds to. */
+const ANALYTICS_COUNTERS = ['paymentsRecovered', 'executions', 'customersReached', 'communicationsSent'] as const;
 
 /**
  * Service for managing dunning campaigns
@@ -621,7 +625,8 @@ export class DunningCampaignService {
    * threw (a provider that cannot be reached, a database error) is marked `failed` with a `nextRetryAt`,
    * so `retryFailedExecutions` retries it; one whose message was refused is listed with the failure's
    * code and marked `failed` (with a `nextRetryAt` only for a 5xx refusal; a timeout is not retried, the
-   * message may have gone out). A fault that stops
+   * message may have gone out). One that ran but whose campaign analytics are full is complete and listed
+   * with `payments.counter_exhausted` or `money.out_of_range`. A fault that stops
    * the whole tick is thrown. `limit` is a whole number of 0 or more (a precondition: anything else throws
    * an invariant failure before any query).
    */
@@ -656,12 +661,11 @@ export class DunningCampaignService {
    * the execution is then `failed`, with a `nextRetryAt` when a later try can work (a 5xx refusal,
    * within `MAX_EXECUTION_RETRIES`; `retryCount` is the retry this run counts as).
    * Returns the `MoneyFailure` of a stored payment the stop check could not read; the execution itself
-   * is then complete and nothing was cancelled.
+   * is then complete and nothing was cancelled. Returns `CounterExhausted` (`payments.counter_exhausted`)
+   * or `AmountOutOfRange` (`money.out_of_range`) when the campaign's analytics row cannot count what this
+   * run did; the execution is complete and the stop check has run, only the analytics missed it.
    */
-  private async executeIndividualExecution(
-    execution: DunningExecution,
-    retryCount: number,
-  ): Promise<MoneyFailure | SendFailure | undefined> {
+  private async executeIndividualExecution(execution: DunningExecution, retryCount: number) {
     // Update status to running
     orThrow(await this.executionRepo.updateStatus(execution.id, 'running'));
 
@@ -711,11 +715,19 @@ export class DunningCampaignService {
     // Update execution with result
     orThrow(await this.executionRepo.updateStatus(execution.id, 'completed', result));
 
+    // Only a message that went out counts as reached and sent. A full counter is returned after the
+    // stop check, so a customer who paid is still not sent the later steps.
+    let counted;
+    if (result.communicationsSent > 0) {
+      counted = await this.updateCampaignAnalytics(execution.campaignId, { customersReached: 1, communicationsSent: 1 });
+    }
+
     // Check if payment was successful and stop subsequent executions if configured
     if (campaign.settings.stopOnPaymentSuccess) {
-      return this.checkAndStopOnPaymentSuccess(execution);
+      const stopped = await this.checkAndStopOnPaymentSuccess(execution);
+      if (isFailure(stopped)) return stopped;
     }
-    return undefined;
+    return counted;
   }
 
   /**
@@ -808,12 +820,6 @@ export class DunningCampaignService {
 
     // A provider refusal, a timeout or a channel with no provider is returned (the communication row records it)
     if (isFailure(communicationResult)) return communicationResult;
-
-    // Only a message that went out counts as reached and sent
-    await this.updateCampaignAnalytics(execution.campaignId, {
-      customersReached: 1,
-      communicationsSent: 1,
-    });
 
     return {
       customersProcessed: 1,
@@ -947,8 +953,10 @@ export class DunningCampaignService {
    * Check if payment was successful and stop subsequent executions. The payment row is read and
    * checked first, so a stored currency `@arki/money` refuses returns its `MoneyFailure` before any
    * execution is cancelled. A row of another shape than the query selects is a bug (`AssertError`).
+   * Returns the failure of the analytics write (`payments.counter_exhausted`, `money.out_of_range`)
+   * when the recovery cannot be counted; the executions are cancelled by then.
    */
-  private async checkAndStopOnPaymentSuccess(execution: DunningExecution): Promise<MoneyFailure | undefined> {
+  private async checkAndStopOnPaymentSuccess(execution: DunningExecution) {
     // Check if the customer has made a successful payment since the execution started
     const paymentResult = await this.db.execute(sql`
       SELECT p.id, p.amount_minor, p.currency, p.created_at
@@ -961,7 +969,7 @@ export class DunningCampaignService {
     `);
 
     const recentSuccessfulPayments = paymentResult.rows || [];
-    if (recentSuccessfulPayments.length === 0) return undefined;
+    if (recentSuccessfulPayments.length === 0) return;
 
     const payment = ensure(recentSuccessfulPayments[0], paymentRowSchema, { at: 'payments.row' });
     const currency = Currency.parse(payment.currency.toUpperCase());
@@ -992,12 +1000,14 @@ export class DunningCampaignService {
     }
 
     // Update campaign analytics with successful recovery
-    await this.updateCampaignAnalytics(execution.campaignId, { paymentsRecovered: 1, revenueRecovered });
-    return undefined;
+    return this.updateCampaignAnalytics(execution.campaignId, { paymentsRecovered: 1, revenueRecovered });
   }
 
   /**
-   * Update campaign analytics with new metrics
+   * Add the metrics to the campaign's analytics row of today and the currency, in one upsert. Returns
+   * `CounterExhausted` (`payments.counter_exhausted`) when a counter would pass `INT4_MAX`, the most its
+   * `integer` column holds, and `AmountOutOfRange` (`money.out_of_range`) when the recovered revenue
+   * would pass 2^53 - 1 minor units, the most the column reads back exactly. Nothing is written then.
    */
   private async updateCampaignAnalytics(
     campaignId: DunningCampaignId,
@@ -1008,7 +1018,7 @@ export class DunningCampaignService {
       customersReached?: number;
       communicationsSent?: number;
     },
-  ): Promise<void> {
+  ) {
     const today = now().toString().slice(0, 10);
     // One row per campaign, day and currency. Counters with no payment go to the default-currency row.
     const currency = metrics.revenueRecovered?.currency.code ?? DEFAULT_ANALYTICS_CURRENCY;
@@ -1020,8 +1030,9 @@ export class DunningCampaignService {
     const executions = metrics.executions ?? 0;
     const customersReached = metrics.customersReached ?? 0;
     const communicationsSent = metrics.communicationsSent ?? 0;
+    const added = { paymentsRecovered, executions, customersReached, communicationsSent };
 
-    await this.db
+    const [counted] = await this.db
       .insert(analytics)
       .values({
         id: analyticsId,
@@ -1044,11 +1055,26 @@ export class DunningCampaignService {
           communicationsSent: sql`${analytics.communicationsSent} + ${communicationsSent}`,
           updatedAt: now(),
         },
-      });
+        // The guard sits in the upsert itself, so a race between two calls never raises a sum past what its column holds
+        setWhere: and(
+          ...ANALYTICS_COUNTERS.map(counter => lte(analytics[counter], INT4_MAX - added[counter])),
+          lte(analytics.revenueRecoveredMinor, Number.MAX_SAFE_INTEGER - revenueMinor),
+        ),
+      })
+      .returning();
+    if (counted) return;
+
+    // Nothing was written: the row holds a sum that cannot take this much more (no call lowers one again)
+    const [row] = await this.db.select().from(analytics).where(eq(analytics.id, analyticsId));
+    // The row went with its campaign between the two statements: there is nothing left to count
+    if (!row) return;
+    const full = ANALYTICS_COUNTERS.find(counter => row[counter] > INT4_MAX - added[counter]);
+    return full ? CounterExhausted({ counter: full, id: analyticsId }) : AmountOutOfRange();
   }
 
   /**
-   * Campaign analytics of the last `days` days. Precondition (anything else throws an invariant failure
+   * Campaign analytics of the last `days` days, or `AmountOutOfRange` (`money.out_of_range`) when the
+   * revenue of one currency sums past 2^53 - 1 minor units. Precondition (anything else throws an invariant failure
    * and runs no query): `days` is a whole number from 0 to `MAX_DUNNING_DAYS` (100 years).
    */
   async getCampaignAnalytics(campaignId?: DunningCampaignId, days = 30) {
@@ -1067,9 +1093,10 @@ export class DunningCampaignService {
   /**
    * The numbers on the dunning dashboard, all read from the tables: campaign counts, what ran
    * today (since 00:00 UTC), what was recovered today and this month, the conversion rate and
-   * the top campaign over the last 30 days, and the latest executions.
+   * the top campaign over the last 30 days, and the latest executions. Returns `AmountOutOfRange`
+   * (`money.out_of_range`) when a revenue total sums past 2^53 - 1 minor units (see `getAnalyticsSince`).
    */
-  async getDashboardStats(): Promise<DunningDashboardStats> {
+  async getDashboardStats() {
     const current = new Date();
     const startOfToday = fromDate(new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate())));
     const startOfMonth = fromDate(new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), 1)));
@@ -1085,11 +1112,16 @@ export class DunningCampaignService {
     ]);
     // The query is built from constants, so a refusal is a bug
     const recentExecutionRows = orThrow(recentExecutions);
+    // A revenue sum past 2^53 - 1 minor units is returned, not shown rounded
+    if (isFailure(today)) return today;
+    if (isFailure(month)) return month;
+    if (isFailure(recent)) return recent;
 
     const topCampaign = top ? await this.campaignRepo.findById(top.campaignId) : null;
     const topRevenue = top ? await this.campaignRepo.getAnalyticsSince(last30Days, top.campaignId) : null;
+    if (isFailure(topRevenue)) return topRevenue;
 
-    return {
+    const stats: DunningDashboardStats = {
       totalCampaigns: campaigns.total,
       activeCampaigns: campaigns.active,
       executionsToday: today.executions,
@@ -1109,6 +1141,7 @@ export class DunningCampaignService {
           : null,
       recentExecutions: recentExecutionRows,
     };
+    return stats;
   }
 
   /**

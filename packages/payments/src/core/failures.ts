@@ -237,13 +237,21 @@ export const PaymentsConfigurationInvalid = /* @__PURE__ */ defineFailure('payme
 });
 
 /** Which counter column is full, in `CounterExhausted`. */
-const counterSchema = z.enum(['retryCount', 'attempts']);
+const counterSchema = z.enum([
+  'retryCount',
+  'attempts',
+  'paymentsRecovered',
+  'executions',
+  'customersReached',
+  'communicationsSent',
+]);
 
 /**
- * A counter column already holds 2^31 - 1 (`INT4_MAX`), the most an `integer` column can, so it
- * cannot go up by one more. Nothing was written. `counter` names the column (`retryCount` of a
- * dunning execution, `attempts` of a webhook event) and `id` the row. The update checks the column
- * itself, so a full counter is never raised by a race between a read and a write.
+ * A counter column already holds 2^31 - 1 (`INT4_MAX`), the most an `integer` column can, or would pass
+ * it with what the call adds, so it cannot go up. Nothing was written. `counter` names the column
+ * (`retryCount` of a dunning execution, `attempts` of a webhook event, or `paymentsRecovered`,
+ * `executions`, `customersReached` or `communicationsSent` of a campaign's analytics row) and `id` the
+ * row. The update checks the column itself, so a full counter is never raised by a race between a read and a write.
  *
  * @fix Stop retrying the row: a counter this high was set by hand, since a correct caller stops long before it.
  * @verify bun run test -- src/dunning/campaign-service.test.ts src/core/repository.customers.test.ts

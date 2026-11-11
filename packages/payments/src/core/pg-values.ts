@@ -15,19 +15,32 @@ import { instantSchema } from '@arki/date/zod';
 export const MAX_JSON_DEPTH = 100;
 
 /**
- * Whether this value nests objects or arrays deeper than `MAX_JSON_DEPTH`. It walks with its own
- * stack, not by recursion, and stops at the first value that is too deep, so a 100,000-level body
- * costs about 100 steps.
+ * Whether the JSON `JSON.stringify` writes for this value nests objects or arrays deeper than
+ * `MAX_JSON_DEPTH`. Like `JSON.stringify`, it measures what a value's `toJSON(key)` returns in place of
+ * the value (a `Date`, a class with its own `toJSON`), so a shallow value whose `toJSON` returns a deep
+ * tree is too deep. It walks with its own stack, not by recursion, and stops at the first value that is
+ * too deep, so a 100,000-level body costs about 100 steps. A `toJSON` that throws throws here.
  */
 export function exceedsJsonDepth(value: unknown): boolean {
-  const pending: { item: unknown; depth: number }[] = [{ item: value, depth: 0 }];
+  const pending: { item: unknown; key: string; depth: number }[] = [{ item: value, key: '', depth: 0 }];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-    const { item, depth } = next;
+    const { key, depth } = next;
+    const item = writtenAs(next.item, key);
     if (typeof item !== 'object' || item === null) continue;
     if (depth >= MAX_JSON_DEPTH) return true;
-    for (const child of Object.values(item)) pending.push({ item: child, depth: depth + 1 });
+    for (const [childKey, child] of Object.entries(item))
+      pending.push({ item: child, key: childKey, depth: depth + 1 });
   }
   return false;
+}
+
+/** The value `JSON.stringify` writes for `item` held under `key`: what its `toJSON(key)` returns when it has one, else `item`. */
+function writtenAs(item: unknown, key: string): unknown {
+  if ((typeof item !== 'object' || item === null) && typeof item !== 'function') return item;
+  const toJSON: unknown = Reflect.get(item, 'toJSON');
+  if (typeof toJSON !== 'function') return item;
+  const written: unknown = Reflect.apply(toJSON, item, [key]);
+  return written;
 }
 
 const jsonDepthMessage = `JSON cannot nest deeper than ${MAX_JSON_DEPTH} levels`;

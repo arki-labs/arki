@@ -18,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { add, fromDate, now, sub, toMillis } from '@arki/date';
 import { FAILURE_ERROR_CODES, orThrow } from '@arki/failure';
+import { Money } from '@arki/money';
 
 import type { CustomerId } from '../core/types.js';
 import type { CreateDunningCampaignInput } from './contracts.js';
@@ -591,7 +592,7 @@ async function analytics(
 describe('getDashboardStats', () => {
   it('reads campaign counts, today, the month, the top campaign and the latest executions from the tables', async () => {
     // Each assertion below is about this campaign's rows; other tests' campaigns only add to the counts
-    const before = await service.getDashboardStats();
+    const before = orThrow(await service.getDashboardStats());
     const winner = await createdCampaign('Dashboard: winner');
     await createdCampaign('Dashboard: idle', 'draft');
     await analytics(winner, now(), {
@@ -617,7 +618,7 @@ describe('getDashboardStats', () => {
     });
     const latest = await execution(winner, 'scheduled');
 
-    const stats = await service.getDashboardStats();
+    const stats = orThrow(await service.getDashboardStats());
 
     expect(stats.totalCampaigns).toBe(before.totalCampaigns + 2);
     expect(stats.activeCampaigns).toBe(before.activeCampaigns + 1);
@@ -647,8 +648,8 @@ describe('campaign analytics', () => {
     const campaignId = await createdCampaign('Analytics: counters');
 
     // The method is private: the execution paths that call it also need a mail provider
-    await service['updateCampaignAnalytics'](campaignId, { customersReached: 1, communicationsSent: 1 });
-    await service['updateCampaignAnalytics'](campaignId, { customersReached: 2, executions: 3 });
+    expect(await service['updateCampaignAnalytics'](campaignId, { customersReached: 1, communicationsSent: 1 })).toBeUndefined();
+    expect(await service['updateCampaignAnalytics'](campaignId, { customersReached: 2, executions: 3 })).toBeUndefined();
 
     const rows = await db
       .select()
@@ -656,6 +657,72 @@ describe('campaign analytics', () => {
       .where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ customersReached: 3, communicationsSent: 1, executions: 3, paymentsRecovered: 0 });
+  });
+
+  async function analyticsRows(campaignId: DunningCampaignId) {
+    return db.select().from(tables.dunningCampaignAnalytics).where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
+  }
+
+  // The SQL `customers_reached + 1` failed with a raw SQLSTATE 22003 once the counter was full
+  it('a counter that would pass 2^31 - 1 returns payments.counter_exhausted and adds nothing to the row', async () => {
+    const campaignId = await createdCampaign('Analytics: full counter');
+    expect(await service['updateCampaignAnalytics'](campaignId, { customersReached: INT4_MAX, executions: 1 })).toBeUndefined();
+    const [before] = await analyticsRows(campaignId);
+
+    const refused = await service['updateCampaignAnalytics'](campaignId, { executions: 1, customersReached: 1 });
+
+    expect(refused).toMatchObject({ code: 'payments.counter_exhausted', data: { counter: 'customersReached', id: before?.id } });
+    expect(await analyticsRows(campaignId)).toEqual([before]);
+  });
+
+  // A total past 2^53 - 1 was stored, and every read of it then threw an invariant failure
+  it('revenue that would pass 2^53 - 1 minor units returns money.out_of_range and adds nothing to the row', async () => {
+    const campaignId = await createdCampaign('Analytics: full revenue');
+    const most = Money.fromMinor(Number.MAX_SAFE_INTEGER, 'JPY');
+    expect(await service['updateCampaignAnalytics'](campaignId, { paymentsRecovered: 1, revenueRecovered: most })).toBeUndefined();
+    const [before] = await analyticsRows(campaignId);
+
+    const one = Money.fromMinor(1, 'JPY');
+    const refused = await service['updateCampaignAnalytics'](campaignId, { paymentsRecovered: 1, revenueRecovered: one });
+
+    expect(refused).toMatchObject({ code: 'money.out_of_range' });
+    expect(await analyticsRows(campaignId)).toEqual([before]);
+    expect(orThrow(await service.getCampaignAnalytics(campaignId)).revenueRecovered.toJSON()).toEqual([
+      { amount: String(Number.MAX_SAFE_INTEGER), currency: 'JPY' },
+    ]);
+    orThrow(await service.deleteCampaign(campaignId));
+  });
+
+  // Rows that each fit sum past what they hold: the revenue read threw an invariant, the top campaign a raw 22003
+  it('sums of many rows past the safe range return money.out_of_range; the top campaign counts past 2^31 - 1', async () => {
+    const first = await createdCampaign('Analytics: big sum one');
+    const second = await createdCampaign('Analytics: big sum two');
+    try {
+      const most = Money.fromMinor(Number.MAX_SAFE_INTEGER, 'KRW');
+      for (const campaignId of [first, second]) {
+        expect(await service['updateCampaignAnalytics'](campaignId, { revenueRecovered: most })).toBeUndefined();
+      }
+      // Two currency rows of one campaign, each with a full count of recovered payments
+      for (const currency of ['EUR', 'USD']) {
+        const recovered = { paymentsRecovered: INT4_MAX, revenueRecovered: Money.fromMinor(1, currency) };
+        expect(await service['updateCampaignAnalytics'](first, recovered)).toBeUndefined();
+      }
+      // A row is dated 00:00 UTC of its day
+      const since = sub(now(), { hours: 25 });
+      const campaigns = createDunningCampaignRepository(db, tables);
+
+      expect(await campaigns.getAnalyticsSince(since)).toMatchObject({ code: 'money.out_of_range' });
+      expect(await service.getDashboardStats()).toMatchObject({ code: 'money.out_of_range' });
+      expect(await campaigns.findTopPerformer(since)).toMatchObject({ campaignId: first, paymentsRecovered: 2 * INT4_MAX });
+      // One campaign's rows still fit, so its own sum reads
+      expect(orThrow(await campaigns.getAnalyticsSince(since, second)).revenueRecovered.toJSON()).toEqual([
+        { amount: String(Number.MAX_SAFE_INTEGER), currency: 'KRW' },
+      ]);
+    } finally {
+      // The rows go with their campaigns, so the other tests' dashboard reads stay in range
+      orThrow(await service.deleteCampaign(first));
+      orThrow(await service.deleteCampaign(second));
+    }
   });
 });
 
@@ -899,6 +966,37 @@ describe('a scheduled execution in a named schema', () => {
       paymentsRecovered: 1,
       revenueRecoveredMinor: 1999,
     });
+  });
+
+  // The tick dropped what the analytics upsert returned: a full counter surfaced as a raw 22003
+  it('lists payments.counter_exhausted when the analytics row is full, after the run completed and the stop check ran', async () => {
+    const buyer = await newCustomer('full-analytics');
+    const campaignId = await createdCampaign('Recovery: full analytics');
+    const campaign = await service.getCampaign(campaignId);
+    const base = { campaignId, templateId: campaign?.templates[0]?.id, customerId: buyer.id, triggerType: 'manual', triggerData: {} } as const;
+    const [due] = await db
+      .insert(tables.dunningExecutions)
+      .values({ ...base, status: 'scheduled', scheduledAt: sub(now(), { minutes: 1 }), startedAt: sub(now(), { hours: 1 }) })
+      .returning();
+    if (!due) throw new Error('execution not inserted');
+    await newPayment(buyer, 'succeeded', now());
+    expect(await service['updateCampaignAnalytics'](campaignId, { communicationsSent: INT4_MAX })).toBeUndefined();
+
+    const report = await service.processScheduledExecutions(1000);
+
+    expect(report.failed.find(fault => fault.id === due.id)).toMatchObject({
+      status: 'refused',
+      failure: { code: 'payments.counter_exhausted', data: { counter: 'communicationsSent' } },
+    });
+    const [stored] = await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.id, due.id));
+    expect(stored?.status).toBe('completed');
+    // The stop check still ran: the recovered payment counts in its own currency's row
+    const rows = await db
+      .select()
+      .from(tables.dunningCampaignAnalytics)
+      .where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
+    expect(rows.find(row => row.currency === 'EUR')).toMatchObject({ paymentsRecovered: 1, revenueRecoveredMinor: 1999 });
+    expect(rows.find(row => row.currency === 'USD')).toMatchObject({ communicationsSent: INT4_MAX, customersReached: 0 });
   });
 });
 

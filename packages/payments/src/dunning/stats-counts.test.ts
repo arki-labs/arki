@@ -121,7 +121,7 @@ describe('stats read through raw aggregates', () => {
     });
     const execution = orThrow(stored);
 
-    const summary = await repositories.campaigns.getAnalyticsSince(sub(now(), { hours: 2 }), campaign.id);
+    const summary = orThrow(await repositories.campaigns.getAnalyticsSince(sub(now(), { hours: 2 }), campaign.id));
     const top = await repositories.campaigns.findTopPerformer(sub(now(), { hours: 2 }));
     const metrics = await repositories.communications.getMetricsForExecution(execution.id);
 

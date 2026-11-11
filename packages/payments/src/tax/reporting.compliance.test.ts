@@ -304,6 +304,29 @@ describe('an export format outside csv, json and xml', () => {
 });
 
 describe('audit entries the table cannot store', () => {
+  /** An array nested `levels` deep around one string. */
+  function nested(levels: number): unknown {
+    let tree: unknown = 'leaf';
+    for (let level = 0; level < levels; level++) tree = [tree];
+    return tree;
+  }
+
+  // The depth check skipped `toJSON`, which `JSON.stringify` follows: 101 levels were stored, 200,000 overflowed the stack
+  it('measure what toJSON returns: too deep is schema.invalid_input, a throwing toJSON keeps schema.async_required', async () => {
+    const entry = { action: 'report' as const, entity: 'customer' as const, entityId: 'cust_audit_json' };
+    const deepAs = (levels: number) => ({ metadata: { toJSON: () => nested(levels) } });
+
+    expect(await reporting.createAuditEntry({ ...entry, details: deepAs(101) })).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await reporting.createAuditEntry({ ...entry, details: deepAs(200_000) })).toMatchObject({ code: 'schema.invalid_input' });
+    const refusing = { metadata: { toJSON: () => { throw new Error('no JSON for this value'); } } };
+    expect(await reporting.createAuditEntry({ ...entry, details: refusing })).toMatchObject({ code: 'schema.async_required' });
+    expect(await reporting.getAuditTrail('customer', 'cust_audit_json')).toEqual([]);
+
+    // 98 levels under `details` and `metadata` is 99 in all, within the cap: stored as `toJSON` wrote it
+    const stored = orThrow(await reporting.createAuditEntry({ ...entry, details: deepAs(98) }));
+    expect(stored.details.metadata).toEqual(nested(98));
+  });
+
   // An entityId over 255, U+0000 or a bigint in details used to reach Postgres (22001, 22P05) or throw from the driver
   it('return schema.invalid_input and store nothing; an id already used returns payments.tax_row_exists', async () => {
     const entry = { action: 'report' as const, entity: 'customer' as const, entityId: 'cust_audit', details: {} };
