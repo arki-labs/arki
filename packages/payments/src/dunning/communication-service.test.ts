@@ -985,8 +985,37 @@ describe('CommunicationOrchestrationService.sendCommunication', () => {
 
     expect(report.failed).toContainEqual({
       id: pending.id,
-      code: 'payments.notification_channel_unavailable',
-      message: 'No notification provider is registered for the sms channel',
+      status: 'refused',
+      failure: expect.objectContaining({
+        code: 'payments.notification_channel_unavailable',
+        message: 'No notification provider is registered for the sms channel',
+      }),
+    });
+  });
+
+  it('retryFailedCommunications lists a resend that could not go out, with the failure', async () => {
+    const service = new CommunicationOrchestrationService(db, tables);
+    const { execution, template } = await scheduledExecution();
+    const [failed] = await db
+      .insert(tables.dunningCommunications)
+      .values({
+        executionId: execution.id,
+        customerId,
+        templateId: template.id,
+        channel: 'sms',
+        recipient: '+15550000002',
+        content: 'Please update your card',
+        status: 'failed',
+      })
+      .returning();
+    if (!failed) throw new Error('the communication was not stored');
+
+    const report = await service.retryFailedCommunications();
+
+    expect(report.failed).toContainEqual({
+      id: failed.id,
+      status: 'refused',
+      failure: expect.objectContaining({ code: 'payments.notification_channel_unavailable' }),
     });
   });
 

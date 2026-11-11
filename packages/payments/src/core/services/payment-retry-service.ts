@@ -221,7 +221,26 @@ export class PaymentRetryService {
     return retryAttempts;
   }
 
-  async processRetries(): Promise<void> {
+  /**
+   * Run the retry attempts that are due, oldest first, and report what each did, in that order:
+   *
+   * - `succeeded`: the provider took the payment. A past due subscription is active again, and the
+   *   payment's other pending attempts are cancelled.
+   * - `failed`: the payment was not recovered. `failure` is the declined card (`payments.card_declined`),
+   *   or `payment` is the provider's answer when it is not `succeeded` (its `failureReason` says why).
+   *   The last attempt of a payment then marks the subscription past due.
+   * - `cancelled`: nothing was charged: the subscription is no longer active or past due, the payment
+   *   is gone or already succeeded, or an earlier attempt of this run recovered it.
+   * - `refused`: the package returned a failure, in `failure`. The provider refused the call (such as
+   *   `payments.configuration_invalid` from a `StripeProvider` built without `references`, or
+   *   `payments.reference_not_found`), or the journal refused the write after it: the money came in
+   *   but the subscription is still past due, or the last failed attempt could not mark it past due.
+   * - `thrown`: the attempt threw (a fault), in `error`.
+   *
+   * The attempt itself says `failed` for `refused` and `thrown`, with the failure's message. One broken
+   * attempt never stops the others.
+   */
+  async processRetries() {
     const current = now();
     const pendingRetries = [...this.retryAttempts.values()]
       .filter((attempt) => attempt.status === 'pending' && isSameOrBefore(attempt.scheduledFor, current))
@@ -229,111 +248,120 @@ export class PaymentRetryService {
 
     logger.debug('Processing {count} pending retry attempts', { count: pendingRetries.length });
 
+    const reports = [];
     for (const attempt of pendingRetries) {
-      try {
-        const executed = await this.executeRetry(attempt);
-        if (isFailure(executed)) {
-          logger.warn('Retry {attemptId} failed: {code}', {
-            attemptId: attempt.id,
-            code: executed.code,
-            failure: executed,
-          });
-        }
-      } catch (error) {
-        // One broken attempt must not stop the others
-        logger.error('Retry {attemptId} threw: {error}', {
+      reports.push(await this.runRetry(attempt));
+    }
+    return reports;
+  }
+
+  /** One due attempt, run and reported (see `processRetries`). */
+  private async runRetry(attempt: RetryAttempt) {
+    // An earlier attempt of this run recovered the payment and cancelled this one
+    if (attempt.status !== 'pending') return { attemptId: attempt.id, status: 'cancelled' as const };
+    try {
+      const report = await this.executeRetry(attempt);
+      if (report.status === 'refused') {
+        logger.warn('Retry {attemptId} was refused: {code}', {
           attemptId: attempt.id,
-          error: error instanceof Error ? error : String(error),
+          code: report.failure.code,
+          failure: report.failure,
         });
-        attempt.status = 'failed';
-        attempt.failureReason = error instanceof Error ? error.message : 'Unknown error';
       }
+      return report;
+    } catch (error) {
+      // One broken attempt must not stop the others
+      logger.error('Retry {attemptId} threw: {error}', {
+        attemptId: attempt.id,
+        error: error instanceof Error ? error : String(error),
+      });
+      attempt.status = 'failed';
+      attempt.failureReason = error instanceof Error ? error.message : 'Unknown error';
+      return { attemptId: attempt.id, status: 'thrown' as const, error };
     }
   }
 
-  /** Nothing, or the failure of a journal write; `attempt` then says `failed` with its message. */
+  /** Run one attempt and report it (see `processRetries`); `attempt` says what happened, with the failure's message. */
   private async executeRetry(attempt: RetryAttempt) {
+    const attemptId = attempt.id;
     attempt.status = 'executing';
     attempt.executedAt = now();
 
-    try {
-      const subscription = await this.paymentRepository.findSubscriptionById(attempt.subscriptionId);
-      if (!subscription || !['active', 'past_due'].includes(subscription.status)) {
-        attempt.status = 'cancelled';
-        logger.debug('Cancelled retry {attemptId}: the subscription is no longer eligible', { attemptId: attempt.id });
-        return;
+    const subscription = await this.paymentRepository.findSubscriptionById(attempt.subscriptionId);
+    if (!subscription || !['active', 'past_due'].includes(subscription.status)) {
+      attempt.status = 'cancelled';
+      logger.debug('Cancelled retry {attemptId}: the subscription is no longer eligible', { attemptId });
+      return { attemptId, status: 'cancelled' as const };
+    }
+
+    const payment = await this.paymentRepository.findPaymentById(attempt.paymentId);
+    if (!payment || payment.status === 'succeeded') {
+      attempt.status = 'cancelled';
+      logger.debug('Cancelled retry {attemptId}: the payment is gone or already succeeded', { attemptId });
+      return { attemptId, status: 'cancelled' as const };
+    }
+
+    logger.debug('Executing retry attempt {attemptNumber} for payment {paymentId}', {
+      attemptNumber: attempt.attemptNumber,
+      paymentId: attempt.paymentId,
+    });
+
+    const result = await this.paymentProvider.confirmPayment(attempt.paymentId);
+    if (isFailure(result)) {
+      attempt.status = 'failed';
+      attempt.failureReason = result.message;
+      // Any other provider failure (a bad config, a missing payment row) is the package refusing the call
+      if (!CardDeclined.is(result)) return { attemptId, status: 'refused' as const, failure: result };
+
+      logger.info('Retry {attemptId} failed: the card was declined', { attemptId });
+      // A declined card is a failed retry like any other: the last one ends dunning
+      const ended = await this.endDunningAfterLast(attempt);
+      if (isFailure(ended)) return { attemptId, status: 'refused' as const, failure: ended };
+      return { attemptId, status: 'failed' as const, failure: result };
+    }
+
+    if (result.status === 'succeeded') {
+      attempt.status = 'succeeded';
+      await this.cancelRetries(attempt.paymentId, attemptId);
+
+      if (subscription.status === 'past_due') {
+        const activated = await this.writes.activateSubscription({ subscriptionId: subscription.id });
+        // The money came in, but the row could not follow: the attempt counts as failed, as when the write threw
+        if (isFailure(activated)) {
+          attempt.status = 'failed';
+          attempt.failureReason = activated.message;
+          return { attemptId, status: 'refused' as const, failure: activated };
+        }
       }
 
-      const payment = await this.paymentRepository.findPaymentById(attempt.paymentId);
-      if (!payment || payment.status === 'succeeded') {
-        attempt.status = 'cancelled';
-        logger.debug('Cancelled retry {attemptId}: the payment is gone or already succeeded', {
-          attemptId: attempt.id,
-        });
-        return;
-      }
-
-      logger.debug('Executing retry attempt {attemptNumber} for payment {paymentId}', {
-        attemptNumber: attempt.attemptNumber,
+      logger.info('Retry {attemptId} succeeded: payment {paymentId} recovered', {
+        attemptId,
         paymentId: attempt.paymentId,
       });
-
-      const result = await this.paymentProvider.confirmPayment(attempt.paymentId);
-      if (isFailure(result)) {
-        // A declined card or a missing payment row: this attempt failed, as when the provider threw
-        attempt.status = 'failed';
-        attempt.failureReason = result.message;
-        logger.warn('Retry {attemptId} failed: {code}', { attemptId: attempt.id, code: result.code, failure: result });
-
-        // A declined card is a failed retry like any other: the last one ends dunning
-        if (CardDeclined.is(result) && (await this.isLastAttempt(attempt.paymentId, attempt.attemptNumber))) {
-          const ended = await this.handleFinalFailure(attempt.paymentId, attempt.subscriptionId);
-          if (isFailure(ended)) {
-            attempt.failureReason = ended.message;
-            return ended;
-          }
-        }
-        return;
-      }
-
-      if (result.status === 'succeeded') {
-        attempt.status = 'succeeded';
-        await this.cancelRetries(attempt.paymentId, attempt.id);
-
-        if (subscription.status === 'past_due') {
-          const activated = await this.writes.activateSubscription({ subscriptionId: subscription.id });
-          // The money came in, but the row could not follow: the attempt counts as failed, as when the write threw
-          if (isFailure(activated)) {
-            attempt.status = 'failed';
-            attempt.failureReason = activated.message;
-            return activated;
-          }
-        }
-
-        logger.info('Retry {attemptId} succeeded: payment {paymentId} recovered', {
-          attemptId: attempt.id,
-          paymentId: attempt.paymentId,
-        });
-      } else {
-        attempt.status = 'failed';
-        attempt.failureReason = this.extractFailureReason(result);
-
-        logger.info('Retry {attemptId} failed: {reason}', { attemptId: attempt.id, reason: attempt.failureReason });
-
-        if (await this.isLastAttempt(attempt.paymentId, attempt.attemptNumber)) {
-          const ended = await this.handleFinalFailure(attempt.paymentId, attempt.subscriptionId);
-          if (isFailure(ended)) {
-            attempt.failureReason = ended.message;
-            return ended;
-          }
-        }
-      }
-      return;
-    } catch (error) {
-      attempt.status = 'failed';
-      attempt.failureReason = error instanceof Error ? error.message : 'Retry execution error';
-      throw error;
+      return { attemptId, status: 'succeeded' as const };
     }
+
+    attempt.status = 'failed';
+    attempt.failureReason = this.extractFailureReason(result);
+    logger.info('Retry {attemptId} failed: {reason}', { attemptId, reason: attempt.failureReason });
+
+    const ended = await this.endDunningAfterLast(attempt);
+    if (isFailure(ended)) return { attemptId, status: 'refused' as const, failure: ended };
+    return { attemptId, status: 'failed' as const, payment: result };
+  }
+
+  /**
+   * After a failed attempt: when it was the payment's last, mark the subscription past due. Nothing,
+   * or the failure of that write (then also the attempt's `failureReason`).
+   */
+  private async endDunningAfterLast(attempt: RetryAttempt) {
+    if (!(await this.isLastAttempt(attempt.paymentId, attempt.attemptNumber))) return;
+    const ended = await this.handleFinalFailure(attempt.paymentId, attempt.subscriptionId);
+    if (isFailure(ended)) {
+      attempt.failureReason = ended.message;
+      return ended;
+    }
+    return;
   }
 
   private selectRetryStrategy(

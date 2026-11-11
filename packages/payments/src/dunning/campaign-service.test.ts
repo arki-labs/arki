@@ -947,7 +947,7 @@ describe('a tick reports a stored payment the stop check cannot read', () => {
     const report = await service.processScheduledExecutions(1000);
 
     const fault = report.failed.find(entry => entry.id === id);
-    expect(fault?.code).toBe('money.unknown_currency');
+    expect(fault).toMatchObject({ status: 'refused', failure: { code: 'money.unknown_currency' } });
     expect(await statusOf(id)).toBe('completed');
     expect(await statusOf(laterId)).toBe('scheduled');
     const analyticsRows = await db
@@ -966,7 +966,7 @@ describe('a tick reports a stored payment the stop check cannot read', () => {
 
     const report = await service.retryFailedExecutions(1000);
 
-    expect(report.failed.find(entry => entry.id === id)?.code).toBe('money.unknown_currency');
+    expect(report.failed.find(entry => entry.id === id)?.failure?.code).toBe('money.unknown_currency');
     expect(await statusOf(laterId)).toBe('scheduled');
   });
 });
@@ -1178,7 +1178,7 @@ describe('a message that did not go out fails the execution and is reported', ()
 
     const report = await tickWhileResend('drop');
 
-    expect(report.failed.find(fault => fault.id === id)).toMatchObject({ code: null });
+    expect(report.failed.find(fault => fault.id === id)).toMatchObject({ status: 'thrown', error: expect.any(Error) });
     const stored = await storedExecution(id);
     expect(stored.status).toBe('failed');
     expect(minutesUntil(stored.nextRetryAt)).toBe(30);
@@ -1190,7 +1190,7 @@ describe('a message that did not go out fails the execution and is reported', ()
 
     const report = await tickWhileResend({ status: 503, body: '{"message":"try later"}' });
 
-    expect(report.failed.find(fault => fault.id === id)?.code).toBe('payments.notification_provider_rejected');
+    expect(report.failed.find(fault => fault.id === id)?.failure?.code).toBe('payments.notification_provider_rejected');
     const stored = await storedExecution(id);
     expect(stored).toMatchObject({
       status: 'failed',
@@ -1210,7 +1210,7 @@ describe('a message that did not go out fails the execution and is reported', ()
 
     const report = await tickWhileResend({ status: 200, body: '{"id":"email_late"}', delayMs: 600 });
 
-    expect(report.failed.find(fault => fault.id === id)?.code).toBe('payments.notification_provider_timeout');
+    expect(report.failed.find(fault => fault.id === id)?.failure?.code).toBe('payments.notification_provider_timeout');
     expect(await storedExecution(id)).toMatchObject({ status: 'failed', nextRetryAt: null });
     expect(await communicationsOf(id)).toEqual([{ status: 'failed' }]);
   });
@@ -1220,7 +1220,7 @@ describe('a message that did not go out fails the execution and is reported', ()
 
     const report = await tickWhileResend({ status: 422, body: '{"message":"invalid recipient"}' });
 
-    expect(report.failed.find(fault => fault.id === id)?.code).toBe('payments.notification_provider_rejected');
+    expect(report.failed.find(fault => fault.id === id)?.failure?.code).toBe('payments.notification_provider_rejected');
     expect(await storedExecution(id)).toMatchObject({ status: 'failed', nextRetryAt: null });
   });
 
@@ -1379,7 +1379,13 @@ describe('a retry count that is already full', () => {
 
     const report = await service.retryFailedExecutions(1000);
 
-    expect(report.failed).toContainEqual(expect.objectContaining({ id: full.id, code: 'payments.counter_exhausted' }));
+    expect(report.failed).toContainEqual(
+      expect.objectContaining({
+        id: full.id,
+        status: 'refused',
+        failure: expect.objectContaining({ code: 'payments.counter_exhausted' }),
+      }),
+    );
     expect(await executions.findById(full.id)).toMatchObject({
       status: 'failed',
       retryCount: INT4_MAX,

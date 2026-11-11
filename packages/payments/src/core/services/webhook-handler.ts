@@ -314,39 +314,77 @@ export class WebhookHandler extends EventEmitter {
    * Reads only events with attempts left (fewer than `maxRetries`), oldest first, so events given
    * up on never crowd out newer ones. A run whose attempt was the last one emits `webhook:failed`
    * once, next to `webhook:processing_error`; the row keeps the error that attempt recorded.
+   *
+   * Returns one report per event read, in that order:
+   *
+   * - `processed`: the event ran and is marked processed.
+   * - `skipped`: another taker holds the event (its attempt is still inside its lease); nothing ran.
+   * - `refused`: the event's handler or a journal write returned a failure, in `failure`. It is
+   *   recorded on the row, and the event stays unprocessed for the next resend or retry.
+   * - `thrown`: the run threw (a fault), in `error`; recorded on the row the same way.
+   *
+   * One broken event never stops the others. A fault that stops the whole run (the event read or a
+   * takeover throws: the database is down) emits `webhook:retry_error` and is thrown.
    */
-  async retryFailedWebhooks(): Promise<void> {
+  async retryFailedWebhooks() {
     try {
       const unprocessedEvents = await this.paymentRepository.findUnprocessedWebhookEvents(100, this.config.maxRetries);
 
+      const reports = [];
       for (const event of unprocessedEvents) {
+        const webhookId = event.id;
         const reclaimed = await this.paymentRepository.reclaimWebhookEvent(
-          event.id,
+          webhookId,
           event.attempts,
           this.leaseCutoff(),
         );
-        // Lost to another taker, or (never here: every event read has fewer than `maxRetries` attempts) a full count
-        if (reclaimed !== true) {
+        // Never here: every event read has fewer than `maxRetries` attempts, so the count is not full
+        if (isFailure(reclaimed)) {
+          reports.push({ webhookId, status: 'refused' as const, failure: reclaimed });
           continue;
         }
-        let error: string | undefined;
-        try {
-          const outcome = await this.runClaimed(event.id, event.eventType, event.provider, event.data);
-          if (isFailure(outcome)) error = outcome.code;
-        } catch (error_) {
-          error = error_ instanceof Error ? error_.message : 'Unknown error';
+        if (!reclaimed) {
+          reports.push({ webhookId, status: 'skipped' as const });
+          continue;
         }
-        if (error === undefined) continue;
 
-        const report = { webhookId: event.id, eventType: event.eventType, provider: event.provider, error };
+        const ran = await this.runRetried(webhookId, event.eventType, event.provider, event.data);
+        reports.push(ran);
+        if (ran.status === 'processed') continue;
+
+        const error =
+          ran.status === 'refused'
+            ? ran.failure.code
+            : ran.error instanceof Error
+              ? ran.error.message
+              : 'Unknown error';
+        const report = { webhookId, eventType: event.eventType, provider: event.provider, error };
         this.emit('webhook:processing_error', report);
         // The takeover counted this attempt: `event.attempts + 1` have now failed
         if (event.attempts + 1 >= this.config.maxRetries) this.emit('webhook:failed', report);
       }
+      return reports;
     } catch (error) {
       this.emit('webhook:retry_error', {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
+      throw error;
+    }
+  }
+
+  /** Run one event `retryFailedWebhooks` took over, and report it (see there). */
+  private async runRetried(
+    webhookId: WebhookId,
+    eventType: WebhookEventType,
+    provider: PaymentProviderType,
+    data: Record<string, unknown>,
+  ) {
+    try {
+      const outcome = await this.runClaimed(webhookId, eventType, provider, data);
+      if (isFailure(outcome)) return { webhookId, status: 'refused' as const, failure: outcome };
+      return { webhookId, status: 'processed' as const };
+    } catch (error) {
+      return { webhookId, status: 'thrown' as const, error };
     }
   }
 

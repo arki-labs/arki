@@ -280,11 +280,11 @@ describe('the scheduled ticks hand their faults to the scheduler', () => {
     const profiles = await ticks.updateRiskProfiles();
 
     expect(segments.failed).toEqual([
-      expect.objectContaining({ id: segment.id, code: 'money.unknown_currency' }),
+      { id: segment.id, status: 'refused', failure: expect.objectContaining({ code: 'money.unknown_currency' }) },
     ]);
     expect(profiles).toMatchObject({
       processed: 1,
-      failed: [expect.objectContaining({ id: customerId, code: 'money.unknown_currency' })],
+      failed: [{ id: customerId, status: 'refused', failure: { code: 'money.unknown_currency' } }],
     });
     await client.close();
   });

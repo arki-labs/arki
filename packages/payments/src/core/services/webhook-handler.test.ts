@@ -385,11 +385,12 @@ describe('WebhookHandler.retryFailedWebhooks', () => {
     const retrying = handler.retryFailedWebhooks();
     await entered.promise;
     // The job's own attempt is now running: a second pass must not start it again.
-    await handler.retryFailedWebhooks();
+    const { id: webhookId } = await rowFor('evt_retry_job');
+    expect(await handler.retryFailedWebhooks()).toEqual([{ webhookId, status: 'skipped' }]);
     expect(counter.runs).toBe(2);
 
     release.resolve();
-    await retrying;
+    expect(await retrying).toEqual([{ webhookId, status: 'processed' }]);
     expect(counter.runs).toBe(2);
     expect(await rowFor('evt_retry_job')).toMatchObject({ processed: true, attempts: 2 });
   });
@@ -1195,11 +1196,45 @@ describe('WebhookHandler.retryFailedWebhooks and events given up on', () => {
     const failed: unknown[] = [];
     handler.on('webhook:failed', report => failed.push(report));
 
-    await handler.retryFailedWebhooks();
-    await handler.retryFailedWebhooks();
+    const { id: webhookId } = await rowFor('evt_last_try');
+    expect(await handler.retryFailedWebhooks()).toEqual([
+      { webhookId, status: 'thrown', error: expect.objectContaining({ message: 'still down' }) },
+    ]);
+    expect(await handler.retryFailedWebhooks()).toEqual([]);
 
     expect(failed).toMatchObject([{ error: 'still down' }]);
     expect(await rowFor('evt_last_try')).toMatchObject({ attempts: 2, errorMessage: 'still down' });
+  });
+});
+
+describe('WebhookHandler.retryFailedWebhooks reports', () => {
+  it('each event it read: processed, refused with the failure, or thrown with the error', async () => {
+    const crash = new Error('downstream crashed');
+    const fine = await seedRow('evt_report_fine', { lastAttemptAt: sub(now(), { hours: 1 }) });
+    const deleted = await seedRow('evt_report_deleted', { lastAttemptAt: sub(now(), { hours: 1 }) });
+    const crashing = await seedRow('evt_report_crashing', { lastAttemptAt: sub(now(), { hours: 1 }) });
+    const { validator } = validatorReturning(valid);
+    const handler = orThrow(WebhookHandler.create(new PaymentRepository(db, core), validator, writesOn(db)));
+    handler.registerEventHandler('subscription.created', async ({ webhookId }) => {
+      // A row deleted while its event ran cannot be marked processed
+      if (webhookId === deleted.id) await db.delete(webhookEvents).where(eq(webhookEvents.id, webhookId));
+      if (webhookId === crashing.id) throw crash;
+    });
+
+    const reports = await handler.retryFailedWebhooks();
+
+    expect(reports).toHaveLength(3);
+    expect(reports).toEqual(
+      expect.arrayContaining([
+        { webhookId: fine.id, status: 'processed' },
+        {
+          webhookId: deleted.id,
+          status: 'refused',
+          failure: expect.objectContaining({ code: 'payments.webhook_event_not_found' }),
+        },
+        { webhookId: crashing.id, status: 'thrown', error: crash },
+      ]),
+    );
   });
 });
 

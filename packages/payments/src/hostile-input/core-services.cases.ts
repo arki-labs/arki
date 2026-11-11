@@ -480,12 +480,8 @@ export const coreServicesArea = area<Ctx>({
 
         return args(service);
       },
-      call: async (_ctx, service) => {
-        await service.processRetries();
-
-        return 'processed';
-      },
-      valid: result => expect(result).toBe('processed'),
+      call: (_ctx, service) => service.processRetries(),
+      valid: result => expect(result).toMatchObject([{ status: 'succeeded' }]),
     }),
     op('core/services/payment-retry-service.ts::PaymentRetryService.cancelRetries', {
       arrange: async ctx => {

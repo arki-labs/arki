@@ -26,6 +26,7 @@ import { PaymentWithoutSubscription } from '../failures.js';
 import { MAX_BATCH_ITEMS } from '../pg-values.js';
 import { createPaymentId } from '../primitives.js';
 import { CardDeclined, ReferenceNotFound } from '../providers/provider-error.js';
+import { StripeProvider } from '../providers/stripe-provider.js';
 import { PaymentRetryService } from './payment-retry-service.js';
 
 type Provider = Parameters<typeof PaymentRetryService.create>[0];
@@ -178,6 +179,107 @@ describe('a retry the card declines', () => {
     expect(attempts.map(attempt => attempt.status)).toEqual(['failed', 'pending']);
     expect(eventsWritten).toBe(0);
     expect(await subscriptionRow(db, id)).toMatchObject({ status: 'active' });
+  });
+});
+
+/**
+ * `processRetries` returns what each due attempt did, so the caller can act on a failure instead of
+ * reading log lines: a provider built wrong, a declined card or a crash each come back as a value.
+ */
+describe('processRetries reports each due attempt', () => {
+  /** A failed payment on an active subscription, with its retries scheduled by `strategy` on `provider`. */
+  async function scheduledOn(provider: Provider, strategy: RetryStrategy = oneRetryNow) {
+    const subscription = await seedSubscription(writes, 'active');
+    const payment = await seedPayment(writes, subscription.id);
+    const service = build(provider, reads, writes, [strategy]);
+    const attempts = await orThrow(service.scheduleRetries(payment.id, 'card_declined'));
+    return { service, subscription, payment, attemptIds: attempts.map(attempt => attempt.id) };
+  }
+
+  it('a recovered payment is succeeded, and its other due attempt is cancelled, in run order', async () => {
+    const twoDueNow: RetryStrategy = { ...oneRetryNow, name: 'two_due_now', maxAttempts: 2, delayMinutes: [0, 0] };
+    const { service, attemptIds } = await scheduledOn(providerWhereRetryEnds('succeeded'), twoDueNow);
+
+    expect(await service.processRetries()).toEqual([
+      { attemptId: attemptIds[0], status: 'succeeded' },
+      { attemptId: attemptIds[1], status: 'cancelled' },
+    ]);
+  });
+
+  it('a declined card is failed with payments.card_declined', async () => {
+    const declining: Provider = {
+      confirmPayment: () => Promise.resolve(CardDeclined({ providerCode: 'card_declined' })),
+    };
+    const { service, attemptIds } = await scheduledOn(declining);
+
+    expect(await service.processRetries()).toEqual([
+      {
+        attemptId: attemptIds[0],
+        status: 'failed',
+        failure: expect.objectContaining({ code: 'payments.card_declined', data: { providerCode: 'card_declined' } }),
+      },
+    ]);
+  });
+
+  it('a payment the provider answers as failed is failed with that answer', async () => {
+    const { service, payment, attemptIds } = await scheduledOn(providerWhereRetryEnds('failed'));
+
+    expect(await service.processRetries()).toEqual([
+      {
+        attemptId: attemptIds[0],
+        status: 'failed',
+        payment: expect.objectContaining({ id: payment.id, status: 'failed' }),
+      },
+    ]);
+  });
+
+  it('a StripeProvider built without references is refused with payments.configuration_invalid', async () => {
+    const stripe = orThrow(
+      StripeProvider.create({ apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' }),
+    );
+    const { service, payment, attemptIds } = await scheduledOn(stripe);
+
+    expect(await service.processRetries()).toEqual([
+      {
+        attemptId: attemptIds[0],
+        status: 'refused',
+        failure: expect.objectContaining({
+          code: 'payments.configuration_invalid',
+          data: expect.objectContaining({ setting: 'references' }),
+        }),
+      },
+    ]);
+    expect(service.getRetryAttempts(payment.id)).toMatchObject([{ status: 'failed' }]);
+  });
+
+  it('an attempt that throws is thrown with its error, and the next attempt still runs', async () => {
+    const providerDown = new Error('provider down');
+    const subscription = await seedSubscription(writes, 'active');
+    const broken = await seedPayment(writes, subscription.id);
+    const recovered = await seedPayment(writes, subscription.id);
+    const recovering = providerWhereRetryEnds('succeeded');
+    const provider: Provider = {
+      async confirmPayment(paymentId) {
+        if (paymentId === broken.id) throw providerDown;
+        return recovering.confirmPayment(paymentId);
+      },
+    };
+    const service = build(provider, reads, writes, [oneRetryNow]);
+    const [first] = await orThrow(service.scheduleRetries(broken.id, 'card_declined'));
+    const [second] = await orThrow(service.scheduleRetries(recovered.id, 'card_declined'));
+
+    expect(await service.processRetries()).toEqual([
+      { attemptId: first?.id, status: 'thrown', error: providerDown },
+      { attemptId: second?.id, status: 'succeeded' },
+    ]);
+    expect(service.getRetryAttempts(broken.id)).toMatchObject([{ status: 'failed', failureReason: 'provider down' }]);
+  });
+
+  it('an attempt whose subscription is no longer active or past due is cancelled', async () => {
+    const { service, subscription, attemptIds } = await scheduledOn(providerWhereRetryEnds('succeeded'));
+    await orThrow(writes.cancelSubscription({ subscriptionId: subscription.id }));
+
+    expect(await service.processRetries()).toEqual([{ attemptId: attemptIds[0], status: 'cancelled' }]);
   });
 });
 

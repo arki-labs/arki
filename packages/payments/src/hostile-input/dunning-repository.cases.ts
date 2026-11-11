@@ -292,7 +292,7 @@ export const dunningRepositoryArea = area<Ctx>({
     op('dunning/index.ts::tickFault', {
       arrange: () => args('item_1', new Error('boom')),
       call: (_ctx, id, fault) => tickFault(id, fault),
-      valid: result => expect(result).toEqual({ id: 'item_1', code: null, message: 'boom' }),
+      valid: result => expect(result).toEqual({ id: 'item_1', status: 'thrown', error: new Error('boom') }),
     }),
     op('dunning/primitives.ts::createCustomerRiskProfileId', {
       arrange: noArgs,

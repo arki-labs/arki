@@ -223,8 +223,11 @@ export type NotificationProviderFailure =
   | FailureOf<typeof NotificationWebhookHostNotAllowed>
   | SchemaFailure;
 
-/** One item a scheduled tick could not handle: its id, the failure code (`null` for a thrown error) and the message. */
-export type DunningTickFault = { id: string; code: string | null; message: string };
+/**
+ * One item a scheduled tick could not handle, made by `tickFault`: `refused` with the `failure` the
+ * package returned, or `thrown` with the `error` (a fault).
+ */
+export type DunningTickFault = ReturnType<typeof tickFault>;
 
 /**
  * What one scheduled tick did: how many items it handled, and each item it could not handle. A tick
@@ -233,8 +236,8 @@ export type DunningTickFault = { id: string; code: string | null; message: strin
  */
 export type DunningTickReport = { processed: number; failed: DunningTickFault[] };
 
-/** The tick fault for one item: a returned failure keeps its code, a thrown error has none. */
-export function tickFault(id: string, fault: unknown): DunningTickFault {
-  if (isFailure(fault)) return { id, code: fault.code, message: fault.message };
-  return { id, code: null, message: fault instanceof Error ? fault.message : String(fault) };
+/** The tick fault for one item: a returned failure is `refused` and keeps the failure, anything else is `thrown` and keeps the error. */
+export function tickFault(id: string, fault: unknown) {
+  if (isFailure(fault)) return { id, status: 'refused' as const, failure: fault };
+  return { id, status: 'thrown' as const, error: fault };
 }
