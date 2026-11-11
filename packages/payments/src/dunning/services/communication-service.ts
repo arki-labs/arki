@@ -28,6 +28,7 @@ import type {
   DunningTemplate,
 } from '../types.js';
 import { PaymentsConfigurationInvalid } from '../../core/failures.js';
+import { fetchUrlSchema } from '../../core/fetch-url.js';
 import { INT4_MAX, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from '../../core/pg-values.js';
 import { communicationWebhookSchema } from '../contracts.js';
 import { PaymentProviderError } from '../../core/providers/provider-error.js';
@@ -109,12 +110,11 @@ const headerValueSchema = z
 /** A header name `fetch` accepts: an HTTP token. */
 const headerNameSchema = z.string().regex(/^[\w!#$%&'*+.^`|~-]+$/, 'is not an HTTP header name');
 
-/** A provider API origin `fetch` can call: an http(s) URL with no user name or password (`fetch` refuses those). */
-const apiBaseUrlSchema = z.url({ protocol: /^https?$/ }).refine(
-  // Zod runs a refinement after a failed format check too, so it parses only text a URL can be
-  url => URL.canParse(url) && new URL(url).username === '' && new URL(url).password === '',
-  'must be an http or https URL with no user name or password',
-);
+/**
+ * A provider API origin `fetch` can call on every runtime: an http(s) URL with no user name or
+ * password and no port the Fetch standard blocks (`fetch` refuses both).
+ */
+const apiBaseUrlSchema = fetchUrlSchema;
 
 /**
  * `payments.configuration_invalid` for `setting` when `value` fails `schema`, else `undefined`, so a
@@ -283,8 +283,9 @@ export class EmailProvider implements CommunicationProvider {
   /**
    * Builds the provider, or returns `payments.configuration_invalid` for a `timeoutMs` that is not a
    * whole number from 1 to 2^31 - 1, an `apiKey` no HTTP header can carry, or an `apiBaseUrl` that is
-   * not an http(s) URL without credentials: `fetch` would refuse those before sending, so
-   * `unavailable` means a real outage.
+   * not an http(s) URL without credentials or that uses a port the Fetch standard blocks (such as
+   * 6000, on every runtime): `fetch` would refuse those before sending, so `unavailable` means a real
+   * outage.
    */
   static create(config: EmailProviderConfig): EmailProvider | ConfigurationInvalid {
     return (
@@ -431,7 +432,8 @@ export class SMSProvider implements CommunicationProvider {
   /**
    * Builds the provider, or returns `payments.configuration_invalid` for a `timeoutMs` that is not a
    * whole number from 1 to 2^31 - 1, an `accountSid` or `authToken` no HTTP header can carry, or an
-   * `apiBaseUrl` that is not an http(s) URL without credentials.
+   * `apiBaseUrl` that is not an http(s) URL without credentials or that uses a port the Fetch
+   * standard blocks (such as 6000, on every runtime).
    */
   static create(config: SMSProviderConfig): SMSProvider | ConfigurationInvalid {
     // `btoa` throws for a character above U+00FF; `fetch` refuses an invalid origin before sending
@@ -632,8 +634,8 @@ export class InAppProvider implements CommunicationProvider {
 }
 
 /**
- * A webhook recipient: an http or https URL with no user name or password. `fetch` throws for one
- * with credentials before sending, which would read as an outage.
+ * A webhook recipient: an http or https URL with no user name or password and no port the Fetch
+ * standard blocks. `fetch` throws for either before sending, which would read as an outage.
  */
 const webhookUrlSchema = apiBaseUrlSchema;
 

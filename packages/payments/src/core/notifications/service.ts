@@ -14,6 +14,7 @@ import type { Refund } from '../../refunds/types.js';
 import type { PaymentRepository } from '../repository.js';
 import { refundAmountOf } from '../../refunds/repository.js';
 import { NotificationFailed, PaymentsConfigurationInvalid } from '../failures.js';
+import { fetchUrlSchema } from '../fetch-url.js';
 import { MAX_BATCH_ITEMS, pgTextSchema } from '../pg-values.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
 import { observePayments } from '../telemetry.js';
@@ -155,7 +156,7 @@ export class EmailNotificationService implements NotificationService {
 }
 
 export type SlackNotificationConfig = {
-  /** The Slack incoming-webhook URL. It is a secret: it is never logged. */
+  /** The Slack incoming-webhook URL: http(s), no user name or password, no port `fetch` blocks. It is a secret: it is never logged. */
   webhookUrl: string;
   adminChannel: string;
   supportChannel: string;
@@ -166,7 +167,7 @@ export type SlackNotificationConfig = {
 };
 
 const slackConfigSchema = z.object({
-  webhookUrl: z.url({ protocol: /^https?$/ }),
+  webhookUrl: fetchUrlSchema,
   adminChannel: z.string().min(1),
   supportChannel: z.string().min(1),
   adminUrl: z.url(),
@@ -181,7 +182,11 @@ export class SlackNotificationService implements NotificationService {
     this.config = config;
   }
 
-  /** Builds the service. Returns `payments.configuration_invalid` for a config without a valid webhook URL, channels or admin URL. */
+  /**
+   * Builds the service. Returns `payments.configuration_invalid` for a config without a valid webhook
+   * URL (an http(s) URL with no user name or password, on a port the Fetch standard does not block),
+   * channels or admin URL.
+   */
   static create(config: SlackNotificationConfig) {
     const problem = notificationConfigProblem(config, slackConfigSchema, 'notifications.slack');
     return problem ?? new SlackNotificationService(config);

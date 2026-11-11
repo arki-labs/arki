@@ -319,6 +319,33 @@ describe('createNotificationService refuses a config that cannot send, when it i
           slack: { webhookUrl: '', adminChannel: '#a', supportChannel: '#s', adminUrl: 'https://admin.example.com' },
         }),
     ],
+    [
+      // `fetch` on Node, Deno and browsers refuses this port, so every post would fail
+      'slack with a webhook URL on a port the Fetch standard blocks',
+      () =>
+        createNotificationService({
+          type: 'slack',
+          slack: {
+            webhookUrl: 'http://127.0.0.1:6000/hook',
+            adminChannel: '#a',
+            supportChannel: '#s',
+            adminUrl: 'https://admin.example.com',
+          },
+        }),
+    ],
+    [
+      'slack with a webhook URL holding a user name and password',
+      () =>
+        createNotificationService({
+          type: 'slack',
+          slack: {
+            webhookUrl: 'https://user:pass@hooks.slack.com/services/x',
+            adminChannel: '#a',
+            supportChannel: '#s',
+            adminUrl: 'https://admin.example.com',
+          },
+        }),
+    ],
     ['multi with no channel', () => createNotificationService({ type: 'multi' })],
   ])('%s returns payments.configuration_invalid and builds nothing', (_name, build) => {
     expect(PaymentsConfigurationInvalid.is(build())).toBe(true);

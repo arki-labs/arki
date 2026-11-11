@@ -17,7 +17,12 @@ import type { RecordedStripeRequest } from './stripe-test-support.js';
 import { createRefundId } from '../../refunds/primitives.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId } from '../primitives.js';
 import { PlanPriceNotFlat } from './provider-error.js';
-import { createFakeStripeHttp, stripeProviderOf } from './stripe-test-support.js';
+import {
+  createFakeStripeHttp,
+  STRIPE_READ_AMOUNT_CASES,
+  STRIPE_STORED_AMOUNT_CASES,
+  stripeProviderOf,
+} from './stripe-test-support.js';
 
 const T0 = 1_767_225_600;
 const T1 = 1_769_904_000;
@@ -351,7 +356,7 @@ describe('plans', () => {
     const half = provider(() => ({
       body: stripeIntent({ latest_charge: { id: 'ch_1', object: 'charge', amount_refunded: 5.5, receipt_url: null } }),
     }));
-    expect(isFailure(await half.stripe.getPayment(paymentRow.id))).toBe(true);
+    expect(await half.stripe.getPayment(paymentRow.id)).toMatchObject({ code: 'money.out_of_range' });
     expect(isFailure(await refunded.stripe.getPayment(paymentRow.id))).toBe(false);
   });
 
@@ -775,6 +780,21 @@ describe('amounts Stripe cannot take are returned before any request', () => {
     expect(requests).toEqual([]);
   });
 
+  it('createPlan returns money.out_of_range for an MGA amount Stripe takes but our minor-unit column cannot hold', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    // 10^15 ariary is 10^15 Stripe units (whole ariary) but 10^17 of our minor units (2 ISO decimals)
+    const plan = await stripe.createPlan({
+      name: 'Pro',
+      tier: 'pro',
+      amount: money('1000000000000000', 'MGA'),
+      interval: 'monthly',
+    });
+
+    expect(plan).toMatchObject({ code: 'money.out_of_range' });
+    expect(requests).toEqual([]);
+  });
+
   it('createPlan deletes the product it made when Stripe refuses the price, then throws the price error', async () => {
     const { stripe, requests } = provider(request => {
       if (request.path === '/v1/products' && request.method === 'POST') {
@@ -856,5 +876,109 @@ describe('amounts Stripe cannot take are returned before any request', () => {
 
     expect(refund).toMatchObject({ code: 'money.provider_amount' });
     expect(requests).toEqual([]);
+  });
+});
+
+/**
+ * Every call that turns a Stripe amount into `Money` returns the exact `@arki/money` code for an amount money
+ * refuses, never a throw and never a made-up amount. Plans and payments fill a minor-unit column, so they also
+ * refuse an amount past 2^53 - 1 minor units; the preview does not store one.
+ */
+describe('amounts Stripe sends that are not money', () => {
+  const plans: [string, (stripe: ReturnType<typeof provider>['stripe']) => Promise<unknown>, boolean][] = [
+    ['getPlan', stripe => stripe.getPlan(planId), false],
+    ['updatePlan', stripe => stripe.updatePlan(planId, { metadata: { badge: 'new' } }), false],
+    ['listPlans', stripe => stripe.listPlans(), true],
+  ];
+  const plansByCase = plans.flatMap(([method, call, listed]) =>
+    STRIPE_STORED_AMOUNT_CASES.map(([code, what, currency, amount]) => ({
+      method,
+      call,
+      listed,
+      code,
+      what,
+      currency,
+      amount,
+    })),
+  );
+
+  it.each(plansByCase)('$method returns $code for $what', async ({ call, listed, code, currency, amount }) => {
+    const price = stripePrice({ currency, unit_amount: amount });
+    const { stripe } = provider(() => ({ body: listed ? list([price]) : price }));
+
+    expect(await call(stripe)).toMatchObject({ code });
+  });
+
+  const payments: [string, (stripe: ReturnType<typeof provider>['stripe']) => Promise<unknown>][] = [
+    [
+      'createPayment',
+      stripe => stripe.createPayment({ customerId: customer.id, amount: money(15, 'USD'), paymentMethodId: 'pm_1' }),
+    ],
+    ['getPayment', stripe => stripe.getPayment(paymentRow.id)],
+    ['confirmPayment', stripe => stripe.confirmPayment(paymentRow.id)],
+    ['cancelPayment', stripe => stripe.cancelPayment(paymentRow.id)],
+  ];
+  const paymentsByCase = payments.flatMap(([method, call]) =>
+    (['amount', 'amount_refunded'] as const).flatMap(field =>
+      STRIPE_STORED_AMOUNT_CASES.map(([code, what, currency, amount]) => ({
+        method,
+        call,
+        field,
+        code,
+        what,
+        currency,
+        amount,
+      })),
+    ),
+  );
+
+  it.each(paymentsByCase)(
+    '$method returns $code for $what in $field',
+    async ({ call, field, code, currency, amount }) => {
+      const charge = {
+        id: 'ch_1',
+        object: 'charge',
+        amount_refunded: field === 'amount_refunded' ? amount : 0,
+        receipt_url: null,
+      };
+      const intent = stripeIntent({ currency, amount: field === 'amount' ? amount : 0, latest_charge: charge });
+      const { stripe } = provider(() => ({ body: intent }));
+
+      expect(await call(stripe)).toMatchObject({ code });
+    },
+  );
+
+  it.each(STRIPE_READ_AMOUNT_CASES)(
+    'previewSubscriptionChange returns %s for %s',
+    async (code, _what, currency, amount) => {
+      const { stripe } = provider(request =>
+        request.path === '/v1/invoices/create_preview'
+          ? { body: { id: 'in_preview', object: 'invoice', currency, lines: list([{ ...line(0, true), amount }]) } }
+          : { body: stripeSubscription() },
+      );
+
+      expect(await stripe.previewSubscriptionChange({ subscriptionId: subscriptionRow.id, planId })).toMatchObject({
+        code,
+      });
+    },
+  );
+
+  it('previewSubscriptionChange stores no minor units, so a Stripe MGA amount near 2^53 is an answer', async () => {
+    const { stripe } = provider(request =>
+      request.path === '/v1/invoices/create_preview'
+        ? {
+            body: {
+              id: 'in_preview',
+              object: 'invoice',
+              currency: 'mga',
+              lines: list([line(Number.MAX_SAFE_INTEGER, false)]),
+            },
+          }
+        : { body: stripeSubscription() },
+    );
+
+    const preview = await orThrow(stripe.previewSubscriptionChange({ subscriptionId: subscriptionRow.id, planId }));
+
+    expect(preview.proration.nextInvoiceTotal).toEqual({ amount: '9007199254740991.00', currency: 'MGA' });
   });
 });

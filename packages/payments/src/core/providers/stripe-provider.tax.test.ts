@@ -15,7 +15,7 @@ import type { Customer } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
 import { createCustomerId } from '../primitives.js';
 import { TaxAddressIncomplete } from './provider-error.js';
-import { createFakeStripeHttp, stripeProviderOf } from './stripe-test-support.js';
+import { createFakeStripeHttp, STRIPE_READ_AMOUNT_CASES, stripeProviderOf } from './stripe-test-support.js';
 
 const customer: Customer = {
   id: orThrow(createCustomerId()),
@@ -519,5 +519,54 @@ describe('tax reports', () => {
 
     expect(stripe.features.taxReporting).toBe(false);
     expect('getTaxReport' in stripe).toBe(false);
+  });
+});
+
+/**
+ * Tax answers hold no minor-unit column, so the read cases apply: each Stripe amount money refuses is returned
+ * with its exact `@arki/money` code. Every amount of the answer carries the bad value.
+ */
+describe('tax amounts Stripe sends that are not money', () => {
+  const sale = {
+    reference: 'order_9',
+    type: 'sale' as const,
+    currency: 'USD',
+    lineItems: [{ amount: money('10.00', 'USD'), reference: 'plan' }],
+  };
+
+  it.each(STRIPE_READ_AMOUNT_CASES)('calculateTax returns %s for %s', async (code, _what, currency, amount) => {
+    const breakdown = { amount, jurisdiction: { display_name: 'Berlin', country: 'DE', level: 'country' } };
+    const { stripe } = provider(() => ({
+      body: {
+        id: 'taxcalc_1',
+        object: 'tax.calculation',
+        currency,
+        amount_total: amount,
+        tax_amount_exclusive: amount,
+        tax_amount_inclusive: amount,
+        line_items: list([{ tax_breakdown: [breakdown] }]),
+      },
+    }));
+
+    expect(
+      await stripe.calculateTax({ customerId: customer.id, currency: 'USD', lineItems: sale.lineItems }),
+    ).toMatchObject({ code });
+  });
+
+  it.each(STRIPE_READ_AMOUNT_CASES)('createTaxTransaction returns %s for %s', async (code, _what, currency, amount) => {
+    const { stripe } = provider(request =>
+      request.path === '/v1/tax/calculations'
+        ? { body: { id: 'taxcalc_1', object: 'tax.calculation', currency: 'usd' } }
+        : {
+            body: {
+              id: 'tax_txn_1',
+              object: 'tax.transaction',
+              currency,
+              line_items: list([{ amount, amount_tax: amount, tax_behavior: 'exclusive' }]),
+            },
+          },
+    );
+
+    expect(await stripe.createTaxTransaction(sale)).toMatchObject({ code });
   });
 });

@@ -1,0 +1,5 @@
+---
+"@arki/payments": minor
+---
+
+Audit 7, dunning lane. A full counter is returned, never a raw Postgres 22003 error: `DunningExecutionRepository.startRetry`, `PaymentRepository.incrementWebhookEventAttempts` and `reclaimWebhookEvent` return the new failure `payments.counter_exhausted` (`CounterExhausted`, 409, data `{ counter, id }`) when `retryCount` or `attempts` already holds 2^31 - 1, and write nothing. The guard sits in the update itself, and `incrementWebhookEventAttempts` now raises the count in SQL. `reclaimWebhookEvent` returns `boolean | CounterExhausted`. `retryFailedExecutions` reports such an execution and stops retrying it. Every URL `fetch` is given refuses a port the WHATWG Fetch standard blocks, on every runtime (one list, `FETCH_BAD_PORTS`): `EmailProvider.create` and `SMSProvider.create` return `payments.configuration_invalid` for such an `apiBaseUrl`, `WebhookProvider.send` returns `schema.invalid_input` for such a recipient, and `SlackNotificationService.create` refuses such a `webhookUrl` (and one with credentials).

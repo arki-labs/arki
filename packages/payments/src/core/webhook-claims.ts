@@ -20,6 +20,7 @@ import type { FailureOf, SchemaFailure } from '@arki/failure';
 import type { NewWebhookEvent, WebhookEvent, WebhookId } from './types.js';
 import { paymentProviderValues, webhookEventTypeValues } from './primitives.js';
 import { INT4_MAX, isPgInstant, pgInstantSchema, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from './pg-values.js';
+import { CounterExhausted } from './failures.js';
 import { WebhookClaimConflict } from './services/webhook-failures.js';
 
 /**
@@ -103,7 +104,9 @@ export async function claimWebhookEvent(
  *
  * Preconditions (anything else throws an invariant failure): `seenAttempts` is the whole `attempts`
  * value read from the row, and `leaseCutoff` falls in the years 1 to 9999. An `id` no row can hold
- * (U+0000) takes nothing over: false, with no query.
+ * (U+0000) takes nothing over: false, with no query. A row the takeover would match whose `attempts`
+ * already holds `INT4_MAX` cannot count one more: `CounterExhausted` (`payments.counter_exhausted`),
+ * and nothing is written.
  */
 export async function reclaimWebhookEvent(
   db: WebhookClaimDb,
@@ -111,13 +114,24 @@ export async function reclaimWebhookEvent(
   id: WebhookId,
   seenAttempts: number,
   leaseCutoff: Instant,
-): Promise<boolean> {
+): Promise<boolean | FailureOf<typeof CounterExhausted>> {
   invariant(
     Number.isInteger(seenAttempts) && seenAttempts >= 0 && seenAttempts <= INT4_MAX,
     '[@arki/payments] seenAttempts must be the attempts value read from the row',
   );
   invariant(isPgInstant(leaseCutoff), '[@arki/payments] leaseCutoff must fall in the years 1 to 9999');
   if (!is(id, pgTextSchema)) return false;
+  const takeover = and(
+    eq(table.id, id),
+    eq(table.processed, false),
+    eq(table.attempts, seenAttempts),
+    or(isNotNull(table.errorMessage), isNull(table.lastAttemptAt), lt(table.lastAttemptAt, leaseCutoff)),
+  );
+  if (seenAttempts === INT4_MAX) {
+    // The update would match only a row whose count is full, and the column cannot hold one more
+    const [full] = await db.select({ id: table.id }).from(table).where(takeover);
+    return full ? CounterExhausted({ counter: 'attempts', id }) : false;
+  }
   const attemptAt = now();
   const won = await db
     .update(table)
@@ -127,14 +141,8 @@ export async function reclaimWebhookEvent(
       errorMessage: null,
       updatedAt: attemptAt,
     })
-    .where(
-      and(
-        eq(table.id, id),
-        eq(table.processed, false),
-        eq(table.attempts, seenAttempts),
-        or(isNotNull(table.errorMessage), isNull(table.lastAttemptAt), lt(table.lastAttemptAt, leaseCutoff)),
-      ),
-    )
+    // `attempts = seenAttempts`, below INT4_MAX, guards the increment in the update itself
+    .where(takeover)
     .returning({ id: table.id });
 
   return won.length > 0;

@@ -26,6 +26,7 @@ import type {
   InAppNotificationStore,
   StoredInAppNotification,
 } from './services/communication-service.js';
+import { FETCH_BAD_PORTS } from '../core/fetch-url.js';
 import { createCustomerId } from '../core/primitives.js';
 import { PaymentProviderError } from '../core/providers/provider-error.js';
 import { core, customerId, schema, userId, users } from '../test-support.js';
@@ -58,6 +59,8 @@ let lastRequest: { url: string | undefined; body: string } | undefined;
 let requestCount = 0;
 let server: Server;
 let origin: string;
+/** An origin on a port nothing listens on, so a connection to it is refused. */
+let closedOrigin: string;
 
 function answerWith(next: Answer) {
   answer = next;
@@ -155,6 +158,13 @@ beforeAll(async () => {
   const address: AddressInfo | string | null = server.address();
   if (address === null || typeof address === 'string') throw new Error('the test server has no port');
   origin = `http://127.0.0.1:${address.port}`;
+  // A real port the system handed out, then let go: port 1 would be refused by `fetch` itself (a blocked port)
+  const closed = createServer();
+  await new Promise<void>(resolve => closed.listen(0, '127.0.0.1', resolve));
+  const closedAddress: AddressInfo | string | null = closed.address();
+  if (closedAddress === null || typeof closedAddress === 'string') throw new Error('the closed server has no port');
+  closedOrigin = `http://127.0.0.1:${closedAddress.port}`;
+  await new Promise(resolve => closed.close(resolve));
 
   client = new PGlite('memory://');
   await client.waitReady;
@@ -283,16 +293,16 @@ function unavailable(error: unknown) {
 }
 
 describe('a provider that cannot be reached, or a message id it cannot be asked about', () => {
-  // Nothing listens on port 1: the connection is refused before any answer
-  const offline = {
+  // Nothing listens on the closed port: the connection is refused before any answer
+  const offline = () => ({
     apiKey: 're_test',
     fromEmail: 'billing@example.com',
     fromName: 'Billing',
-    apiBaseUrl: 'http://127.0.0.1:1',
-  };
+    apiBaseUrl: closedOrigin,
+  });
 
   it('send and getDeliveryStatus throw PaymentProviderError unavailable (retryable), with the network error as cause', async () => {
-    const provider = orThrow(EmailProvider.create(offline));
+    const provider = orThrow(EmailProvider.create(offline()));
 
     await expect(provider.send(request)).rejects.toSatisfy(unavailable);
     await expect(provider.getDeliveryStatus('email_123')).rejects.toSatisfy(
@@ -312,7 +322,13 @@ describe('a provider that cannot be reached, or a message id it cannot be asked 
         'payments.configuration_invalid',
       );
     }
-    for (const apiBaseUrl of ['not a url', 'ftp://api.resend.com', 'https://user:pass@api.resend.com', '']) {
+    for (const apiBaseUrl of [
+      'not a url',
+      'ftp://api.resend.com',
+      'https://user:pass@api.resend.com',
+      '',
+      'http://127.0.0.1:6000',
+    ]) {
       expect(bootFailureCode(() => EmailProvider.create({ ...base, apiBaseUrl }))).toBe(
         'payments.configuration_invalid',
       );
@@ -330,6 +346,25 @@ describe('a provider that cannot be reached, or a message id it cannot be asked 
     expect(
       orThrow(EmailProvider.create({ ...base, apiKey: 're_\u00E9', apiBaseUrl: 'https://api.resend.com' })).channel,
     ).toBe('email');
+  });
+
+  // Node, Deno and browsers refuse these ports in `fetch`, so every send would throw unavailable; Bun sends them
+  it('an apiBaseUrl on any port the Fetch standard blocks returns payments.configuration_invalid at boot; a port next to one builds', () => {
+    const base = { apiKey: 're_test', fromEmail: 'billing@example.com', fromName: 'Billing' };
+    const smsBase = { accountSid: 'AC123', authToken: 'secret', fromNumber: '+15550000000' };
+
+    for (const port of FETCH_BAD_PORTS) {
+      expect(EmailProvider.create({ ...base, apiBaseUrl: `http://127.0.0.1:${port}` })).toMatchObject({
+        code: 'payments.configuration_invalid',
+        data: { setting: 'email.apiBaseUrl' },
+      });
+      expect(SMSProvider.create({ ...smsBase, apiBaseUrl: `https://api.twilio.com:${port}` })).toMatchObject({
+        code: 'payments.configuration_invalid',
+        data: { setting: 'sms.apiBaseUrl' },
+      });
+    }
+    expect(orThrow(EmailProvider.create({ ...base, apiBaseUrl: 'http://127.0.0.1:6001' })).channel).toBe('email');
+    expect(orThrow(SMSProvider.create({ ...smsBase, apiBaseUrl: 'https://api.twilio.com:443' })).channel).toBe('sms');
   });
 
   it('a message id with a lone UTF-16 surrogate returns schema.invalid_input and makes no request', async () => {
@@ -427,6 +462,15 @@ describe('WebhookProvider', () => {
 
     expect(InvalidInput.is(refused)).toBe(true);
     expect(lastRequest).toBeUndefined();
+  });
+
+  it('a recipient on a port the Fetch standard blocks returns schema.invalid_input and sends nothing', async () => {
+    const before = requestCount;
+
+    const refused = await webhook().send({ ...request, recipient: 'http://127.0.0.1:6000/hook' });
+
+    expect(refused).toMatchObject({ code: 'schema.invalid_input' });
+    expect(requestCount).toBe(before);
   });
 
   it('posts a JSON content as the payload, with the tracking metadata added', async () => {
@@ -809,7 +853,7 @@ describe('CommunicationOrchestrationService.sendCommunication', () => {
           apiKey: 're_test',
           fromEmail: 'billing@example.com',
           fromName: 'Billing',
-          apiBaseUrl: 'http://127.0.0.1:1',
+          apiBaseUrl: closedOrigin,
         }),
       ),
     );
@@ -832,7 +876,7 @@ describe('CommunicationOrchestrationService.sendCommunication', () => {
           apiKey: 're_test',
           fromEmail: 'billing@example.com',
           fromName: 'Billing',
-          apiBaseUrl: 'http://127.0.0.1:1',
+          apiBaseUrl: closedOrigin,
         }),
       ),
     );

@@ -2,7 +2,7 @@ import type { AnyRelations, SQL } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { and, count, desc, eq, gte, lt, lte, ne, or } from 'drizzle-orm';
+import { and, count, desc, eq, gte, lt, lte, ne, or, sql } from 'drizzle-orm';
 
 import type { UserId } from './user-id.js';
 import type { Instant } from '@arki/date';
@@ -44,6 +44,7 @@ import type {
 } from './types.js';
 import { createCoreDerivedSchemas } from './derived-schemas.js';
 import {
+  CounterExhausted,
   CustomerConflict,
   CustomerInUse,
   PlanAlreadyExists,
@@ -685,7 +686,7 @@ export class PaymentRepository {
    * `seenAttempts` is the whole `attempts` value read from the row, and `leaseCutoff` falls in the
    * years 1 to 9999 (preconditions: anything else throws).
    */
-  async reclaimWebhookEvent(id: WebhookId, seenAttempts: number, leaseCutoff: Instant): Promise<boolean> {
+  async reclaimWebhookEvent(id: WebhookId, seenAttempts: number, leaseCutoff: Instant) {
     return reclaimWebhookEvent(this.db, this.webhookEvents, id, seenAttempts, leaseCutoff);
   }
 
@@ -817,36 +818,36 @@ export class PaymentRepository {
   }
 
   /**
-   * The event with one more attempt, `WebhookEventNotFound` when no event has this id, or
-   * `InvalidInput` when `errorMessage` holds U+0000 (nothing is written then).
+   * The event with one more attempt, `WebhookEventNotFound` when no event has this id,
+   * `CounterExhausted` (`payments.counter_exhausted`) when its `attempts` already holds `INT4_MAX`, or
+   * `InvalidInput` when `errorMessage` holds U+0000 (nothing is written for either failure).
    */
   async incrementWebhookEventAttempts(
     id: WebhookId,
     errorMessage?: string,
-  ): Promise<WebhookEvent | EventNotFound | SchemaFailure> {
+  ): Promise<WebhookEvent | EventNotFound | FailureOf<typeof CounterExhausted> | SchemaFailure> {
     const message = parse(pgTextSchema.optional(), errorMessage);
     if (isFailure(message)) return message;
-    const currentEvent = await this.findWebhookEventById(id);
-    if (!currentEvent) {
-      return WebhookEventNotFound({ webhookId: id });
-    }
+    if (!findable(id)) return WebhookEventNotFound({ webhookId: id });
 
-    const result = await this.db
-      .update(this.webhookEvents)
+    const events = this.webhookEvents;
+    const [row] = await this.db
+      .update(events)
       .set({
-        attempts: currentEvent.attempts + 1,
+        // Raised in SQL, so two calls at once count two attempts
+        attempts: sql`${events.attempts} + 1`,
         lastAttemptAt: now(),
         errorMessage: message,
         updatedAt: now(),
       })
-      .where(eq(this.webhookEvents.id, id))
+      // The guard sits in the update itself, so a full count is never raised past what the column holds
+      .where(and(eq(events.id, id), lt(events.attempts, INT4_MAX)))
       .returning();
-    const row = result[0];
-    // The row was read above: an update that matches nothing means it was deleted in between
-    if (!row) {
-      return WebhookEventNotFound({ webhookId: id });
-    }
-    return row;
+    if (row) return row;
+
+    // Nothing matched: an unknown id, or an event whose count is full
+    const existing = await this.findWebhookEventById(id);
+    return existing ? CounterExhausted({ counter: 'attempts', id }) : WebhookEventNotFound({ webhookId: id });
   }
 
   // Analytics and reporting methods

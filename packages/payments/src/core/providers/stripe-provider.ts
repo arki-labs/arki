@@ -41,7 +41,6 @@ import type { UserId } from '../user-id.js';
 import type { PaymentProviderConfig, ProviderRefundResult } from './base-provider.js';
 import type { CardDeclined, IdempotencyConflict } from './provider-error.js';
 import { PaymentsConfigurationInvalid } from '../failures.js';
-import { toMinorColumn } from '../money.js';
 import { holdsLoneSurrogate, MAX_BATCH_ITEMS, pgJsonRecordSchema, pgTextSchema } from '../pg-values.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId, planIdSchema } from '../primitives.js';
 import { observePayments } from '../telemetry.js';
@@ -63,7 +62,8 @@ const logger = getLogger('arki:payments:stripe');
 
 /**
  * The rows the provider reads to turn our ids into Stripe ids. A `PaymentRepository` fits.
- * Without it, the calls that take a customer, plan, subscription or payment id throw `not_configured`.
+ * Without it, the calls that take a customer, plan, subscription or payment id return
+ * `PaymentsConfigurationInvalid` (`payments.configuration_invalid`, setting `references`) and send no request.
  * An id with no row, or a row with no Stripe id, is returned as `ReferenceNotFound` before any request.
  */
 export type StripeReferenceReads = {
@@ -117,12 +117,24 @@ function stripeCurrencyOf(code: string) {
   return isFailure(currency) ? ProviderAmount({ cause: new UnknownCurrencyError(upper.slice(0, 32)) }) : currency;
 }
 
+/**
+ * Our minor-unit column for an amount Stripe sent. Stripe can send more than a column holds: its zero-decimal
+ * MGA unit is 100 of our minor units, and so a Stripe amount near 2^53 is past 2^53 - 1 minor units here. That
+ * is returned as `AmountOutOfRange` (`money.out_of_range`), as `fromStripeAmount` returns one past 2^53 Stripe units.
+ */
+function minorColumnOf(amount: Money) {
+  const units = amount.toMinorUnits();
+  return typeof units === 'number' ? units : AmountOutOfRange();
+}
+
 /** An amount of ours that Stripe cannot take: what `stripeAmountOf` returns instead of units. */
 type SendAmountFailure = Exclude<ReturnType<typeof stripeAmountOf>, number>;
 /** An amount Stripe sent that is not a valid `Money`: what `fromStripeAmount` returns instead. */
 type ReadAmountFailure = Exclude<ReturnType<typeof fromStripeAmount>, Money>;
 type NotFound = FailureOf<typeof ReferenceNotFound>;
 type NotFlat = FailureOf<typeof PlanPriceNotFlat>;
+/** The provider was built without `references`, which the call needs (`payments.configuration_invalid`). */
+type NotConfigured = FailureOf<typeof PaymentsConfigurationInvalid>;
 type Declined = FailureOf<typeof CardDeclined>;
 type Conflict = FailureOf<typeof IdempotencyConflict>;
 
@@ -436,14 +448,15 @@ export class StripeProvider extends BasePaymentProvider {
     });
   }
 
-  private requireReferences(): StripeReferenceReads {
-    if (!this.references) {
-      throw new PaymentProviderError(
-        'not_configured',
-        'StripeProvider needs `references` (a repository) to turn customer, plan and subscription ids into Stripe ids',
-      );
-    }
-    return this.references;
+  /** `references`, or `PaymentsConfigurationInvalid` when the provider was built without it: the call then sends no request. */
+  private requireReferences(): StripeReferenceReads | NotConfigured {
+    return (
+      this.references ??
+      PaymentsConfigurationInvalid({
+        setting: 'references',
+        problem: 'a repository that turns customer, plan, subscription and payment ids into Stripe ids',
+      })
+    );
   }
 
   /*
@@ -451,12 +464,16 @@ export class StripeProvider extends BasePaymentProvider {
    * asking `references`: a lookup by it would fail in Postgres with a raw 22021.
    */
   private async customerRef(customerId: CustomerId) {
-    const customer = is(customerId, pgTextSchema) ? await this.requireReferences().findCustomerById(customerId) : null;
+    const references = this.requireReferences();
+    if (isFailure(references)) return references;
+    const customer = is(customerId, pgTextSchema) ? await references.findCustomerById(customerId) : null;
     return customer ?? ReferenceNotFound({ kind: 'customer', id: customerId, missing: 'row' });
   }
 
   private async planRef(planId: PlanId) {
-    const plan = is(planId, pgTextSchema) ? await this.requireReferences().findPlanById(planId) : null;
+    const references = this.requireReferences();
+    if (isFailure(references)) return references;
+    const plan = is(planId, pgTextSchema) ? await references.findPlanById(planId) : null;
     return plan ?? ReferenceNotFound({ kind: 'plan', id: planId, missing: 'row' });
   }
 
@@ -476,13 +493,17 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   private async paymentRef(paymentId: PaymentId) {
-    const payment = is(paymentId, pgTextSchema) ? await this.requireReferences().findPaymentById(paymentId) : null;
+    const references = this.requireReferences();
+    if (isFailure(references)) return references;
+    const payment = is(paymentId, pgTextSchema) ? await references.findPaymentById(paymentId) : null;
     return payment ?? ReferenceNotFound({ kind: 'payment', id: paymentId, missing: 'row' });
   }
 
   private async subscriptionRef(subscriptionId: SubscriptionId) {
+    const references = this.requireReferences();
+    if (isFailure(references)) return references;
     const subscription = is(subscriptionId, pgTextSchema)
-      ? await this.requireReferences().findSubscriptionById(subscriptionId)
+      ? await references.findSubscriptionById(subscriptionId)
       : null;
     return subscription ?? ReferenceNotFound({ kind: 'subscription', id: subscriptionId, missing: 'row' });
   }
@@ -566,8 +587,9 @@ export class StripeProvider extends BasePaymentProvider {
     };
   }
 
-  async getCustomer(customerId: CustomerId): Promise<Customer | null> {
+  async getCustomer(customerId: CustomerId): Promise<Result<Customer | null, NotConfigured>> {
     const references = this.requireReferences();
+    if (isFailure(references)) return references;
     const row = is(customerId, pgTextSchema) ? await references.findCustomerById(customerId) : null;
     if (!row) return null;
 
@@ -583,7 +605,7 @@ export class StripeProvider extends BasePaymentProvider {
   async updateCustomer(
     customerId: CustomerId,
     params: { email?: string; name?: string; metadata?: Record<string, unknown> },
-  ): Promise<Result<Customer, NotFound | SchemaFailure>> {
+  ): Promise<Result<Customer, NotFound | NotConfigured | SchemaFailure>> {
     const texts = checkStripeTexts({ email: params.email, name: params.name });
     if (isFailure(texts)) return texts;
     const metadata = checkMetadata(params.metadata);
@@ -616,10 +638,12 @@ export class StripeProvider extends BasePaymentProvider {
     if (price.unit_amount === null || !price.recurring) return PlanPriceNotFlat({ priceId: price.id });
     const amount = fromStripeAmount(price.unit_amount, price.currency);
     if (isFailure(amount)) return amount;
+    const priceMinor = minorColumnOf(amount);
+    if (isFailure(priceMinor)) return priceMinor;
     return {
       ...row,
       name: productName ?? row.name,
-      priceMinor: toMinorColumn(amount),
+      priceMinor,
       currency: amount.currency.code,
       interval: this.mapStripeIntervalToBilling(price.recurring.interval),
       intervalCount: price.recurring.interval_count,
@@ -667,6 +691,9 @@ export class StripeProvider extends BasePaymentProvider {
     // Before any request: a price Stripe cannot take must not leave a product behind
     const unitAmount = stripeAmountOf(params.amount);
     if (isFailure(unitAmount)) return unitAmount;
+    // Our row holds the price in minor units: past 2^53 - 1 of them (an MGA unit at Stripe is 100) has no row
+    const priceMinor = minorColumnOf(params.amount);
+    if (isFailure(priceMinor)) return priceMinor;
     const stripeProduct = await this.call('stripe.products.create', () =>
       this.stripe.products.create({
         name: params.name,
@@ -698,7 +725,7 @@ export class StripeProvider extends BasePaymentProvider {
       name: params.name,
       description: params.description ?? null,
       tier: params.tier,
-      priceMinor: toMinorColumn(params.amount),
+      priceMinor,
       currency: params.amount.currency.code,
       interval: params.interval,
       intervalCount: params.intervalCount || 1,
@@ -728,8 +755,9 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   /** `null` when the plan has no row; `ReferenceNotFound` when its row has no Stripe price. */
-  async getPlan(planId: PlanId): Promise<Result<Plan | null, NotFound | NotFlat | ReadAmountFailure>> {
+  async getPlan(planId: PlanId): Promise<Result<Plan | null, NotFound | NotFlat | ReadAmountFailure | NotConfigured>> {
     const references = this.requireReferences();
+    if (isFailure(references)) return references;
     const row = is(planId, pgTextSchema) ? await references.findPlanById(planId) : null;
     if (!row) return null;
     const priceId = this.priceIdOf(row);
@@ -745,7 +773,7 @@ export class StripeProvider extends BasePaymentProvider {
   async updatePlan(
     planId: PlanId,
     params: { name?: string; metadata?: Record<string, unknown> },
-  ): Promise<Result<Plan, NotFound | NotFlat | ReadAmountFailure | SchemaFailure>> {
+  ): Promise<Result<Plan, NotFound | NotFlat | ReadAmountFailure | NotConfigured | SchemaFailure>> {
     const texts = checkStripeTexts({ name: params.name });
     if (isFailure(texts)) return texts;
     const checked = checkMetadata(params.metadata);
@@ -791,8 +819,9 @@ export class StripeProvider extends BasePaymentProvider {
    * The active plans Stripe sells that this package created: prices carrying our `planId` in their
    * metadata, whose row still exists. Prices made in the Stripe dashboard have no row here and are left out.
    */
-  async listPlans(): Promise<Result<Plan[], NotFlat | ReadAmountFailure>> {
+  async listPlans(): Promise<Result<Plan[], NotFlat | ReadAmountFailure | NotConfigured>> {
     const references = this.requireReferences();
+    if (isFailure(references)) return references;
     const prices = await this.call('stripe.prices.list', () =>
       this.stripe.prices
         .list({ active: true, type: 'recurring', expand: ['data.product'], limit: 100 })
@@ -871,8 +900,9 @@ export class StripeProvider extends BasePaymentProvider {
     });
   }
 
-  async getSubscription(subscriptionId: SubscriptionId): Promise<Subscription | null> {
+  async getSubscription(subscriptionId: SubscriptionId): Promise<Result<Subscription | null, NotConfigured>> {
     const references = this.requireReferences();
+    if (isFailure(references)) return references;
     const row = is(subscriptionId, pgTextSchema) ? await references.findSubscriptionById(subscriptionId) : null;
     if (!row) return null;
 
@@ -1017,7 +1047,7 @@ export class StripeProvider extends BasePaymentProvider {
     subscriptionId: SubscriptionId;
     planId: PlanId;
     prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
-  }): Promise<Result<SubscriptionPreview, NotFound | ReadAmountFailure | SchemaFailure>> {
+  }): Promise<Result<SubscriptionPreview, NotFound | ReadAmountFailure | NotConfigured | SchemaFailure>> {
     const proration = parse(prorationBehaviorSchema, params.prorationBehavior);
     if (isFailure(proration)) return proration;
     const current = await this.subscriptionRef(params.subscriptionId);
@@ -1092,15 +1122,18 @@ export class StripeProvider extends BasePaymentProvider {
       Payment,
       'id' | 'userId' | 'customerId' | 'subscriptionId' | 'metadata' | 'disputeId' | 'disputeStatus' | 'createdAt'
     >,
-  ): Payment | MoneyFailure {
+  ): Payment | ReadAmountFailure {
     const amount = fromStripeAmount(intent.amount, intent.currency);
     if (isFailure(amount)) return amount;
+    const amountMinor = minorColumnOf(amount);
+    if (isFailure(amountMinor)) return amountMinor;
     const paymentMethod = intent.payment_method;
     const charge = intent.latest_charge;
     const chargeObject = charge !== null && typeof charge === 'object' ? charge : null;
     const refunded = chargeObject ? fromStripeAmount(chargeObject.amount_refunded, intent.currency) : null;
     if (isFailure(refunded)) return refunded;
-    const refundedMinor = refunded ? toMinorColumn(refunded) : 0;
+    const refundedMinor = refunded ? minorColumnOf(refunded) : 0;
+    if (isFailure(refundedMinor)) return refundedMinor;
 
     return {
       id: base.id,
@@ -1108,7 +1141,7 @@ export class StripeProvider extends BasePaymentProvider {
       customerId: base.customerId,
       subscriptionId: base.subscriptionId,
       providerPaymentId: intent.id,
-      amountMinor: toMinorColumn(amount),
+      amountMinor,
       currency: amount.currency.code,
       status: this.mapPaymentIntentStatus(intent),
       paymentMethod:
@@ -1205,8 +1238,9 @@ export class StripeProvider extends BasePaymentProvider {
     });
   }
 
-  async getPayment(paymentId: PaymentId): Promise<Payment | MoneyFailure | null> {
+  async getPayment(paymentId: PaymentId): Promise<Payment | ReadAmountFailure | NotConfigured | null> {
     const references = this.requireReferences();
+    if (isFailure(references)) return references;
     const row = is(paymentId, pgTextSchema) ? await references.findPaymentById(paymentId) : null;
     if (!row) return null;
 
@@ -1258,7 +1292,7 @@ export class StripeProvider extends BasePaymentProvider {
       reason?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<Result<ProviderRefundResult, NotFound | Conflict | SendAmountFailure | SchemaFailure>> {
+  ): Promise<Result<ProviderRefundResult, NotFound | Conflict | SendAmountFailure | NotConfigured | SchemaFailure>> {
     const texts = checkStripeTexts({ refundId: params.refundId });
     if (isFailure(texts)) return texts;
     const metadata = checkMetadata(params.metadata);
@@ -1348,7 +1382,7 @@ export class StripeProvider extends BasePaymentProvider {
   async attachPaymentMethod(params: {
     customerId: CustomerId;
     paymentMethodId: string;
-  }): Promise<Result<PaymentMethodInfo, Declined | NotFound | SchemaFailure>> {
+  }): Promise<Result<PaymentMethodInfo, Declined | NotFound | NotConfigured | SchemaFailure>> {
     const texts = checkStripeTexts({ paymentMethodId: params.paymentMethodId });
     if (isFailure(texts)) return texts;
     const customer = await this.customerRef(params.customerId);

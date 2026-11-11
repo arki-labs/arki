@@ -1116,8 +1116,9 @@ export class DunningCampaignService {
    * `retryCount` and runs the execution again. A retry that throws, or whose message is refused with
    * a 5xx, is `failed` again with the next
    * `nextRetryAt` (30 minutes, then 60, then 120), so a later call picks it again; after
-   * `MAX_EXECUTION_RETRIES` (3) retries it stays failed with no `nextRetryAt`. Returns how many were
-   * retried and each retry that threw again. `limit` is a whole number of 0 or more (a precondition:
+   * `MAX_EXECUTION_RETRIES` (3) retries it stays failed with no `nextRetryAt`. An execution whose
+   * `retryCount` is already full (`payments.counter_exhausted`) is not run: it is reported and stays
+   * failed with no `nextRetryAt`. Returns how many were retried and each retry that threw again. `limit` is a whole number of 0 or more (a precondition:
    * anything else throws an invariant failure before any query).
    */
   async retryFailedExecutions(limit = 50): Promise<DunningTickReport> {
@@ -1128,7 +1129,13 @@ export class DunningCampaignService {
       // The retry this run makes: startRetry writes the same count
       const retryCount = executionDb.retryCount + 1;
       try {
-        await this.executionRepo.startRetry(executionDb.id);
+        const started = await this.executionRepo.startRetry(executionDb.id);
+        if (isFailure(started)) {
+          // `retryCount` is full, so this execution can never count another retry: it stays failed for good
+          report.failed.push(tickFault(executionDb.id, started));
+          await this.executionRepo.recordFailure(executionDb.id, `Max retries exceeded: ${started.message}`, null);
+          continue;
+        }
 
         const outcome = await this.executeIndividualExecution(executionDb, retryCount);
         if (isFailure(outcome)) report.failed.push(tickFault(executionDb.id, outcome));

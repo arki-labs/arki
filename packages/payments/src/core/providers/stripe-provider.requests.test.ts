@@ -177,12 +177,71 @@ describe('createSubscription', () => {
     expect(http.requests).toHaveLength(0);
   });
 
-  it('says not_configured when the provider has no references', async () => {
-    const bare = stripeProviderOf({ apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' });
+  /**
+   * `references` is optional, so a provider built without it is a setup the app can get wrong: every call
+   * that turns one of our ids into a Stripe id returns that, and asks Stripe nothing, instead of throwing.
+   */
+  describe('without references', () => {
+    const paymentId = orThrow(createPaymentId());
+    const subscriptionId = orThrow(createSubscriptionId());
+    const usd = money('10.00', 'USD');
+    const calls: [string, (bare: StripeProvider) => Promise<unknown>][] = [
+      ['getCustomer', bare => bare.getCustomer(customer.id)],
+      ['updateCustomer', bare => bare.updateCustomer(customer.id, { name: 'Alice' })],
+      ['deleteCustomer', bare => bare.deleteCustomer(customer.id)],
+      ['getPlan', bare => bare.getPlan(proPlan.id)],
+      ['updatePlan', bare => bare.updatePlan(proPlan.id, { name: 'Pro' })],
+      ['deletePlan', bare => bare.deletePlan(proPlan.id)],
+      ['listPlans', bare => bare.listPlans()],
+      ['createSubscription', bare => bare.createSubscription({ customerId: customer.id, planId: proPlan.id })],
+      ['getSubscription', bare => bare.getSubscription(subscriptionId)],
+      ['updateSubscription', bare => bare.updateSubscription(subscriptionId, { planId: teamPlan.id })],
+      ['cancelSubscription', bare => bare.cancelSubscription(subscriptionId, { immediately: true })],
+      ['reactivateSubscription', bare => bare.reactivateSubscription(subscriptionId)],
+      ['pauseSubscription', bare => bare.pauseSubscription(subscriptionId)],
+      ['resumeSubscription', bare => bare.resumeSubscription(subscriptionId)],
+      ['previewSubscriptionChange', bare => bare.previewSubscriptionChange({ subscriptionId, planId: teamPlan.id })],
+      ['createPayment', bare => bare.createPayment({ customerId: customer.id, amount: usd, paymentMethodId: 'pm_1' })],
+      ['getPayment', bare => bare.getPayment(paymentId)],
+      ['confirmPayment', bare => bare.confirmPayment(paymentId)],
+      ['cancelPayment', bare => bare.cancelPayment(paymentId)],
+      ['refundPayment', bare => bare.refundPayment(paymentId, { refundId: 'rfnd_1', idempotencyKey: 'refund-1' })],
+      ['findRefund', bare => bare.findRefund(paymentId, orThrow(createRefundId()))],
+      ['attachPaymentMethod', bare => bare.attachPaymentMethod({ customerId: customer.id, paymentMethodId: 'pm_1' })],
+      ['listPaymentMethods', bare => bare.listPaymentMethods(customer.id)],
+      [
+        'setDefaultPaymentMethod',
+        bare => bare.setDefaultPaymentMethod({ customerId: customer.id, paymentMethodId: 'pm_1' }),
+      ],
+      ['createSetupIntent', bare => bare.createSetupIntent(customer.id)],
+      [
+        'createPaymentIntent',
+        bare => bare.createPaymentIntent({ customerId: customer.id, amount: usd, automatic: false }),
+      ],
+      [
+        'createTaxTransaction',
+        bare =>
+          bare.createTaxTransaction({
+            reference: 'order-1',
+            type: 'sale',
+            lineItems: [{ amount: usd, reference: 'plan' }],
+            currency: 'usd',
+            customerId: customer.id,
+          }),
+      ],
+    ];
 
-    await expect(bare.createSubscription({ customerId: customer.id, planId: proPlan.id })).rejects.toMatchObject({
-      name: 'PaymentProviderError',
-      code: 'not_configured',
+    it.each(calls)('%s returns payments.configuration_invalid for references, with no request', async (_name, call) => {
+      const http = createFakeStripeHttp(() => ({ body: {} }));
+      const bare = stripeProviderOf(
+        { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
+        { httpClient: http.client },
+      );
+
+      const answer = await call(bare);
+
+      expect(answer).toMatchObject({ code: 'payments.configuration_invalid', data: { setting: 'references' } });
+      expect(http.requests).toHaveLength(0);
     });
   });
 

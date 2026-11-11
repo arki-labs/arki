@@ -61,3 +61,33 @@ export function stripeProviderOf(...args: Parameters<typeof StripeProvider.creat
   if (isFailure(provider)) throw new Error(`Test provider config rejected: ${provider.code}`);
   return provider;
 }
+
+/**
+ * Amounts Stripe can send that are not a `Money`, each with the exact `@arki/money` code a read returns:
+ * `[code, what, Stripe currency, Stripe amount]`. Stripe's JSON types an amount as an integer, but the SDK
+ * passes on whatever the JSON holds, so text is in the list too. `money.rounding_necessary`,
+ * `money.invalid_shape`, `money.unsupported_locale` and `money.invalid_rate` cannot come from a read.
+ */
+export const STRIPE_READ_AMOUNT_CASES = [
+  ['money.unknown_currency', 'a currency outside ISO 4217', 'zzz', 1500],
+  ['money.provider_amount', 'a currency Stripe has no amount rule for (KWD: 3 decimals)', 'kwd', 1000],
+  ['money.provider_amount', 'units off the Stripe rule (ISK: whole kronur in two decimals)', 'isk', 150],
+  ['money.out_of_range', 'a fraction of a Stripe unit (5.5 JPY)', 'jpy', 5.5],
+  ['money.out_of_range', 'past 2^53 Stripe units', 'usd', 1e21],
+  ['money.invalid_text', 'text that is not a whole number', 'usd', 'ten'],
+  ['money.input_too_large', 'text longer than 1,000 characters', 'usd', '1'.repeat(1001)],
+] as const;
+
+/**
+ * The read cases, plus one only a read that fills a minor-unit column has: a Stripe amount within 2^53 that is
+ * past 2^53 - 1 of our minor units (MGA is whole ariary at Stripe and 2 decimals in ISO 4217).
+ */
+export const STRIPE_STORED_AMOUNT_CASES = [
+  ...STRIPE_READ_AMOUNT_CASES,
+  [
+    'money.out_of_range',
+    'past 2^53 - 1 minor units (MGA: one Stripe unit is 100 of ours)',
+    'mga',
+    Number.MAX_SAFE_INTEGER,
+  ],
+] as const;

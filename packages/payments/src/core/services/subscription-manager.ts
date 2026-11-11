@@ -7,6 +7,7 @@ import type { CommandNotFound } from '@arki/journal';
 import type { MoneyFailure } from '@arki/money';
 import { invariant, isFailure } from '@arki/failure';
 
+import type { PaymentsConfigurationInvalid } from '../failures.js';
 import type { CoreWrites } from '../journal.js';
 import type { JournalWriteFailure } from '../journal/support.js';
 import type { CardDeclined, IdempotencyConflict } from '../providers/provider-error.js';
@@ -26,6 +27,8 @@ type Inactive = FailureOf<typeof PlanInactive>;
 type AlreadyActive = FailureOf<typeof SubscriptionAlreadyActive>;
 type Declined = FailureOf<typeof CardDeclined>;
 type Conflict = FailureOf<typeof IdempotencyConflict>;
+/** The provider was built without what the call needs, such as Stripe's `references` (`payments.configuration_invalid`). */
+type NotConfigured = FailureOf<typeof PaymentsConfigurationInvalid>;
 /** What a `writes.*` call here returns besides the row: a journal failure, or no row to change. */
 type StoreFailure = JournalWriteFailure | CommandNotFound;
 
@@ -114,7 +117,10 @@ export class SubscriptionManager {
     planId: PlanId,
     options: SubscriptionCreationOptions = {},
   ): Promise<
-    Result<Subscription, Declined | Conflict | NotFound | IdGenerationFailure | Inactive | AlreadyActive | SchemaFailure>
+    Result<
+      Subscription,
+      Declined | Conflict | NotFound | NotConfigured | IdGenerationFailure | Inactive | AlreadyActive | SchemaFailure
+    >
   > {
     const days = options.trialPeriodDays;
     invariant(
@@ -158,6 +164,7 @@ export class SubscriptionManager {
     | MoneyFailure
     | Declined
     | Conflict
+    | NotConfigured
     | SchemaFailure
     | StoreFailure
   > {
@@ -200,7 +207,9 @@ export class SubscriptionManager {
   async setCancelAtPeriodEnd(
     subscriptionId: SubscriptionId,
     cancelAtPeriodEnd: boolean,
-  ): Promise<Subscription | NotFound | InvalidState | Declined | Conflict | SchemaFailure | StoreFailure> {
+  ): Promise<
+    Subscription | NotFound | NotConfigured | InvalidState | Declined | Conflict | SchemaFailure | StoreFailure
+  > {
     const currentSubscription = await this.subscriptionNotCanceled(subscriptionId, 'set_cancel_at_period_end');
     if (isFailure(currentSubscription)) return currentSubscription;
 
@@ -219,7 +228,7 @@ export class SubscriptionManager {
   async cancelSubscription(
     subscriptionId: SubscriptionId,
     options: SubscriptionCancellationOptions = {},
-  ): Promise<Subscription | NotFound | InvalidState | Conflict | StoreFailure> {
+  ): Promise<Subscription | NotFound | NotConfigured | InvalidState | Conflict | StoreFailure> {
     const currentSubscription = await this.subscriptionNotCanceled(subscriptionId, 'cancel');
     if (isFailure(currentSubscription)) return currentSubscription;
 
@@ -244,7 +253,7 @@ export class SubscriptionManager {
 
   async reactivateSubscription(
     subscriptionId: SubscriptionId,
-  ): Promise<Subscription | NotFound | InvalidState | StoreFailure> {
+  ): Promise<Subscription | NotFound | NotConfigured | InvalidState | StoreFailure> {
     const currentSubscription = await this.subscriptionIn(subscriptionId, ['canceled', 'past_due'], 'reactivate');
     if (isFailure(currentSubscription)) return currentSubscription;
 
@@ -264,7 +273,7 @@ export class SubscriptionManager {
 
   async pauseSubscription(
     subscriptionId: SubscriptionId,
-  ): Promise<Subscription | NotFound | InvalidState | StoreFailure> {
+  ): Promise<Subscription | NotFound | NotConfigured | InvalidState | StoreFailure> {
     const currentSubscription = await this.subscriptionIn(subscriptionId, ['active'], 'pause');
     if (isFailure(currentSubscription)) return currentSubscription;
 
@@ -281,7 +290,7 @@ export class SubscriptionManager {
 
   async resumeSubscription(
     subscriptionId: SubscriptionId,
-  ): Promise<Subscription | NotFound | InvalidState | StoreFailure> {
+  ): Promise<Subscription | NotFound | NotConfigured | InvalidState | StoreFailure> {
     const currentSubscription = await this.subscriptionIn(subscriptionId, ['paused'], 'resume');
     if (isFailure(currentSubscription)) return currentSubscription;
 
@@ -348,7 +357,7 @@ export class SubscriptionManager {
     subscriptionId: SubscriptionId,
     newPlanId: PlanId,
     options: SubscriptionChangeOptions = {},
-  ): Promise<Result<SubscriptionPreview, NotFound | Inactive | MoneyFailure | SchemaFailure>> {
+  ): Promise<Result<SubscriptionPreview, NotFound | NotConfigured | Inactive | MoneyFailure | SchemaFailure>> {
     const subscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
     if (!subscription) return ReferenceNotFound({ kind: 'subscription', id: subscriptionId, missing: 'row' });
 
@@ -452,15 +461,17 @@ export class SubscriptionManager {
   /**
    * Store what the provider holds for the subscription. Returns the stored row, or a failure:
    * `ReferenceNotFound` (`missing: 'row'` when we hold no such subscription, `missing: 'provider_id'`
-   * when the provider has none for it), or the refusal of the journal write.
+   * when the provider has none for it), the provider's `PaymentsConfigurationInvalid` (built without what
+   * the read needs), or the refusal of the journal write.
    */
   async syncSubscriptionWithProvider(
     subscriptionId: SubscriptionId,
-  ): Promise<Subscription | NotFound | JournalWriteFailure> {
+  ): Promise<Subscription | NotFound | NotConfigured | JournalWriteFailure> {
     const localSubscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
     if (!localSubscription) return ReferenceNotFound({ kind: 'subscription', id: subscriptionId, missing: 'row' });
 
     const providerSubscription = await this.paymentProvider.getSubscription(subscriptionId);
+    if (isFailure(providerSubscription)) return providerSubscription;
     if (!providerSubscription) {
       return ReferenceNotFound({ kind: 'subscription', id: subscriptionId, missing: 'provider_id' });
     }

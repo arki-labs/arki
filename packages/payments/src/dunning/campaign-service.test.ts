@@ -24,6 +24,7 @@ import type { CreateDunningCampaignInput } from './contracts.js';
 import type { DunningCampaignId } from './primitives.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
 import { userIdFactory } from '../core/user-id.js';
+import { INT4_MAX } from '../core/pg-values.js';
 import { core, customerId, planId, schema, userId, users } from '../test-support.js';
 import { updateDunningCampaignInputSchema } from './contracts.js';
 import { DunningCampaignNotFound, DunningCampaignWithoutSteps, DunningTemplateInUse } from './failures.js';
@@ -1331,6 +1332,61 @@ describe('the dunning repositories refuse what their columns refuse', () => {
       .from(tables.dunningCommunications)
       .where(eq(tables.dunningCommunications.executionId, ran.id));
     expect(rows).toEqual([expect.objectContaining({ status: 'pending', providerMessageId: null })]);
+  });
+});
+
+describe('a retry count that is already full', () => {
+  /** A failed execution, due for a retry, whose `retryCount` holds the most an int4 column can. */
+  async function fullExecution(name: string) {
+    const campaignId = await createdCampaign(name);
+    const campaign = await service.getCampaign(campaignId);
+    const executions = createDunningExecutionRepository(db, tables);
+    const full = orThrow(
+      await executions.create({
+        campaignId,
+        templateId: campaign?.templates[0]?.id,
+        customerId,
+        triggerType: 'manual',
+        triggerData: {},
+        scheduledAt: sub(now(), { hours: 1 }),
+        status: 'failed',
+        retryCount: INT4_MAX,
+        nextRetryAt: sub(now(), { minutes: 1 }),
+      }),
+    );
+    return { executions, full };
+  }
+
+  // The SQL `retry_count + 1` failed with a raw SQLSTATE 22003 before
+  it('startRetry returns payments.counter_exhausted and writes nothing; an unknown id is still undefined', async () => {
+    const { executions, full } = await fullExecution('Full retry count');
+
+    expect(await executions.startRetry(full.id)).toMatchObject({
+      code: 'payments.counter_exhausted',
+      data: { counter: 'retryCount', id: full.id },
+    });
+    expect(await executions.findById(full.id)).toMatchObject({
+      status: 'failed',
+      retryCount: INT4_MAX,
+      nextRetryAt: full.nextRetryAt,
+    });
+    expect(await executions.startRetry(orThrow(createDunningExecutionId()))).toBeUndefined();
+  });
+
+  // Left due, the execution would be picked and refused on every tick for good
+  it('retryFailedExecutions reports payments.counter_exhausted, does not run it, and never picks it again', async () => {
+    const { executions, full } = await fullExecution('Full retry count tick');
+
+    const report = await service.retryFailedExecutions(1000);
+
+    expect(report.failed).toContainEqual(expect.objectContaining({ id: full.id, code: 'payments.counter_exhausted' }));
+    expect(await executions.findById(full.id)).toMatchObject({
+      status: 'failed',
+      retryCount: INT4_MAX,
+      nextRetryAt: null,
+    });
+    const again = await service.retryFailedExecutions(1000);
+    expect(again.failed.map(fault => fault.id)).not.toContain(full.id);
   });
 });
 

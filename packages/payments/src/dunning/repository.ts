@@ -2,7 +2,7 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
-import { and, asc, desc, eq, gte, ilike, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, ilike, lt, lte, sql } from 'drizzle-orm';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 
 import { z } from '@arki/contracts';
@@ -26,6 +26,7 @@ import {
   pgTextSchema,
   pgVarcharSchema,
 } from '../core/pg-values.js';
+import { CounterExhausted } from '../core/failures.js';
 import { ReferenceNotFound } from '../core/providers/provider-error.js';
 import type {
   CreateCustomerSegmentInput,
@@ -978,24 +979,32 @@ export class DunningExecutionRepository {
 
   /**
    * Start one retry of a failed execution, in one update: it is `running` again, its `retryCount`
-   * goes up by one and it has no `nextRetryAt` until it fails again. Returns the updated row, or
-   * `undefined` for an unknown id (also one no row can hold).
+   * goes up by one and it has no `nextRetryAt` until it fails again. Returns the updated row,
+   * `undefined` for an unknown id (also one no row can hold), or `CounterExhausted`
+   * (`payments.counter_exhausted`) when `retryCount` already holds `INT4_MAX` (nothing is written then).
    */
-  async startRetry(id: DunningExecutionId): Promise<DunningExecution | undefined> {
+  async startRetry(
+    id: DunningExecutionId,
+  ): Promise<DunningExecution | FailureOf<typeof CounterExhausted> | undefined> {
     if (!findable(id)) return undefined;
+    const executions = this.dunningExecutions;
     const [execution] = await this.db
-      .update(this.dunningExecutions)
+      .update(executions)
       .set({
         status: 'running',
         startedAt: now(),
-        retryCount: sql`${this.dunningExecutions.retryCount} + 1`,
+        retryCount: sql`${executions.retryCount} + 1`,
         nextRetryAt: null,
         updatedAt: now(),
       })
-      .where(eq(this.dunningExecutions.id, id))
+      // The guard sits in the update itself, so a full count is never raised past what the column holds
+      .where(and(eq(executions.id, id), lt(executions.retryCount, INT4_MAX)))
       .returning();
+    if (execution) return execution;
 
-    return execution;
+    // Nothing matched: an unknown id, or a row whose count is full (no call lowers it again)
+    const [full] = await this.db.select({ id: executions.id }).from(executions).where(eq(executions.id, id));
+    return full ? CounterExhausted({ counter: 'retryCount', id }) : undefined;
   }
 
   /**

@@ -23,7 +23,7 @@ import { adminId, core, meta, openDb, plain, rejectionOf, typed, userId, users }
 import { CustomerConflict, WebhookEventNotFound } from './failures.js';
 import { createCustomerId, createPlanId, createWebhookId } from './primitives.js';
 import { ReferenceNotFound } from './providers/provider-error.js';
-import { pgJsonRecordSchema, pgJsonSchema } from './pg-values.js';
+import { INT4_MAX, pgJsonRecordSchema, pgJsonSchema } from './pg-values.js';
 import { PaymentRepository } from './repository.js';
 
 const relations = defineRelations(
@@ -383,6 +383,38 @@ describe('PaymentRepository reads with values no row can hold', () => {
     const events = await repo.findUnprocessedWebhookEvents(1000, 2 ** 31);
 
     expect(events.map(event => event.id)).toContain(created.id);
+  });
+
+  // The `attempts + 1` of both doors failed with a raw SQLSTATE 22003 on a full count before
+  it('an event whose attempts count is full returns payments.counter_exhausted from both increments and writes nothing', async () => {
+    const full = orThrow(
+      await repo.createWebhookEvent({
+        provider: 'stripe',
+        eventType: 'subscription.created',
+        providerEventId: 'evt_full_attempts',
+        data: {},
+        attempts: INT4_MAX,
+        errorMessage: 'the last attempt failed',
+      }),
+    );
+    const exhausted = { code: 'payments.counter_exhausted', data: { counter: 'attempts', id: full.id } };
+
+    expect(await repo.incrementWebhookEventAttempts(full.id, 'once more')).toMatchObject(exhausted);
+    expect(await repo.reclaimWebhookEvent(full.id, INT4_MAX, instant('2026-01-01T00:00:00Z'))).toMatchObject(exhausted);
+    expect(await repo.findWebhookEventById(full.id)).toEqual(full);
+    // An id no event has is still not found, and a count that is not full still goes up
+    expect(WebhookEventNotFound.is(await repo.incrementWebhookEventAttempts(orThrow(createWebhookId())))).toBe(true);
+    expect(await repo.reclaimWebhookEvent(orThrow(createWebhookId()), INT4_MAX, instant('2026-01-01T00:00:00Z'))).toBe(false);
+    const below = orThrow(
+      await repo.createWebhookEvent({
+        provider: 'stripe',
+        eventType: 'subscription.created',
+        providerEventId: 'evt_almost_full_attempts',
+        data: {},
+        attempts: INT4_MAX - 1,
+      }),
+    );
+    expect(await repo.incrementWebhookEventAttempts(below.id)).toMatchObject({ attempts: INT4_MAX });
   });
 
   it('a time outside the years 1 to 9999 or a fractional count breaks a stated precondition', async () => {

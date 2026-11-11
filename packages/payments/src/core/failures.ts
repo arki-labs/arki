@@ -235,3 +235,22 @@ export const PaymentsConfigurationInvalid = /* @__PURE__ */ defineFailure('payme
   message: 'Payments setting {setting} is invalid: {problem}',
   remediation: 'Pass the capability or setting it names when the app builds the service.',
 });
+
+/** Which counter column is full, in `CounterExhausted`. */
+const counterSchema = z.enum(['retryCount', 'attempts']);
+
+/**
+ * A counter column already holds 2^31 - 1 (`INT4_MAX`), the most an `integer` column can, so it
+ * cannot go up by one more. Nothing was written. `counter` names the column (`retryCount` of a
+ * dunning execution, `attempts` of a webhook event) and `id` the row. The update checks the column
+ * itself, so a full counter is never raised by a race between a read and a write.
+ *
+ * @fix Stop retrying the row: a counter this high was set by hand, since a correct caller stops long before it.
+ * @verify bun run test -- src/dunning/campaign-service.test.ts src/core/repository.customers.test.ts
+ */
+export const CounterExhausted = /* @__PURE__ */ defineFailure('payments.counter_exhausted', {
+  status: 409,
+  data: z.object({ counter: counterSchema, id: z.string() }),
+  message: 'The {counter} counter of {id} is full and cannot go up',
+  remediation: 'Stop retrying the row; a correct caller stops long before the counter is full.',
+});

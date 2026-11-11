@@ -284,6 +284,10 @@ export class WebhookHandler extends EventEmitter {
       // A resend of an event that failed or whose attempt crashed takes it
       // over; a resend of one still inside its lease asks to be resent later.
       const reclaimed = await this.paymentRepository.reclaimWebhookEvent(webhookId, event.attempts, this.leaseCutoff());
+      // A full count cannot get here (`attempts` is below `maxRetries`, at most INT4_MAX); it would mean no attempts are left
+      if (isFailure(reclaimed)) {
+        return WebhookRetriesExhausted({ webhookId, attempts: event.attempts, retryable: false });
+      }
       if (!reclaimed) {
         logger.debug('Webhook {webhookId} is being processed; asking for a resend', { webhookId });
         return WebhookInProgress({ webhookId, retryable: true });
@@ -321,7 +325,8 @@ export class WebhookHandler extends EventEmitter {
           event.attempts,
           this.leaseCutoff(),
         );
-        if (!reclaimed) {
+        // Lost to another taker, or (never here: every event read has fewer than `maxRetries` attempts) a full count
+        if (reclaimed !== true) {
           continue;
         }
         let error: string | undefined;

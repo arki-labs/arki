@@ -26,6 +26,7 @@ import { adminId, core, countEvents, eventTypesOf, openDb, planId, rejectionOf, 
 import { PlanInactive, SubscriptionAlreadyActive, SubscriptionInvalidState } from '../failures.js';
 import { createCustomerId, createPlanId, createSubscriptionId } from '../primitives.js';
 import { CardDeclined, IdempotencyConflict, ReferenceNotFound } from '../providers/provider-error.js';
+import { createFakeStripeHttp, stripeProviderOf } from '../providers/stripe-test-support.js';
 import { SubscriptionManager } from './subscription-manager.js';
 
 type Provider = ConstructorParameters<typeof SubscriptionManager>[0];
@@ -385,6 +386,73 @@ describe('a failure the provider returns is handed back, and nothing is written'
 });
 
 /** A refusal the manager decides itself is returned with its code before the provider is asked. */
+/**
+ * `references` is optional on a `StripeProvider`, so an app can build one without it. Every manager call that
+ * reaches such a provider hands back its `payments.configuration_invalid`, asks Stripe nothing and writes nothing.
+ */
+describe('a provider built without references', () => {
+  const premium = orThrow(createPlanId());
+  const calls: [
+    string,
+    Subscription['status'],
+    (manager: SubscriptionManager, id: SubscriptionId) => Promise<unknown>,
+  ][] = [
+    ['updateSubscription', 'active', (manager, id) => manager.updateSubscription(id, premium)],
+    ['setCancelAtPeriodEnd', 'active', (manager, id) => manager.setCancelAtPeriodEnd(id, true)],
+    ['cancelSubscription', 'active', (manager, id) => manager.cancelSubscription(id)],
+    ['reactivateSubscription', 'canceled', (manager, id) => manager.reactivateSubscription(id)],
+    ['pauseSubscription', 'active', (manager, id) => manager.pauseSubscription(id)],
+    ['resumeSubscription', 'paused', (manager, id) => manager.resumeSubscription(id)],
+    ['previewSubscriptionChange', 'active', (manager, id) => manager.previewSubscriptionChange(id, premium)],
+    ['syncSubscriptionWithProvider', 'active', (manager, id) => manager.syncSubscriptionWithProvider(id)],
+  ];
+
+  beforeAll(async () => {
+    await db.insert(core.plans).values({ id: premium, name: 'Premium', priceMinor: 2000 });
+  });
+
+  it.each(calls)('%s returns payments.configuration_invalid and writes nothing', async (_name, status, call) => {
+    const { id } = await seedSubscription(writes, status);
+    const rowBefore = await subscriptionRow(db, id);
+    const eventsBefore = await countEvents(db);
+    const http = createFakeStripeHttp(() => ({ body: {} }));
+    const bare = stripeProviderOf(
+      { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
+      { httpClient: http.client },
+    );
+
+    const result = await call(new SubscriptionManager(bare, reads, writes), id);
+
+    expect(result).toMatchObject({ code: 'payments.configuration_invalid', data: { setting: 'references' } });
+    expect(http.requests).toHaveLength(0);
+    expect(await subscriptionRow(db, id)).toEqual(rowBefore);
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('createSubscription returns payments.configuration_invalid and writes nothing', async () => {
+    const owner = 'usr_bare_provider' as const;
+    await db.insert(users).values({ id: owner });
+    await db.insert(core.customers).values({
+      id: orThrow(createCustomerId()),
+      userId: owner,
+      providerCustomerId: 'cus_bare_provider',
+      email: 'bare@example.com',
+    });
+    const eventsBefore = await countEvents(db);
+    const http = createFakeStripeHttp(() => ({ body: {} }));
+    const bare = stripeProviderOf(
+      { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
+      { httpClient: http.client },
+    );
+
+    const result = await new SubscriptionManager(bare, reads, writes).createSubscription(owner, premium);
+
+    expect(result).toMatchObject({ code: 'payments.configuration_invalid', data: { setting: 'references' } });
+    expect(http.requests).toHaveLength(0);
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+});
+
 describe('a journal refusal after the provider answered is handed back unchanged', () => {
   /**
    * A manager whose provider answers with what we hold, after `race` changed the row under it: a

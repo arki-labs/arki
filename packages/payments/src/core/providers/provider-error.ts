@@ -114,11 +114,10 @@ export const TaxAddressIncomplete = /* @__PURE__ */ defineFailure('payments.tax_
  * - `invalid_request`: the provider rejected the request itself. Retrying the same call fails again.
  * - `authentication`: the API key is wrong or lacks permission.
  * - `rate_limited` / `unavailable`: a later retry can work.
- * - `not_configured`: the provider was built without what the call needs.
  * - `unknown`: anything else. `cause` holds the original error.
  */
 export type PaymentProviderErrorCode =
-  'invalid_request' | 'authentication' | 'rate_limited' | 'unavailable' | 'not_configured' | 'unknown';
+  'invalid_request' | 'authentication' | 'rate_limited' | 'unavailable' | 'unknown';
 
 export class PaymentProviderError extends Error {
   readonly code: PaymentProviderErrorCode;
