@@ -2,13 +2,10 @@
  * Production-boot checks for app test suites (the C1 regression class: a sign-in method that
  * silently disappears in production). `assertAuthBoots` boots an app's auth module under
  * `NODE_ENV=production` and checks that every method the definition declares is live in the
- * engine. `applyProductionBootEnv` is the env flip it uses, and `emailModuleMock` is the
- * `@arki/mail` mock an app wires through vitest's hoisted `vi.mock`: `vi.mock(...)` is hoisted to
- * the top of the consuming file, so it cannot be authored here.
+ * engine. `applyProductionBootEnv` is the env flip it uses. Booting sends no mail, so
+ * an app builds its real mail transport (a placeholder key is enough) and mocks nothing.
  */
-import { expect, vi } from 'vitest';
-
-import type * as MailModule from '@arki/mail';
+import { expect } from 'vitest';
 
 import type { AuthDefinition } from '../definition.js';
 import type { AuthEngine } from '../pg/engine.js';
@@ -61,24 +58,6 @@ export function applyProductionBootEnv(): () => void {
       else process.env[key] = value;
     }
   };
-}
-
-/**
- * The `@arki/mail` module mock: the real module, except that every `mailer()`
- * sends through a `mailSink()` — nothing leaves the process. Consumers wire it
- * through vitest's hoisted `vi.mock`, delegating here to keep the body DRY:
- *
- * ```ts
- * vi.mock('@arki/mail', async () => {
- *   const { emailModuleMock } = await import('@arki/auth/testing/production-boot');
- *   return emailModuleMock();
- * });
- * ```
- */
-export async function emailModuleMock(): Promise<typeof MailModule> {
-  const actual = await vi.importActual<typeof MailModule>('@arki/mail');
-  const { mailSink } = await import('@arki/mail/testing');
-  return { ...actual, mailer: options => actual.mailer({ ...options, transport: mailSink() }) };
 }
 
 /** What `assertAuthBoots` reads: the definition and the engine it was built into. */
