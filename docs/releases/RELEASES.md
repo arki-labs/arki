@@ -13,6 +13,54 @@ When the ledger and the tool disagree, **trust the tool**, then correct the ledg
 
 ---
 
+## Wave 1 — Foundation (foundation) @ ed0d724 (2026-11-09)
+
+<!-- candidate: foundation-ed0d724 -->
+
+**Packages shipped** (9, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/failure | 0.4.0 | 1 |
+| @arki/log | 0.4.1 | 2 |
+| @arki/ts | 0.1.1 | 3 |
+| @arki/clock | 0.2.1 | 4 |
+| @arki/schema | 0.3.1 | 5 |
+| @arki/string | 0.5.1 | 6 |
+| @arki/async | 0.3.1 | 7 |
+| @arki/contracts | 0.4.2 | 8 |
+| @arki/date | 0.5.1 | 9 |
+
+**Source commit**: `ed0d72419f095fbd723a38a8584487f0ec135b95`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (9 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `demo:drop-studio` success, `demo:faultline` success, `docs:@arki/async` success, `docs:@arki/clock` success, `docs:@arki/contracts` success, `docs:@arki/date` success, `docs:@arki/failure` success, `docs:@arki/log` success, `docs:@arki/schema` success, `docs:@arki/string` success, `docs:@arki/ts` success, `published:@arki/async` success, `published:@arki/clock` success, `published:@arki/contracts` success, `published:@arki/date` success, `published:@arki/failure` success, `published:@arki/log` success, `published:@arki/schema` success, `published:@arki/string` success, `published:@arki/ts` success, `runtimes:@arki/ts` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/foundation-ed0d724/candidate.json`.
+
+---
+
+## Wave 4 — Infrastructure Adapters (infrastructure-adapters) @ 8f16607 (2026-11-04)
+
+<!-- candidate: infrastructure-adapters-8f16607 -->
+
+**Packages shipped** (1, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/tanstack-start | 0.3.1 | 1 |
+
+**Source commit**: `8f16607c5245151a98b285eca59ccdd8b68a17e8`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (1 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `docs:@arki/tanstack-start` success, `published:@arki/tanstack-start` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/infrastructure-adapters-8f16607/candidate.json`.
+
+---
+
 ## Wave 7 — Content and Platform (content-and-platform) @ 4ffe4dc (2026-11-03)
 
 <!-- candidate: content-and-platform-4ffe4dc -->
