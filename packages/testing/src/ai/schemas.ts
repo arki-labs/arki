@@ -1,17 +1,14 @@
 /**
  * The answer shapes the judge reads from Ollama, as zod schemas. The two the judge asks for (`verdictSchema`,
  * `claimsSchema`) also describe themselves as JSON Schema through zod's Standard JSON Schema support: Ollama
- * constrains its output with it.
+ * constrains its output with it. Internal: the TS types in `answers.ts` are the source, and
+ * `../schemas.test-d.ts` locks `verdictSchema` and `checkedClaimSchema` to them.
  */
 import { z } from 'zod';
 
 export const verdictSchema = z.object({ pass: z.boolean(), reason: z.string() });
 
-export type Verdict = z.output<typeof verdictSchema>;
-
-const checkedClaimSchema = z.object({ claim: z.string(), supported: z.boolean(), quote: z.string() });
-
-export type CheckedClaim = z.output<typeof checkedClaimSchema>;
+export const checkedClaimSchema = z.object({ claim: z.string(), supported: z.boolean(), quote: z.string() });
 
 export const claimsSchema = z.object({ claims: z.array(checkedClaimSchema) });
 

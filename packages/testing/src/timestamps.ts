@@ -10,14 +10,13 @@
 import { z } from 'zod';
 
 import { invariant } from '@arki/failure';
-import { Temporal } from '@arki/date/types';
+import type { Temporal } from '@arki/date/types';
 import { is, recordSchema } from '@arki/schema';
 
-/** A `Date` that holds a time (zod refuses `Invalid Date`), a Temporal `Instant`, or a `ZonedDateTime`. */
-const timestampSchema = z.union([z.date(), z.instanceof(Temporal.Instant), z.instanceof(Temporal.ZonedDateTime)]);
+import { timestampSchema } from './schemas.js';
 
 /** A moment in time: a `Date`, or a Temporal `Instant` or `ZonedDateTime`. */
-export type Timestamp = z.output<typeof timestampSchema>;
+export type Timestamp = Date | Temporal.Instant | Temporal.ZonedDateTime;
 
 /** An object with the two timestamps every table row carries. */
 export type Timestamps = { createdAt: Timestamp; updatedAt: Timestamp };

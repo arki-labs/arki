@@ -8,10 +8,10 @@ import type { SchemaWithJson } from '@arki/schema';
 import { defineFailure, invariant, isFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
-import type { Verdict } from './schemas.js';
+import type { Verdict } from './answers.js';
 import { chatAnswerSchema, embedAnswerSchema, tagsAnswerSchema, verdictSchema } from './schemas.js';
 
-export type { Verdict } from './schemas.js';
+export type { Verdict } from './answers.js';
 
 /**
  * Ollama did not answer: it is not running, the call timed out, or it answered with an error status.

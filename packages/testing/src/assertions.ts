@@ -13,18 +13,16 @@ import { formatIssues, is, parse, recordSchema } from '@arki/schema';
 
 import type { Timestamp } from './timestamps.js';
 import { formatValue } from './format-value.js';
+import { paginatedResponseSchema } from './schemas.js';
 import { describeKind, epochNanoseconds, isTimestamp } from './timestamps.js';
 
-/** The page shape `assertPaginationValid` checks: an `items` array, and `total`, `nextCursor` and `hasMore` when present. */
-const paginatedResponseSchema = z.object({
-  items: z.array(z.unknown()),
-  total: z.number().optional(),
-  nextCursor: z.string().nullable().optional(),
-  hasMore: z.boolean().optional(),
-});
-
 /** A page of results: what {@link assertPaginationValid} narrows a response to. */
-export type PaginatedResponse = z.output<typeof paginatedResponseSchema>;
+export type PaginatedResponse = {
+  items: unknown[];
+  total?: number | undefined;
+  nextCursor?: string | null | undefined;
+  hasMore?: boolean | undefined;
+};
 
 /**
  * Assert that a pagination response is valid
