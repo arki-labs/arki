@@ -1,6 +1,6 @@
 {
   "name": "@arki/icons",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "description": "Icon sets for ARKI apps — Iconify, Phosphor, Simple Icons and flag packs behind one React entry point.",
   "keywords": [

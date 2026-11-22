@@ -1,5 +1,34 @@
 # @arki/ui
 
+## 0.2.1
+
+### Patch Changes
+
+- f367180: `ThemeProvider` with `disableTransitionOnChange` no longer throws inside a timer when something else removed its temporary style node first.
+- 6f882ec: Clean up lint errors in the UI components without changing how they look or behave.
+- 0ce4f23: Each package README now records what it instruments, including why these packages need no spans.
+- 937e762: Outside values no longer crash a page:
+
+  - `ResizablePanelGroup` with `autoSaveId`, and `ToolPanelGroup`, read the saved layout through a schema. A saved layout of the wrong shape, or for a different number of panels, is ignored and the default layout is used; the next save replaces it.
+  - `PanelExpandButton` restore no longer throws when a panel mounted or unmounted while another was maximized; the collapsed panels expand instead.
+  - `MathInput` and `ComplexInput` render a `NaN` value (for example 0/0) instead of failing with "Too many re-renders".
+  - `DatePicker` shows the calendar day of any valid `Date`, including the largest one.
+  - `Calendar` falls back to the browser time zone for an unknown `timeZone` (logged at DEBUG under `arki:ui:calendar`), ignores a `month`, `defaultMonth`, `today`, `startMonth` or `endMonth` that is an Invalid Date or within a month of the ends of the Date range, and treats a range with such an end as no range.
+
+  `zod`, `@arki/schema` and `@arki/failure` are new dependencies.
+
+- 933ac99: Ship compiled JavaScript. Every `exports` entry now points `import`, `browser` and `default` at `dist/src/*.js` (JSX compiled with the automatic `react/jsx-runtime`, `'use client'` kept) instead of raw `src/*.ts(x)`, so Vite pre-bundles the package and Node or Vitest can load it without compiling `node_modules`. Together with the `@arki/icons` change, 83 of 84 entries load in plain Node; `./spinners` still needs a bundler, because `react-spinners` is CommonJS without named exports. Export names and the API are unchanged, so this is a patch.
+
+  no docs impact: consumers import the same subpaths; only the files they resolve to changed.
+  no demo impact: no demo imports a changed name.
+
+- 0ce4f23: Declares the engines it supports and documents them in the README.
+- Updated dependencies [89d0ca0]
+- Updated dependencies [933ac99]
+- Updated dependencies [0ce4f23]
+- Updated dependencies [2a9dea1]
+  - @arki/icons@0.2.1
+
 ## 0.2.0
 
 ### Minor Changes
