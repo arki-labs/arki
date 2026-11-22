@@ -196,9 +196,9 @@
       "keyv": "^5.6.0"
     },
     "better-auth": {
-      "@better-auth/expo": "1.7.10",
+      "@better-auth/expo": "1.7.27",
       "@daveyplate/better-auth-ui": "^3.4.0",
-      "better-auth": "1.7.10"
+      "better-auth": "1.7.27"
     },
     "build-tools": {
       "vite": "8.3.4",
