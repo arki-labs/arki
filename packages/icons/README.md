@@ -129,9 +129,9 @@ Rewritten statements keep their line count, so stack traces and source maps stil
 
 Bundle size of the same icons imported from @arki/icons and from popular React icon libraries. The main entry of @arki/icons is Phosphor, so Phosphor imported directly is a plain row to show the wrapper cost.
 
-Measured on Node 26.12.1 (Darwin 27.0.0 arm64, Apple M2 Max (12 cores)) · @arki/bench 0.2.0 (mitata 1.0.34) · publish, seed 1592639052 · commit 57ff7b0beb · 2026-11-01.
+Measured on Node 26.11.1 (Darwin 27.2.0 arm64, Apple M2 Max (12 cores)) · @arki/bench 0.2.0 (mitata 1.0.34) · publish, seed 1592639052 · commit b61efa33ba · 2026-11-22.
 
-Versions: @arki/bench 0.2.0 · @arki/icons 0.2.0 · @phosphor-icons/react 2.1.10 · lucide-react 0.542.0 · mitata 1.0.34 · react-icons 5.7.0.
+Versions: @arki/bench 0.2.0 · @arki/icons 0.2.1 · @phosphor-icons/react 2.1.10 · lucide-react 0.542.0 · mitata 1.0.34 · react-icons 5.7.0.
 
 ### 1 icon
 
@@ -139,9 +139,9 @@ Rows marked *different contract* do other work: they are measured and shown, nev
 
 | Library | Version | JS+CSS gzip | brotli | raw | Budget (gzip) | vs @arki/icons |
 | --- | --- | --: | --: | --: | --- | --- |
-| **@arki/icons** | 0.2.0 | 842 B | 752 B | 2.13 kB | 1 kB | baseline |
-| @phosphor-icons/react (direct) | 2.1.10 | 843 B | 741 B | 2.13 kB | — | ≈ same |
-| lucide-react | 0.542.0 | 741 B | 649 B | 1.25 kB | — | different contract: other drawings, one weight |
+| **@arki/icons** | 0.2.1 | 850 B | 752 B | 2.13 kB | 1 kB | baseline |
+| @phosphor-icons/react (direct) | 2.1.10 | 853 B | 741 B | 2.13 kB | — | ≈ same |
+| lucide-react | 0.542.0 | 746 B | 649 B | 1.25 kB | — | different contract: other drawings, one weight |
 | react-icons (fa6) | 5.7.0 | 1.23 kB | 1.09 kB | 2.76 kB | — | different contract: other drawings, one weight |
 
 ### 10 common icons
@@ -150,10 +150,10 @@ Rows marked *different contract* do other work: they are measured and shown, nev
 
 | Library | Version | JS+CSS gzip | brotli | raw | Budget (gzip) | vs @arki/icons |
 | --- | --- | --: | --: | --: | --- | --- |
-| **@arki/icons** | 0.2.0 | 7.05 kB | 5.94 kB | 29.1 kB | 8 kB | baseline |
-| @phosphor-icons/react (direct) | 2.1.10 | 7.11 kB | 5.95 kB | 29.1 kB | — | ≈ same |
-| lucide-react | 0.542.0 | 1.39 kB | 1.25 kB | 2.89 kB | — | different contract: other drawings, one weight |
-| react-icons (fa6) | 5.7.0 | 2.72 kB | 2.33 kB | 7.08 kB | — | different contract: other drawings, one weight |
+| **@arki/icons** | 0.2.1 | 7.01 kB | 5.94 kB | 29.1 kB | 8 kB | baseline |
+| @phosphor-icons/react (direct) | 2.1.10 | 7.06 kB | 5.95 kB | 29.1 kB | — | ≈ same |
+| lucide-react | 0.542.0 | 1.4 kB | 1.25 kB | 2.89 kB | — | different contract: other drawings, one weight |
+| react-icons (fa6) | 5.7.0 | 2.73 kB | 2.33 kB | 7.08 kB | — | different contract: other drawings, one weight |
 
 check, x, menu, search, user, settings, home, arrow-right, trash, plus.
 
@@ -168,15 +168,15 @@ check, x, menu, search, user, settings, home, arrow-right, trash, plus.
 
 - command: `arki-bench run --profile publish`
 - profile: publish
-- packages: @arki/bench 0.2.0, @arki/bench 0.2.0, @arki/icons 0.2.0, @phosphor-icons/react 2.1.10, lucide-react 0.542.0, mitata 1.0.34, react-icons 5.7.0
-- machine: Darwin 27.0.0 arm64, Apple M2 Max (12 cores), 96 GB RAM
-- source commit: 57ff7b0beb3db214a4c7e90b1487f05573ac7e21
+- packages: @arki/bench 0.2.0, @arki/bench 0.2.0, @arki/icons 0.2.1, @phosphor-icons/react 2.1.10, lucide-react 0.542.0, mitata 1.0.34, react-icons 5.7.0
+- machine: Darwin 27.2.0 arm64, Apple M2 Max (12 cores), 96 GB RAM
+- source commit: b61efa33bac8e8becffdb3e7bb00ba527a34df9c
 
-provenance: 57ff7b0beb3db214a4c7e90b1487f05573ac7e21
+provenance: b61efa33bac8e8becffdb3e7bb00ba527a34df9c
 
 Reproduce: `bunx arki-bench run --profile publish` in the package directory.
 
-<!-- bench:meta {"schema":1,"suite":"@arki/icons","specHash":"e7708cf7a5281c3b","profile":"publish","date":"2026-11-01T09:04:49.862Z","harness":"0.2.0"} -->
+<!-- bench:meta {"schema":1,"suite":"@arki/icons","specHash":"e7708cf7a5281c3b","profile":"publish","date":"2026-11-22T20:19:23.619Z","harness":"0.2.0"} -->
 <!-- bench:end -->
 
 ## Documentation
