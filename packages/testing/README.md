@@ -69,19 +69,20 @@ Debug logs use the `testing:*` categories. Show them with `DEBUG_TESTS=true`.
 
 The root entry loads no Docker client and no MSW. The rest are explicit entries. `IntegrationTester` and `initTester` moved to `@arki/auth/testing/integration-tester`.
 
-| Import                                                                            | Gives you                                                                    | Needs                                      |
-| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------ |
-| `@arki/testing`                                                                   | factories, assertions, timestamps, debug, performance                        | nothing                                    |
-| `@arki/testing/assertions`, `/factories`, `/timestamps`, `/debug`, `/performance` | one part of the root                                                         | nothing                                    |
-| `@arki/testing/containers`                                                        | `setupGlobalTestContainers`, `startPostgresContainer`, `startRedisContainer` | Docker, testcontainers                     |
-| `@arki/testing/msw`                                                               | `setupMswServer`, `http`, `HttpResponse`                                     | `msw`, Vitest                              |
-| `@arki/testing/vitest-setup`                                                      | the Vitest test API, re-exported                                             | Vitest                                     |
-| `@arki/testing/stack`, `/stack/contract`                                          | declare real services once per app                                           | Vitest                                     |
-| `@arki/testing/services/*`                                                        | `postgres`, `redis`, `mailpit`, `ollama`, `http-fixtures`                    | Docker (not `ollama`, not `http-fixtures`) |
-| `@arki/testing/playwright`                                                               | Playwright config, setup and story helpers for a built app                   | `@playwright/test`, Docker                 |
-| `@arki/testing/ai`                                                                | scorers, `createJudge`, `defineScorer`                                       | an Ollama daemon for judge scorers         |
-| `@arki/testing/ai/vitest`, `/ai/playwright`                                       | `expect(...).toScore(scorer)`                                                | Vitest or Playwright                       |
-| `@arki/testing/otel`                                                              | `captureSpans`: finished spans with their parents, and collected metrics     | `@opentelemetry/api`                       |
+| Import                                                                            | Gives you                                                                    | Needs                              |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------- |
+| `@arki/testing`                                                                   | factories, assertions, timestamps, debug, performance                        | nothing                            |
+| `@arki/testing/assertions`, `/factories`, `/timestamps`, `/debug`, `/performance` | one part of the root                                                         | nothing                            |
+| `@arki/testing/containers`                                                        | `setupGlobalTestContainers`, `startPostgresContainer`, `startRedisContainer` | Docker, testcontainers             |
+| `@arki/testing/msw`                                                               | `setupMswServer`, `http`, `HttpResponse`                                     | `msw`, Vitest                      |
+| `@arki/testing/vitest-setup`                                                      | the Vitest test API, re-exported                                             | Vitest                             |
+| `@arki/testing/stack`, `/stack/contract`                                          | declare real services once per app                                           | Vitest                             |
+| `@arki/testing/containers/postgres`, `/containers/redis`, `/containers/mailpit`   | one real service per run or worker                                           | Docker, testcontainers             |
+| `@arki/testing/services/ollama`, `/services/http-fixtures`                        | the local Ollama daemon, a local HTTP server                                 | an Ollama daemon (`ollama` only)   |
+| `@arki/testing/playwright`                                                        | Playwright config, setup and story helpers for a built app                   | `@playwright/test`, Docker         |
+| `@arki/testing/ai`                                                                | scorers, `createJudge`, `defineScorer`                                       | an Ollama daemon for judge scorers |
+| `@arki/testing/ai/vitest`, `/playwright/ai`                                       | `expect(...).toScore(scorer)`                                                | Vitest or Playwright               |
+| `@arki/testing/otel`                                                              | `captureSpans`: finished spans with their parents, and collected metrics     | `@opentelemetry/api`               |
 
 The full list with every export name is in [llms.txt](llms.txt).
 

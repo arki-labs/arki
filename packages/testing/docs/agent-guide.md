@@ -5,7 +5,7 @@ Read this before you add or change a test with `@arki/testing`. The [README](../
 ## The model
 
 - The root entry is light: factories, assertions, timestamps, debug and performance. It needs no Docker.
-- Heavy parts are subpaths: `containers` (Docker), `msw` (`msw`), `e2e` (Playwright, Docker), `ai` (an Ollama daemon for judge scorers).
+- Heavy parts are subpaths: `containers` (Docker), `msw` (`msw`), `playwright` (Playwright, Docker), `ai` (an Ollama daemon for judge scorers).
 - `IntegrationTester` and `initTester` live in `@arki/auth/testing/integration-tester`, because their test users carry an auth `UserId`. They run against a real Postgres and Redis from `./containers`.
 - `stack` and `services/*` declare real services once per app. A service starts once per run (`start`) and may give each worker its own slice (`slice`). Values that cross processes are JSON.
 - The package ships TypeScript source. Run it under Vitest or Bun.
@@ -43,7 +43,15 @@ Follow [the MSW page](msw.md) or [the recipe](recipes/mock-http-api.md).
 
 ### Score AI output
 
-Import scorers from `@arki/testing/ai` and the matcher from `@arki/testing/ai/vitest` (or `/ai/playwright`). `expect(output).toScore(scorer)` passes or fails with the score and reason. `UnscorableError` means the scorer could not run, for example the judge model is missing.
+Import scorers from `@arki/testing/ai` and the matcher from `@arki/testing/ai/vitest` (or `@arki/testing/playwright/ai`). `expect(output).toScore(scorer)` passes or fails with the score and reason. `UnscorableError` means the scorer could not run, for example the judge model is missing.
+
+Pick the scorer by what must hold:
+
+- `containsFacts`: the share of the listed facts found in the output, compared without case, punctuation or the commas in numbers. It passes when every fact is there.
+- `grounded`: the share of the output's claims that the source supports. The judge extracts the claims and a quote for each, and code checks that each quote really is in the source.
+- `rubric`: one criterion in plain words, answered pass or fail by the judge.
+- `shape`: 1 when the output satisfies a Standard Schema, else 0 with the issues.
+- `similarTo`: the cosine similarity between the output and a reference reaches `atLeast`. It needs an embedder. It measures the gist and the topic only, so it cannot tell a fact from its negation or a wrong number. Use `containsFacts` or `grounded` for facts. `atLeast` has no safe default: measure it on your model.
 
 ### Run an end-to-end story against a built app
 
