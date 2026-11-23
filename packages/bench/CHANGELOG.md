@@ -1,5 +1,13 @@
 # @arki/bench
 
+## 0.2.1
+
+### Patch Changes
+
+- 89d0ca0: Tidy two source lines so the package passes its own lint, with no change in behaviour.
+- 89d0ca0: Results record bench 0.2.0, not the stale 0.1.0. The version lives in `src/version.ts`, and a test fails if it drifts from package.json.
+- 4f24c6d: Each package README now records what it instruments, including why these packages need no spans.
+
 ## 0.2.0
 
 ### Minor Changes

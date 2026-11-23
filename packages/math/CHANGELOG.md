@@ -1,5 +1,14 @@
 # @arki/math
 
+## 0.2.1
+
+### Patch Changes
+
+- 4f24c6d: Each package README now records what it instruments, including why these packages need no spans.
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- @arki/failure@0.4.0
+  - @arki/log@0.4.1
+
 ## 0.2.0
 
 ### Minor Changes

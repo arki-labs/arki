@@ -1,5 +1,17 @@
 # @arki/money
 
+## 0.2.1
+
+### Patch Changes
+
+- 937e762: Documents the 10,000-part limit of `split` and `allocate` in the JSDoc and README: more parts throws `ResourceLimitError`.
+- 4f24c6d: Each package README now records what it instruments, including why these packages need no spans.
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- Updated dependencies [4f24c6d]
+- Updated dependencies [4f24c6d]
+  - @arki/math@0.2.1
+  - @arki/failure@0.4.0
+
 ## 0.2.0
 
 ### Minor Changes

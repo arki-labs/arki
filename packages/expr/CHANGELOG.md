@@ -24,6 +24,18 @@ Also unreleased: float domain and LaTeX (RFC `2026-10-14-arki-expr` §21 step 2)
 - `Language` carries its function and constant names as type parameters, so `compile` requires host implementations by type. Function definitions take an optional `cost` (default 1) for the steps budget.
 - `size-limit` budgets in `test`; benchmark suite against mathjs (pruned) and expr-eval.
 
+## 0.1.1
+
+### Patch Changes
+
+- 4f24c6d: Each package README now records what it instruments, including why these packages need no spans.
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- Updated dependencies [4f24c6d]
+- Updated dependencies [4f24c6d]
+  - @arki/math@0.2.1
+  - @arki/failure@0.4.0
+  - @arki/schema@0.3.1
+
 ## 0.1.0
 
 ### Minor Changes

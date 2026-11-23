@@ -1,5 +1,18 @@
 # @arki/cas
 
+## 0.1.1
+
+### Patch Changes
+
+- 4f24c6d: Each package README now records what it instruments, including why these packages need no spans.
+- b21d378: Declare `@arki/failure` as a runtime dependency, since the published entries import it.
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- Updated dependencies [4f24c6d]
+- Updated dependencies [4f24c6d]
+  - @arki/expr@0.1.1
+  - @arki/math@0.2.1
+  - @arki/failure@0.4.0
+
 ## 0.1.0
 
 ### Minor Changes
