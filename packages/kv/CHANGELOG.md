@@ -1,5 +1,34 @@
 # @arki/kv
 
+## 0.6.0
+
+### Minor Changes
+
+- 2b44ad3: `redisResponseCache` (`@arki/kv/redis/idempotency`) now spans each call: `kv.idempotency.begin`,
+  `kv.idempotency.finish` and `kv.idempotency.abandon`, counted in `kv.commands`. Every `kv.*` span now sets the
+  `failure.code` attribute when a command returns a failure, like the other `@arki/*` packages (an attribute change,
+  so minor). A broken OpenTelemetry SDK can no longer make a KV command throw: telemetry errors are swallowed. Keys,
+  values, owners and responses are never recorded.
+
+  no docs impact: README gains an Observability section; no API changed.
+  no demo impact: no demo reads kv telemetry.
+
+### Patch Changes
+
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- 7fc17aa: Span status now follows one rule. A returned failure always sets `failure.code`. It sets the span status to error only when `isFault(failure)` is true (status 500 or higher). An expected outcome (a 4xx, such as a missing record, a held lock or a declined card) leaves the status unset, so alerts on span errors fire only for faults. Thrown errors still set the error status. `@arki/env` and `@arki/schedule` now set `failure.code`, which they did not before. `@arki/payments` used to leave the status unset for every returned failure; a 5xx now sets error. `@arki/async`: `Cancelled` (499) no longer marks the span as an error.
+- Updated dependencies [53d25f7]
+- Updated dependencies [d5c71b1]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [46e88d2]
+- Updated dependencies [53d25f7]
+- Updated dependencies [00e0373]
+- Updated dependencies [5de1c76]
+- Updated dependencies [7fc17aa]
+- Updated dependencies [0464500]
+  - @arki/dot@0.11.0
+  - @arki/http@0.5.0
+
 ## 0.5.0
 
 ### Minor Changes

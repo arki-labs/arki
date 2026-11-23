@@ -1,5 +1,69 @@
 # @arki/auth
 
+## 0.5.0
+
+### Minor Changes
+
+- 8d4cd1d: Breaking: `emailModuleMock` is removed from `@arki/auth/testing/production-boot`. Booting an auth sends no mail, so a production-boot test no longer needs to mock `@arki/mail`. Build the real mail transport with a placeholder key (for example `process.env.RESEND_API_KEY ??= 'test_resend_key'`) and delete the `vi.mock('@arki/mail', ...)` block. A test that checks mail content should send through `@arki/mail/http/mailpit` to a Mailpit container (`@arki/testing/containers/mailpit`) and read the mailbox. `assertAuthBoots` and `applyProductionBootEnv` are unchanged, and `vitest` stays an optional peer because `assertAuthBoots` uses `expect`.
+- 9d345d6: `@arki/auth/testing/integration-tester`: the connection, event-store, id and page checks use schemas (A-39), and caller values the tester cannot honour are the invariant failure `ARKI_FAILURE_E008` before any work runs.
+
+  - `clearTables`, `clearAllTables`, `clearTablesExcept` and `clearTablesByPattern` refuse a set that leaves out a schema table referencing a cleared one (without `on delete cascade` / `set null`), naming it, before deleting any row (was a raw 23503 half-way through). `clearTablesByPattern` ignores a RegExp's `g` / `y` flags (they skipped tables) and refuses a string that is not a regular expression (was a raw `SyntaxError`).
+  - `generateBetween` takes whole numbers with `min <= max` (fractions and reversed bounds returned values outside the range); `generateDate` refuses an `Invalid Date` bound (was a raw `RangeError`), `from` after `to`, and a negative, non-finite or out-of-range span; `generateString` takes a length from 0 to 64 (longer was silently cut); `generateFromEnum` refuses an empty list (returned `undefined`); `waitForProjections` takes 0 to 2^31 - 1 ms.
+  - `assertPaginatedResponse` now delegates to `assertPaginationValid` from `@arki/testing` and narrows to its `PaginatedResponse`, so `total`, `nextCursor` and `hasMore` types are checked when present.
+
+- 2eac7d2: New entry `@arki/auth/testing/integration-tester`: `IntegrationTester`, `initTester` and their types (`TestUser`, `TestUserRole`, `TesterOptions`, `TesterUsers`, `TesterUserOverrides`, `TesterDatabase`, `IntegrationTesterConfig`, `CreateCallerArgs`, `TesterBuilder`, `TesterConfig`, `ContextTesterBuilder`, `InitialTesterBuilder`). They moved here from `@arki/testing/server/integration-tester` and `@arki/testing/server/tester-builder`, unchanged, because their test users carry an auth `UserId`. Change the import path only. The entry needs the new optional peers `@arki/testing`, `testcontainers` and `@testcontainers/postgresql`, and Docker unless a global connection string is set.
+
+  Docs: README `## Public imports` and `## Documentation`, new `docs/integration-tester.md`, `docs/agent-guide.md`.
+
+### Patch Changes
+
+- 2a9dea1: The handler trims trailing slashes from the request path in one pass. A path with a long run of slashes that did not end the path made the old regex trim quadratic.
+- f367180: `IntegrationTester.clearAllTables()` now clears only the Drizzle tables of the schema. It no longer hands relations, enums or other exports of the schema module to `db.delete`, which threw.
+- 8b5cad6: `IntegrationTester.clearTables`, `clearAllTables`, `clearTablesExcept` and `clearTablesByPattern` delete a child table before the parents it references. They deleted in schema export order, so a parent exported before a child that held rows was refused by the foreign key (SQLSTATE 23503). Tables in a foreign-key cycle keep their given order.
+- 111f3f1: `IntegrationTester.getUser` documents that it throws `Tester not initialized. Call setup() first.` when called before `setup()`, and a test pins it.
+- 53d25f7: The README has an `## Observability` section: a table of the `auth.handler`, `auth.principal`, `auth.sign_in_with_id_token` and `auth.observer.<event>` spans, which both the Postgres and SQLite runtimes make. A new test shows `auth.principal` nests under the Dot usecase span that called it. No code change.
+- 7035f16: `@arki/auth/testing/integration-tester`: `clearTables`, `clearAllTables`, `clearTablesExcept` and `clearTablesByPattern` empty their tables in one statement, so two tables that reference each other, both holding rows, now clear together (separate deletes were refused with a raw 23503 whatever the order). The JSDoc of the clear helpers and `seed` now names every input that throws: a set that leaves out a referencing table (invariant failure), a table missing from the database, and `seed` records Postgres refuses (a missing referenced row, a repeated key, a missing NOT NULL column). `seed` inserts in the key order of its argument.
+- 3567d40: `better-auth` and `@better-auth/expo` move from 1.7.10 to 1.7.27. Apps that pin a newer 1.7.x `better-auth` no longer install a second copy next to the one `@arki/auth` uses, so the auth instance types match again.
+
+  no docs impact: public API unchanged; no doc names the better-auth version.
+  no demo impact: no demo depends on `@arki/auth` or better-auth.
+
+- Updated dependencies [053a5b7]
+- Updated dependencies [53d25f7]
+- Updated dependencies [d5c71b1]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [f367180]
+- Updated dependencies [8b5cad6]
+- Updated dependencies [2eac7d2]
+- Updated dependencies [7035f16]
+- Updated dependencies [46e88d2]
+- Updated dependencies [9d345d6]
+- Updated dependencies [f367180]
+- Updated dependencies [2400d21]
+- Updated dependencies [53d25f7]
+- Updated dependencies [0464500]
+- Updated dependencies [93d1ea9]
+- Updated dependencies [00e0373]
+- Updated dependencies [2b44ad3]
+- Updated dependencies [53d25f7]
+- Updated dependencies [5de1c76]
+- Updated dependencies [2a9dea1]
+- Updated dependencies [7fc17aa]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [10fe795]
+- Updated dependencies [7035f16]
+- Updated dependencies [09b7f91]
+- Updated dependencies [2a9dea1]
+- Updated dependencies [54b331d]
+- Updated dependencies [9d345d6]
+- Updated dependencies [0464500]
+  - @arki/testing@0.4.0
+  - @arki/dot@0.11.0
+  - @arki/db@0.6.0
+  - @arki/http@0.5.0
+  - @arki/kv@0.6.0
+  - @arki/mail@0.6.0
+
 ## 0.4.0
 
 ### Minor Changes

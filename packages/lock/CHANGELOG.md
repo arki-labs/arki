@@ -1,5 +1,27 @@
 # @arki/lock
 
+## 0.2.2
+
+### Patch Changes
+
+- d74e617: The README now says what React Native needs: lock tokens come from Web Crypto `getRandomValues`, so
+  install `react-native-get-random-values` first. Without it every lock call returns `RandomSourceUnavailable`
+  and the callback does not run. The smoke test proves both cases on Hermes. Lint fixes only in the key
+  encoding code; behaviour is unchanged.
+
+  no docs impact: README updated in this change.
+  no demo impact: no demo runs on React Native.
+
+- 7fc17aa: Span status now follows one rule. A returned failure always sets `failure.code`. It sets the span status to error only when `isFault(failure)` is true (status 500 or higher). An expected outcome (a 4xx, such as a missing record, a held lock or a declined card) leaves the status unset, so alerts on span errors fire only for faults. Thrown errors still set the error status. `@arki/env` and `@arki/schedule` now set `failure.code`, which they did not before. `@arki/payments` used to leave the status unset for every returned failure; a 5xx now sets error. `@arki/async`: `Cancelled` (499) no longer marks the span as an error.
+- 53d25f7: The README now has an `## Observability` section: every `lock.*` and `lock.store.*` span with when it starts, the `lock.operations` counter, and what is left uninstrumented. A new test proves that inside a Dot app a lock taken by a usecase opens `lock.run` under the usecase's span.
+- Updated dependencies [53d25f7]
+- Updated dependencies [d5c71b1]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [46e88d2]
+- Updated dependencies [00e0373]
+- Updated dependencies [7fc17aa]
+  - @arki/dot@0.11.0
+
 ## 0.2.1
 
 ### Patch Changes

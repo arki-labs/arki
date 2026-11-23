@@ -2,6 +2,62 @@
 
 Renumbered to 0.1.0 on 2026-10-13. The package was never published; the 2.0.x versions below were workspace-only. It stays below 1.0 until its API is stable: a breaking change bumps the minor version.
 
+## 0.4.0
+
+### Minor Changes
+
+- 5de1c76: `queue.execute` now starts a new trace when the message carries no producer trace. Before, it fell back to the active context, so in a Dot app every such job nested under the ended `dot.unit.start` span and looked like part of app startup. A message that carries the producer's trace still continues it. `queue.execute` is now a consumer span (`SpanKind.CONSUMER`), matching the producer `queue.enqueue` span.
+
+  Docs: README `## Observability`.
+
+### Patch Changes
+
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- 4f24c6d: The runtime claims are now proven per entry, and the README tables show it.
+
+  - `@arki/geo/geocoding` runs on Node, Bun and Deno only (package.json `arki.entryRuntimes`):
+    `node-geocoder` needs Node's `readline`. The rest of `@arki/geo` runs on all five engines.
+  - `@arki/seo/react` and `@arki/tanstack-start/error` are bundler-only entries. They are now proven as a
+    bundle on each engine they claim, which is how an app loads them.
+  - `@arki/queue` now passes on Deno, run straight from `node_modules` as a Deno app does.
+  - `@arki/payments-native` now passes on Hermes.
+
+  No code in these packages changed.
+
+  no docs impact: README runtime sections only.
+  no demo impact: no behaviour change.
+
+- 53d25f7: The README now has an `## Observability` section: the `queue.enqueue`, `queue.flow.enqueue` and `queue.execute` spans, what each records, and how the producer context reaches the worker. A new test against a real Redis proves that inside a Dot app a job enqueued by a usecase opens `queue.enqueue` under the usecase's span.
+- 7fc17aa: Span status now follows one rule. A returned failure always sets `failure.code`. It sets the span status to error only when `isFault(failure)` is true (status 500 or higher). An expected outcome (a 4xx, such as a missing record, a held lock or a declined card) leaves the status unset, so alerts on span errors fire only for faults. Thrown errors still set the error status. `@arki/env` and `@arki/schedule` now set `failure.code`, which they did not before. `@arki/payments` used to leave the status unset for every returned failure; a 5xx now sets error. `@arki/async`: `Cancelled` (499) no longer marks the span as an error.
+- Updated dependencies [53d25f7]
+- Updated dependencies [0464500]
+- Updated dependencies [8812b00]
+- Updated dependencies [d5c71b1]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [10fe795]
+- Updated dependencies [81983b8]
+- Updated dependencies [46e88d2]
+- Updated dependencies [2a9dea1]
+- Updated dependencies [5de1c76]
+- Updated dependencies [2400d21]
+- Updated dependencies [5de1c76]
+- Updated dependencies [d74e617]
+- Updated dependencies [53d25f7]
+- Updated dependencies [00e0373]
+- Updated dependencies [53d25f7]
+- Updated dependencies [53d25f7]
+- Updated dependencies [7fc17aa]
+- Updated dependencies [2a9dea1]
+- Updated dependencies [f367180]
+- Updated dependencies [744896d]
+- Updated dependencies [2a9dea1]
+- Updated dependencies [f367180]
+  - @arki/dot@0.11.0
+  - @arki/schedule@0.2.0
+  - @arki/journal@0.5.0
+  - @arki/admin@0.3.1
+  - @arki/resilience@0.3.3
+
 ## 0.3.0
 
 ### Minor Changes

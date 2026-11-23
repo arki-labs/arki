@@ -1,5 +1,66 @@
 # @arki/journal
 
+## 0.5.0
+
+### Minor Changes
+
+- 8812b00: The webhook sender returns failures for outside input instead of throwing `WebhookError`.
+
+  - `subscribe` returns `InvalidInput` (`schema.invalid_input`) when its input fails the schema or the URL is not public https. The issues name the field (`url`, `events`, ...).
+  - `dispatch` returns `InvalidInput` for input that fails its schema or a payload that is not JSON (a bigint, a cycle), and `journal.webhook_payload_too_large` for a body over `maxPayloadBytes`. Nothing is written for either.
+  - `replay` returns `journal.webhook_not_found` for an unknown message or subscription and `journal.webhook_other_partner` for a subscription of another partner. `rotateSecret`, `enable` and `disable` return `journal.webhook_not_found` for an unknown id.
+  - A wrong `encryptionKey` throws `journal.webhook_configuration_invalid` (as `UnexpectedFailure`) when `webhookSender(...)` is built. `dispatch` given the root database throws `invariant` (a caller bug). A non-2xx answer is recorded as `journal.webhook_delivery_failed` and retried by the worker as before.
+  - `WebhookError` and `WEBHOOK_ERROR_CODES` are removed. `SubscribeInput` and `DispatchInput` are now read from their schemas; their shape is unchanged.
+  - `journalReceiptStore` (`@arki/journal/foreman`): a claim that loses the insert to a writer outside the journal's append lock now answers `{ claimed: false, receipt }` with the stored receipt. Before, it threw `UnexpectedFailure`.
+
+  Upgrade: check the result of `subscribe`, `dispatch`, `replay`, `rotateSecret`, `enable` and `disable` with `isFailure`, or wrap them in `orThrow(...)` where a failure is a bug. Replace `WEBHOOK_ERROR_CODES` matches with the failure codes above.
+
+- 10fe795: `SubscribeInput` and `DispatchInput` in `@arki/journal/http/webhooks` are now plain TS types (same shape), and their schemas are internal, so the entry names no Zod type.
+- 2400d21: A Postgres listener that cannot start now returns its failure instead of rejecting.
+
+  - `@arki/db`: `listenOnPool(pool, channel)(onMessage)` resolves to `ListenUnavailable` (`db.listen_unavailable`) when the first connection or `LISTEN` fails. It no longer rejects with an `UnexpectedFailure`. The raw pool error stays its private `cause`. Nothing retries: call the start again.
+  - `@arki/journal`: a `WakeListener` may return a `Failure`. `worker.start()` resolves to that failure and leaves the worker stopped, so a later `start()` tries again. A `listen` that throws also leaves it stopped (before, the worker stayed marked running and every later `start()` did nothing). The failure type is inferred: a worker without `listen` returns no failure. In Dot, `journalWorker()` returns the failure from `start`, so the app's start fails with it.
+  - `@arki/pubsub`: `PubSub` and `TransactionalPubSub` take a `SubscribeFailure` type (`never` by default). `pgPubSub`'s `subscribe` resolves to `db.listen_unavailable` when the channel's listener cannot start; nothing stays subscribed, and the next `subscribe` tries again.
+  - `@arki/live`: a `LiveSource`'s `start` may return a failure, and `hub.start()` resolves to it (`pgSource`: `db.listen_unavailable`). The hub stays `idle` and stopped, so a later `hub.start()` on the same hub tries again; a successful start happens once. `liveQueries()` returns it from its Dot `start`.
+
+  Upgrade: check the result of `worker.start()`, `hub.start()` and pg `subscribe()` where a listener is wired, for example `orThrow(await worker.start())` in a script, or return it from a Dot `start` hook.
+
+- 5de1c76: Each job the worker runs now starts its own trace. Before, a worker started inside Dot's start hook put every `journal.effect` span (and the `journal.step` and command spans under it) under the `dot.unit.start` span, which had already ended, so background jobs looked like part of app startup. The worker's loops, its sweeper and its tap dispatch now run in the root context. Journal rows carry no OpenTelemetry context, so there is no producer trace to continue.
+
+  Docs: README `## Observability`.
+
+- f367180: `checkEventMapFile` returns an `EventMapFileFailed` failure (`journal.event_map_file_failed`) instead of rejecting when the file cannot be written, and no longer reports an unreadable file as `missing`: only "no such file" is `missing`. `scanEntrypoints` records a procedure file it cannot read (a broken symlink, no permission) as a `problems` entry and scans the rest.
+
+### Patch Changes
+
+- 2a9dea1: The event-map scan reads each entrypoint file in one pass. A file with many `import` lines and no quote after them, or a long run of `{` or spaces in an import clause, read the rest of the file again from each line: seconds per 100 KB. It finds the same imports and names as before.
+- 53d25f7: The README now has an `## Observability` section: the `journal.command`, `journal.effect` and `journal.step` spans with their attributes, and what is left uninstrumented. A new test proves that inside a Dot app a command run by a usecase opens `journal.command` inside the usecase's span, through the command's transaction span.
+- 7fc17aa: Span status now follows one rule. A returned failure always sets `failure.code`. It sets the span status to error only when `isFault(failure)` is true (status 500 or higher). An expected outcome (a 4xx, such as a missing record, a held lock or a declined card) leaves the status unset, so alerts on span errors fire only for faults. Thrown errors still set the error status. `@arki/env` and `@arki/schedule` now set `failure.code`, which they did not before. `@arki/payments` used to leave the status unset for every returned failure; a 5xx now sets error. `@arki/async`: `Cancelled` (499) no longer marks the span as an error.
+- 744896d: The agent index `llms.txt` is shorter; the rules keep their names and the long form is in the agent guide.
+- 2a9dea1: `checkEventMapFile` no longer throws a raw `RangeError` or runs out of memory on large files. The line diff skips the lines both texts share at the start and end, and when the rest is over 4,000,000 cells (about 2,000 × 2,000 lines) it returns one summary line as the `stale` diff instead.
+- Updated dependencies [53d25f7]
+- Updated dependencies [d5c71b1]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [81983b8]
+- Updated dependencies [46e88d2]
+- Updated dependencies [2400d21]
+- Updated dependencies [53d25f7]
+- Updated dependencies [0464500]
+- Updated dependencies [d74e617]
+- Updated dependencies [00e0373]
+- Updated dependencies [53d25f7]
+- Updated dependencies [53d25f7]
+- Updated dependencies [5de1c76]
+- Updated dependencies [7fc17aa]
+- Updated dependencies [2a9dea1]
+- Updated dependencies [f367180]
+- Updated dependencies [0464500]
+  - @arki/dot@0.11.0
+  - @arki/db@0.6.0
+  - @arki/http@0.5.0
+  - @arki/admin@0.3.1
+  - @arki/resilience@0.3.3
+
 ## 0.4.1
 
 ### Patch Changes

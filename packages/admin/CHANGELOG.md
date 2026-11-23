@@ -1,5 +1,24 @@
 # @arki/admin
 
+## 0.3.1
+
+### Patch Changes
+
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- 81983b8: Each approved Foreman execute runs in an `admin.action.execute` span with `admin.action`, `admin.receipt` (`applied`, `failed`, `pending`, `replayed` or `unclaimed`) and `failure.code` on a failure, and counts in `admin.executions` (`action`, `receipt`, `outcome`). Served through `foreman()` it nests under the request's `http.request` span. The input, result, execution id, approver and keys are never recorded. `@opentelemetry/api` is a new dependency.
+
+  Docs: README `## Observability`.
+
+- 7fc17aa: Span status now follows one rule. A returned failure always sets `failure.code`. It sets the span status to error only when `isFault(failure)` is true (status 500 or higher). An expected outcome (a 4xx, such as a missing record, a held lock or a declined card) leaves the status unset, so alerts on span errors fire only for faults. Thrown errors still set the error status. `@arki/env` and `@arki/schedule` now set `failure.code`, which they did not before. `@arki/payments` used to leave the status unset for every returned failure; a 5xx now sets error. `@arki/async`: `Cancelled` (499) no longer marks the span as an error.
+- 2a9dea1: The Coolify client reads the version answer in one pass. A long run of digits with no `.x.y` after it made it read the run again from every digit. It finds the same version as before.
+- f367180: A Foreman private key of the right length whose bytes are not an Ed25519 PKCS#8 key now fails with `ARKI_ADMIN_E014` (invalid config) on first use, with the crypto error as `cause`. Before, the first call rejected with a raw `DOMException`.
+- Updated dependencies [4f24c6d]
+- Updated dependencies [53d25f7]
+- Updated dependencies [5de1c76]
+- Updated dependencies [7fc17aa]
+- Updated dependencies [0464500]
+  - @arki/http@0.5.0
+
 ## 0.3.0
 
 ### Minor Changes

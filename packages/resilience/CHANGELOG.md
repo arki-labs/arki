@@ -4,6 +4,26 @@
 
 - Breaking: retry cancellation returns canonical `Cancelled` before another attempt and after rejected cancelled work. `RetryFailure`/`RETRY_FAILURES` include the exact cancellation and clock outcomes. Pre-aborted retries no longer invoke callbacks. See [upgrade guidance](docs/upgrades/0.2.0-to-0.3.0.md).
 
+## 0.3.3
+
+### Patch Changes
+
+- d74e617: `package.json` now declares the five engines the package is proven on (Node, Bun, Deno, browser, Hermes),
+  and the README shows the tested table. Code is unchanged.
+
+  no docs impact: README updated in this change.
+  no demo impact: code unchanged.
+
+- 53d25f7: The README now has an `## Observability` section: every `resilience.*` span with when it starts and what it records, the three metrics, and what is left uninstrumented. A new test proves that inside a Dot app a preset run by a usecase opens `resilience.execute` under the usecase's span.
+- 7fc17aa: Span status now follows one rule. A returned failure always sets `failure.code`. It sets the span status to error only when `isFault(failure)` is true (status 500 or higher). An expected outcome (a 4xx, such as a missing record, a held lock or a declined card) leaves the status unset, so alerts on span errors fire only for faults. Thrown errors still set the error status. `@arki/env` and `@arki/schedule` now set `failure.code`, which they did not before. `@arki/payments` used to leave the status unset for every returned failure; a 5xx now sets error. `@arki/async`: `Cancelled` (499) no longer marks the span as an error.
+- Updated dependencies [53d25f7]
+- Updated dependencies [d5c71b1]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [46e88d2]
+- Updated dependencies [00e0373]
+- Updated dependencies [7fc17aa]
+  - @arki/dot@0.11.0
+
 ## 0.3.2
 
 ### Patch Changes

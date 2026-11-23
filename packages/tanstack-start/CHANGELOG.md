@@ -1,5 +1,38 @@
 # @arki/tanstack-start
 
+## 0.3.2
+
+### Patch Changes
+
+- 0464500: Internal lint cleanup in the devtools, Sentry, error overlay and Vite helpers, with no change in behavior.
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- 4f24c6d: The runtime claims are now proven per entry, and the README tables show it.
+
+  - `@arki/geo/geocoding` runs on Node, Bun and Deno only (package.json `arki.entryRuntimes`):
+    `node-geocoder` needs Node's `readline`. The rest of `@arki/geo` runs on all five engines.
+  - `@arki/seo/react` and `@arki/tanstack-start/error` are bundler-only entries. They are now proven as a
+    bundle on each engine they claim, which is how an app loads them.
+  - `@arki/queue` now passes on Deno, run straight from `node_modules` as a Deno app does.
+  - `@arki/payments-native` now passes on Hermes.
+
+  No code in these packages changed.
+
+  no docs impact: README runtime sections only.
+  no demo impact: no behaviour change.
+
+- 53d25f7: The README has an `## Observability` section: no spans of its own, because the app server, oRPC and the mounted packages already span each request. No code change.
+- Updated dependencies [53d25f7]
+- Updated dependencies [0464500]
+- Updated dependencies [d5c71b1]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [46e88d2]
+- Updated dependencies [5de1c76]
+- Updated dependencies [00e0373]
+- Updated dependencies [53d25f7]
+- Updated dependencies [7fc17aa]
+  - @arki/dot@0.11.0
+  - @arki/schedule@0.2.0
+
 ## 0.3.1
 
 ### Patch Changes

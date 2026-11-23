@@ -1,5 +1,36 @@
 # @arki/db
 
+## 0.6.0
+
+### Minor Changes
+
+- d5c71b1: Removed `createIdFactory` from `@arki/db`. Its id type came from the prefix alone, so two kinds with the same prefix were interchangeable. Migration: declare the id with `defineId(prefix)` from `@arki/contracts` and get its columns with `idColumns(declaration)` from `@arki/db/id`. Replace `make()` and `new()` with `create()`. `createId` and `createPrefixedId` stay. The `dot new` stack template now declares its note id this way and adds `@arki/contracts` to the generated `package.json`.
+- 2400d21: A Postgres listener that cannot start now returns its failure instead of rejecting.
+
+  - `@arki/db`: `listenOnPool(pool, channel)(onMessage)` resolves to `ListenUnavailable` (`db.listen_unavailable`) when the first connection or `LISTEN` fails. It no longer rejects with an `UnexpectedFailure`. The raw pool error stays its private `cause`. Nothing retries: call the start again.
+  - `@arki/journal`: a `WakeListener` may return a `Failure`. `worker.start()` resolves to that failure and leaves the worker stopped, so a later `start()` tries again. A `listen` that throws also leaves it stopped (before, the worker stayed marked running and every later `start()` did nothing). The failure type is inferred: a worker without `listen` returns no failure. In Dot, `journalWorker()` returns the failure from `start`, so the app's start fails with it.
+  - `@arki/pubsub`: `PubSub` and `TransactionalPubSub` take a `SubscribeFailure` type (`never` by default). `pgPubSub`'s `subscribe` resolves to `db.listen_unavailable` when the channel's listener cannot start; nothing stays subscribed, and the next `subscribe` tries again.
+  - `@arki/live`: a `LiveSource`'s `start` may return a failure, and `hub.start()` resolves to it (`pgSource`: `db.listen_unavailable`). The hub stays `idle` and stopped, so a later `hub.start()` on the same hub tries again; a successful start happens once. `liveQueries()` returns it from its Dot `start`.
+
+  Upgrade: check the result of `worker.start()`, `hub.start()` and pg `subscribe()` where a listener is wired, for example `orThrow(await worker.start())` in a script, or return it from a Dot `start` hook.
+
+### Patch Changes
+
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- 0464500: Internal cleanup of two redundant type assertions and an empty client ids module, with no change in behaviour.
+- 53d25f7: The README now has an `## Observability` section that lists every `db.*` span and the `db.operations` and `db.operation.duration` metrics. It replaces the old "Transaction observability" note, which wrongly said transaction spans were still missing. The agent guide and the local-runtime upgrade note no longer say so either. A new test proves that inside a Dot app a transaction a usecase opens runs in `db.transaction.once` under the usecase's span.
+- 7fc17aa: Span status now follows one rule. A returned failure always sets `failure.code`. It sets the span status to error only when `isFault(failure)` is true (status 500 or higher). An expected outcome (a 4xx, such as a missing record, a held lock or a declined card) leaves the status unset, so alerts on span errors fire only for faults. Thrown errors still set the error status. `@arki/env` and `@arki/schedule` now set `failure.code`, which they did not before. `@arki/payments` used to leave the status unset for every returned failure; a 5xx now sets error. `@arki/async`: `Cancelled` (499) no longer marks the span as an error.
+- Updated dependencies [53d25f7]
+- Updated dependencies [d5c71b1]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [46e88d2]
+- Updated dependencies [d74e617]
+- Updated dependencies [00e0373]
+- Updated dependencies [53d25f7]
+- Updated dependencies [7fc17aa]
+  - @arki/dot@0.11.0
+  - @arki/resilience@0.3.3
+
 ## 0.5.1
 
 ### Patch Changes

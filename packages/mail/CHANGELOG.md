@@ -1,5 +1,60 @@
 # @arki/emails
 
+## 0.6.0
+
+### Minor Changes
+
+- f367180: `mailOutbox.enqueue` no longer throws a plain `Error` when the job holding an idempotency key is sent and deleted between the refused insert and the lookup. The key is free then, so it inserts again and returns `{ jobId, deduped: false }`. If other writers keep taking the key for three tries in a row, it returns the new `MailEnqueueContended` (`mail.enqueue_contended`, 503, `data.attempts`) and queues nothing; retry the write. `MailTooLarge`, `MailInvalidMessage` and `MailEnqueueContended` are now exported from `@arki/mail`, so callers can branch on them with `.is()`.
+- 8b5cad6: `mailOutbox().enqueue` no longer fails the caller's write with a raw Postgres error on user data. It returns `MailInvalidMessage` and queues nothing when:
+
+  - any field of the rendered mail holds a NUL character (U+0000), which the jsonb row refuses (SQLSTATE 22P05);
+  - the `idempotencyKey` is empty, holds a NUL character (22021), or is over 256 characters (22001, the journal's `dedupe_key varchar(256)`), counted in code points.
+
+  Breaking: `send`, `sendRaw` and `compose` also return `MailInvalidMessage` for a NUL character in any field, so `send` and `enqueue` agree. No mail can carry it.
+
+- 7035f16: A lone surrogate (such as `'\ud800'` alone) in any field of a message is `MailInvalidMessage`, like a NUL character: it is not text, and the outbox's jsonb column refused it with a raw Postgres 22P02. `enqueue` also returns `MailInvalidMessage` for an `idempotencyKey` holding a lone surrogate (the driver stored it as U+FFFD, so two keys shared one dedupe slot) and for an `expiresAt` that is an Invalid Date (was a raw `RangeError`).
+
+  Breaking: `send` and `sendRaw` now return `MailInvalidMessage` for a message with a lone surrogate instead of sending it.
+
+- 10fe795: `KVLike.get` now takes any Standard Schema of number (`StandardSchemaV1<unknown, number>`) instead of a Zod type; an `@arki/kv` client still fits. `QueuedArgs` in `@arki/mail/pg` is a plain TS type and the queue row schemas are internal, so `.`, `./pg` and `./outbox` name no Zod types.
+- 9d345d6: Settings no request can use now fail when the transport, mailer or outbox is built, as `MailError` `ARKI_MAIL_E001`, instead of every send reading as `mail.uncertain` ("the mail may have been sent") or a raw error:
+
+  - an `apiKey` (Resend, Unosend), `apiToken` (Cloudflare) or SES `credentials.accessKeyId` / `sessionToken` holding a line break, a NUL character or a character above U+00FF (`fetch` refuses such a header before sending). The message never echoes the key.
+  - a Mailpit `baseUrl` that is not an http(s) URL without credentials; an empty Cloudflare `accountId` or one with a lone surrogate (was a raw `URIError`); an SES `region` that is not a host name label.
+  - a `quotaPerMonth` that is not a whole number of at least 0 (NaN silently ignored the budget), and an outbox `maxBytes` that is not a whole number above 0.
+
+  Breaking: `send` and `sendRaw` return `MailInvalidMessage` for an `idempotencyKey` holding a line break, a NUL character or a character above U+00FF, on every transport (Resend sends it as a header, and `failover` may pick Resend). Use a Latin-1 key, such as a hash.
+
+### Patch Changes
+
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- 93d1ea9: Every `send` and `sendRaw` runs in a `mail.send` span, and every provider request in a `mail.<provider>.send` span under it (`mail.resend.send`, `mail.ses.send`, `mail.cloudflare.send`, `mail.unosend.send`, `mail.mailpit.send`), so a failover shows one span per attempt. Spans carry `mail.transport`, `mail.template`, `mail.provider` and `failure.code` on a failure; only `mail.uncertain` (a fault) sets the error status. Each counts in `mail.operations` (`operation`, `outcome`). Addresses, subjects, bodies and keys are never recorded. `@opentelemetry/api` is a new dependency.
+
+  Docs: README `## Observability`.
+
+- 2a9dea1: `mailSink().sentTo` reads each address in one pass. An address with a long run of `<` and no `>` made it read on from every `<`. It finds the same mailbox as before.
+- 2a9dea1: `resend`, `mailpit`, `unosend`, `cloudflare` and `ses` check `timeoutMs` when built: a value that is not more than 0 and at most 2,147,483,647 throws `MailError` `ARKI_MAIL_E001`. It used to make every send reject with a raw `TypeError` or `RangeError`.
+- Updated dependencies [53d25f7]
+- Updated dependencies [8812b00]
+- Updated dependencies [d5c71b1]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [10fe795]
+- Updated dependencies [46e88d2]
+- Updated dependencies [2a9dea1]
+- Updated dependencies [2400d21]
+- Updated dependencies [5de1c76]
+- Updated dependencies [d74e617]
+- Updated dependencies [53d25f7]
+- Updated dependencies [00e0373]
+- Updated dependencies [53d25f7]
+- Updated dependencies [7fc17aa]
+- Updated dependencies [744896d]
+- Updated dependencies [2a9dea1]
+- Updated dependencies [f367180]
+  - @arki/dot@0.11.0
+  - @arki/journal@0.5.0
+  - @arki/resilience@0.3.3
+
 ## 0.5.0
 
 ### Minor Changes

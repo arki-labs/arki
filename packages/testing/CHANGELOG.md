@@ -1,5 +1,50 @@
 # @arki/testing
 
+## 0.4.0
+
+### Minor Changes
+
+- 053a5b7: New entry `@arki/testing/otel` with `captureSpans()`. It installs an in-memory tracer provider and meter
+  provider as the OpenTelemetry globals for one test (plus an `AsyncLocalStorage` context manager when none
+  is registered) and returns `finished`, `named(name)`, `childrenOf(span)`, `collectMetrics()`, `reset()`
+  and `[Symbol.dispose]`, so `using spans = captureSpans()` restores the earlier providers. Each captured
+  span carries its finished `parent`. `@opentelemetry/sdk-trace-base` and `@opentelemetry/sdk-metrics` are
+  new dependencies; `@opentelemetry/api` is an optional peer.
+
+  Docs: `docs/otel.md`, README public imports, failure and limits lines, agent guide task.
+  no demo impact: test tooling, no demo uses it.
+
+- 2eac7d2: `IntegrationTester`, `initTester` and their types moved to `@arki/auth`. The entries `@arki/testing/server/integration-tester` and `@arki/testing/server/tester-builder` are gone: import every name from `@arki/auth/testing/integration-tester` instead. The names and types are unchanged, so only the import path changes. `@arki/testing` no longer depends on `@arki/auth` in any form (it was a dev dependency and an optional peer), which breaks the package cycle `@arki/testing -> @arki/auth -> @arki/mail -> @arki/journal -> @arki/admin -> @arki/testing`. `@arki/db` and `@arki/kv` are no longer dependencies; only the moved code used them.
+
+  Docs: README `## Public imports`, `docs/agent-guide.md`; the integration tester guide moved to `@arki/auth` (`docs/integration-tester.md`).
+
+- 9d345d6: Unknown values are checked by schemas (A-39), and numbers the helpers cannot honour are the invariant failure `ARKI_FAILURE_E008` before any work runs.
+
+  - `isTimestamp`, `assertTimestamps`, `assertPaginationValid`, `assertDeepPartialMatch`, `assertArraySorted`, the stack manifest and the Ollama answer shapes use zod schemas. New type `PaginatedResponse` (what `assertPaginationValid` narrows to); `Timestamp`, `Verdict` and `CheckedClaim` are now inferred from their schemas (same shape; `Verdict` and `CheckedClaim` fields are no longer `readonly`).
+  - `assertPaginationValid` now checks `total`, `nextCursor` and `hasMore` types whenever they are present. `assertArraySorted` refuses `NaN` and an `Invalid Date` key instead of passing.
+  - `epochNanoseconds` / `epochMilliseconds` of an `Invalid Date` throw the invariant failure (was a raw `RangeError` from `BigInt(NaN)`).
+  - Invariant failure for: `createMany` count not a whole number ≥ 0; `measurePerformance`, `assertPerformance` and the tracker's `measure` `maxMs` not finite ≥ 0; `benchmarkQuery` / `comparePerformance` iterations not a whole number ≥ 1, and `comparePerformance` with no operations (was a raw `TypeError`); `assertTimestampRecent` `withinSeconds` not finite ≥ 0; `createJudge` / `createEmbedder` `timeoutMs` not a whole number from 1 to 2^31 - 1, `seed` not whole, `maxTokens` not ≥ 1 (a bad timeout read as `OllamaUnavailable`); `mailbox().waitFor` `timeoutMs` not finite ≥ 0; `dumpTable` `limit` not a whole number ≥ 0.
+  - `e2eTest` `cron.run` reports a failed status as `CRON_FAILED` before reading the body, and a body that is not JSON as `CRON_BAD_BODY` (was a raw `SyntaxError`).
+
+- 09b7f91: `@arki/testing` renames five export entries so the layers check treats them as adapter entries. Only the import path changes. Every exported name stays the same.
+
+  - `@arki/testing/e2e` is now `@arki/testing/playwright`.
+  - `@arki/testing/ai/playwright` is now `@arki/testing/playwright/ai`.
+  - `@arki/testing/services/mailpit` is now `@arki/testing/containers/mailpit`.
+  - `@arki/testing/services/postgres` is now `@arki/testing/containers/postgres`.
+  - `@arki/testing/services/redis` is now `@arki/testing/containers/redis`.
+
+### Patch Changes
+
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- f367180: `mailbox()` checks Mailpit's answers against a Zod schema and throws "Mailpit answered ... with an unexpected shape" when a field it reads has the wrong type, instead of passing the wrong shape on as mail. `zod` moves from a dev dependency to a dependency.
+- 4f24c6d: Each package README now records what it instruments, including why these packages need no spans.
+- 7035f16: `logState`, a debug context's `state` and the `assertDeepPartialMatch` mismatch message never throw on the value they show: a bigint prints as `12n` and a circular value as its tag. A bigint column turned the path-naming assertion into a bare `TypeError`, and `logState` failed the test only when `DEBUG_TESTS` was on.
+- 54b331d: The public types name no Zod type (`TYPES_E001`). `Timestamp`, `PaginatedResponse` and `Verdict` are plain TS types now, with the same shape as before. The schemas that check them are internal, and a type test locks each schema to its type both ways.
+
+  no docs impact: public API unchanged.
+  no demo impact: no demo reads these types.
+
 ## 0.3.0
 
 ### Minor Changes

@@ -1,5 +1,26 @@
 # @arki/dot
 
+## 0.11.0
+
+### Minor Changes
+
+- 00e0373: `dot new` and `dot dev` now return their file-system problems instead of throwing them.
+
+  - `runNew` returns `dot.template_missing` when the template folder is missing or a template file cannot be read. Before, only an empty folder returned it; a missing folder threw a raw `ENOENT`.
+  - `runDev` returns the new `dot.dev_state_failed` (data `{ statePath, reason }`) when it cannot create `.local/dot/dev.json`, for example in a read-only or full project folder. `releaseDevState` no longer rejects: a state file it cannot remove is logged at warn, so the session keeps its own result.
+  - Breaking: `renderTimeline` checks `barWidth` up front. It must be a whole number from 1 to 1000; any other value fails an `invariant` with a clear message instead of a `RangeError` from deep in the renderer.
+  - Breaking: `hookSignals`'s `signals` option takes only termination signals a process can catch (`SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGBREAK`, `SIGUSR2`). `SIGKILL` and `SIGSTOP` are now a type error instead of a runtime crash that left some handlers hooked.
+  - `dot new` templates pin `@arki/db` 0.5.1 and `@arki/journal` 0.4.1, the published versions.
+  - Failure data schemas in `@arki/dot/cli` are zod schemas now, and each exported `...Data` type is the schema's output. `DoctorFailed` checks the whole diagnostics snapshot, not only that its fields are arrays.
+
+### Patch Changes
+
+- 53d25f7: The README has an `## Observability` section, and `docs/observability.md` `## Spans` now lists the usecase span (`feature.<feature>.<usecase>`), the `dot.action` span, custom `telemetryFor` spans and the `dot doctor` probe span, beside the phase and unit spans. No code change.
+- d5c71b1: Removed `createIdFactory` from `@arki/db`. Its id type came from the prefix alone, so two kinds with the same prefix were interchangeable. Migration: declare the id with `defineId(prefix)` from `@arki/contracts` and get its columns with `idColumns(declaration)` from `@arki/db/id`. Replace `make()` and `new()` with `create()`. `createId` and `createPrefixedId` stay. The `dot new` stack template now declares its note id this way and adds `@arki/contracts` to the generated `package.json`.
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- 46e88d2: A failed boot now always marks the `dot.app.boot` and `dot.app.start` spans and the `dot.unit.boot` and `dot.unit.start` spans as errors, whatever the status of the returned failure. Before, a 4xx failure such as a refused start left the status unset, so a failed boot looked healthy in traces. The `failure.code` attribute is still set. Every other Dot span keeps the rule that only a fault (status 500 or higher) is an error.
+- 7fc17aa: Span status now follows one rule. A returned failure always sets `failure.code`. It sets the span status to error only when `isFault(failure)` is true (status 500 or higher). An expected outcome (a 4xx, such as a missing record, a held lock or a declined card) leaves the status unset, so alerts on span errors fire only for faults. Thrown errors still set the error status. `@arki/env` and `@arki/schedule` now set `failure.code`, which they did not before. `@arki/payments` used to leave the status unset for every returned failure; a 5xx now sets error. `@arki/async`: `Cancelled` (499) no longer marks the span as an error.
+
 ## 0.10.0
 
 ### Minor Changes

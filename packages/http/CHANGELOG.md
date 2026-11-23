@@ -1,5 +1,30 @@
 # @arki/http
 
+## 0.5.0
+
+### Minor Changes
+
+- 5de1c76: A thrown `HttpError` with a status below 500 no longer sets error status on its span. It still records `failure.code`. This matches returned failures: only a fault (status 500 or higher) is an error, so an expected refusal such as an `http.idempotency` reused key (422) or a cancelled request (499) does not page anyone. A thrown 5xx `HttpError` and any other throw still set error status.
+
+  Docs: README `## Observability`.
+
+### Patch Changes
+
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- 53d25f7: The README now has an `## Observability` section: the `http.request`, `http.idempotency` and `http.webhook.*` spans, what each records, and what is left to the runtime's fetch instrumentation. A new test proves that inside a Dot app a webhook signed by a usecase nests under the usecase's span, and the usecase under `http.request`.
+- 7fc17aa: Span status now follows one rule. A returned failure always sets `failure.code`. It sets the span status to error only when `isFault(failure)` is true (status 500 or higher). An expected outcome (a 4xx, such as a missing record, a held lock or a declined card) leaves the status unset, so alerts on span errors fire only for faults. Thrown errors still set the error status. `@arki/env` and `@arki/schedule` now set `failure.code`, which they did not before. `@arki/payments` used to leave the status unset for every returned failure; a 5xx now sets error. `@arki/async`: `Cancelled` (499) no longer marks the span as an error.
+- 0464500: Internal lint cleanup in the route trie and OpenAPI JSON checks, with no change in behavior.
+- Updated dependencies [53d25f7]
+- Updated dependencies [d5c71b1]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [46e88d2]
+- Updated dependencies [d74e617]
+- Updated dependencies [00e0373]
+- Updated dependencies [53d25f7]
+- Updated dependencies [7fc17aa]
+  - @arki/dot@0.11.0
+  - @arki/resilience@0.3.3
+
 ## 0.4.1
 
 ### Patch Changes

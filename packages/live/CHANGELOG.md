@@ -1,5 +1,51 @@
 # @arki/live
 
+## 0.3.0
+
+### Minor Changes
+
+- 2400d21: A Postgres listener that cannot start now returns its failure instead of rejecting.
+
+  - `@arki/db`: `listenOnPool(pool, channel)(onMessage)` resolves to `ListenUnavailable` (`db.listen_unavailable`) when the first connection or `LISTEN` fails. It no longer rejects with an `UnexpectedFailure`. The raw pool error stays its private `cause`. Nothing retries: call the start again.
+  - `@arki/journal`: a `WakeListener` may return a `Failure`. `worker.start()` resolves to that failure and leaves the worker stopped, so a later `start()` tries again. A `listen` that throws also leaves it stopped (before, the worker stayed marked running and every later `start()` did nothing). The failure type is inferred: a worker without `listen` returns no failure. In Dot, `journalWorker()` returns the failure from `start`, so the app's start fails with it.
+  - `@arki/pubsub`: `PubSub` and `TransactionalPubSub` take a `SubscribeFailure` type (`never` by default). `pgPubSub`'s `subscribe` resolves to `db.listen_unavailable` when the channel's listener cannot start; nothing stays subscribed, and the next `subscribe` tries again.
+  - `@arki/live`: a `LiveSource`'s `start` may return a failure, and `hub.start()` resolves to it (`pgSource`: `db.listen_unavailable`). The hub stays `idle` and stopped, so a later `hub.start()` on the same hub tries again; a successful start happens once. `liveQueries()` returns it from its Dot `start`.
+
+  Upgrade: check the result of `worker.start()`, `hub.start()` and pg `subscribe()` where a listener is wired, for example `orThrow(await worker.start())` in a script, or return it from a Dot `start` hook.
+
+### Patch Changes
+
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- 2b44ad3: `@arki/live` now reports to OpenTelemetry: one `live.stream` span per server stream (how it started, and why it
+  ended: max age, a revoked grant, a hub gap, the client leaving), one `live.client.connection` span per client
+  connection (status code and outcome, so retries show), and the `live.streams.active`, `live.streams` and
+  `live.client.connections` metrics. Never one span per frame, and never a cursor, grant, table name or frame. It uses
+  `@opentelemetry/api` only (a new dependency), so nothing is exported until the app configures an SDK.
+
+  no docs impact: README gains an Observability section; no API changed.
+  no demo impact: no demo reads live telemetry.
+
+- 2a9dea1: The live client reads the event stream in one pass. A line sent in many chunks with no line end was read again from its start with every chunk: seconds for a 2 MB frame. Chunks without a line end now wait aside until the line ends.
+- 46e88d2: The live client span for the `unauthorized` end reason (401 or 403 from the stream) no longer has an error status. A refused session is an expected outcome, so the status stays unset; the `live.client.outcome` attribute still says `unauthorized`. `retry` and `error` end reasons keep the error status.
+- Updated dependencies [53d25f7]
+- Updated dependencies [d5c71b1]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [46e88d2]
+- Updated dependencies [2400d21]
+- Updated dependencies [53d25f7]
+- Updated dependencies [0464500]
+- Updated dependencies [d74e617]
+- Updated dependencies [00e0373]
+- Updated dependencies [53d25f7]
+- Updated dependencies [53d25f7]
+- Updated dependencies [5de1c76]
+- Updated dependencies [7fc17aa]
+- Updated dependencies [0464500]
+  - @arki/dot@0.11.0
+  - @arki/db@0.6.0
+  - @arki/http@0.5.0
+  - @arki/resilience@0.3.3
+
 ## 0.2.0
 
 ### Minor Changes

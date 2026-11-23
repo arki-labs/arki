@@ -1,5 +1,30 @@
 # @arki/schedule
 
+## 0.2.0
+
+### Minor Changes
+
+- 5de1c76: A schedule tick now starts its own trace. Before, an `every` timer, a cron tick or a durable fire started `schedule.run` under whatever span was active when the app armed it. In a Dot app that was the `dot.unit.start` span, which had already ended, so every background run showed up as part of app startup. Now `schedule.run` for those ticks has no parent. `trigger(name)` still nests under the caller's span.
+
+  Docs: README `## Observability`.
+
+### Patch Changes
+
+- 0464500: Internal cleanup of one type declaration, with no change in behaviour.
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- 53d25f7: The README now has an `## Observability` section: the `schedule.run` span with its attributes and outcomes, the `schedule.run.duration` histogram, and what is left to `@arki/lock`. A new test proves that inside a Dot app the usecase a schedule handler calls nests under `schedule.run`.
+- 7fc17aa: Span status now follows one rule. A returned failure always sets `failure.code`. It sets the span status to error only when `isFault(failure)` is true (status 500 or higher). An expected outcome (a 4xx, such as a missing record, a held lock or a declined card) leaves the status unset, so alerts on span errors fire only for faults. Thrown errors still set the error status. `@arki/env` and `@arki/schedule` now set `failure.code`, which they did not before. `@arki/payments` used to leave the status unset for every returned failure; a 5xx now sets error. `@arki/async`: `Cancelled` (499) no longer marks the span as an error.
+- Updated dependencies [53d25f7]
+- Updated dependencies [d5c71b1]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [d74e617]
+- Updated dependencies [46e88d2]
+- Updated dependencies [00e0373]
+- Updated dependencies [7fc17aa]
+- Updated dependencies [53d25f7]
+  - @arki/dot@0.11.0
+  - @arki/lock@0.2.2
+
 ## 0.1.1
 
 ### Patch Changes
