@@ -33,7 +33,7 @@ Bind it on the server, guard procedures and add the form with the [recipes](#rec
 
 - Your app does not run on Bun with TanStack Start and oRPC. This package supports that one stack. It has no adapter for Next.js or Express.
 - You need an identity provider for other apps (an OAuth server). This is sign-in for one app.
-- You need multi-factor, passkeys, API keys or email one-time codes. They are not in this version (see [Limits](#limits)).
+- You need multi-factor, API keys or email one-time codes. They are not in this version (see [Limits](#limits)).
 - You want a general Better Auth wrapper. App code never imports `better-auth` here.
 
 ## Runtime support
@@ -173,7 +173,7 @@ The gateway reads the principal once per request. `authed`, `verified` and `role
 // backend/src/entrypoints/middleware.ts and gateway.ts
 import { os } from '@orpc/server';
 
-import { AUTH_FAILURES, authed, role } from '@arki/auth';
+import { AUTH_FAILURES, authed, freshSession, role } from '@arki/auth';
 import { step as rpcStep } from '@arki/dot/orpc';
 import { errorMap } from '@arki/failure/orpc';
 
@@ -198,6 +198,16 @@ export const adminStats = os
   .errors(errorMap(...AUTH_FAILURES))
   .use(rpcStep(role('admin')))
   .handler(({ context }) => ({ askedBy: context.principal.user.id }));
+```
+
+Risky actions (delete the account, change the password, publish) ask for a fresh sign-in. Set `sessions: { freshFor: 1800 }` in `defineAuth`, then attach `freshSession` the way you attach `authed`. A session older than 30 minutes gets 403 `auth.session_not_fresh`, with `freshFor` in its data. The client then shows the sign-in form again. A re-sign-in replaces the session: when a sign-in succeeds on a request that carries the same user's session, that old session is revoked, so one session is left. Another user's sign-in keeps the old session. `freshSession` without `sessions.freshFor` throws `ARKI_AUTH_E001` on its first signed-in call.
+
+```ts continue
+export const deleteWorld = os
+  .$context<RequestContext>()
+  .errors(errorMap(...AUTH_FAILURES))
+  .use(rpcStep(freshSession))
+  .handler(({ context }) => ({ deletedBy: context.principal.user.id }));
 ```
 
 `@arki/http` routes read the principal with one step, then check it with another:
@@ -380,11 +390,51 @@ Limits on SQLite:
 - Unique-violation errors carry no constraint name.
 - The workspace scoping kernel (`workspaceReadFilter` and the rest) builds Postgres filters and stays on `@arki/auth/pg/workspaces`.
 
+## Passkeys
+
+A passkey signs a user in with the device's own unlock: face, fingerprint or PIN. A signed-in user adds a passkey; later the passkey alone signs them in. A passkey sign-in is a fresh sign-in, so it passes `freshSession` and can unlock a risky action.
+
+List the method, name the app as the device shows it, and add the `passkeys` table:
+
+```ts
+import { pgSchema } from 'drizzle-orm/pg-core';
+
+import { defineAuth } from '@arki/auth';
+import { authIdSources, createAuthTables, createPasskeyTables } from '@arki/auth/pg';
+import { pgColumns } from '@arki/db/pg';
+
+export const authDefinition = defineAuth({
+  app: { name: 'Notes', key: 'notes' },
+  methods: ['password', 'passkey'],
+  passkey: { rpName: 'Notes' },
+  sessions: { freshFor: 5 * 60 },
+});
+
+const c = pgColumns(pgSchema('notes'));
+const authTables = createAuthTables(c, { fill: 'app', ids: authIdSources });
+const passkeyTables = createPasskeyTables(c, { fill: 'app', user: authTables.User, ids: authIdSources });
+export const tables = { ...authTables, ...passkeyTables };
+```
+
+In the browser, the client from `createAuthClient(authDefinition)` gains the passkey API. Its types follow `methods`; no type arguments:
+
+- `authClient.passkey.addPasskey({ name })` registers this device. It needs a fresh session.
+- `authClient.signIn.passkey()` signs in. On a request that already carries the same user's session, the old session is revoked, so one fresh session is left.
+- `authClient.passkey.listUserPasskeys()` and `authClient.passkey.deletePasskey({ id })` manage the caller's own passkeys.
+
+To unlock a risky action, guard the procedure with `freshSession`. When it answers `auth.session_not_fresh`, call `authClient.signIn.passkey()` and send the request again.
+
+Rules:
+
+- The relying party id is the host of `runtime.url`. Only answers signed for that origin are accepted.
+- `passkey: { rpName }` is required with the method and refused without it (`ARKI_AUTH_E001`). Boot refuses `passkey` without the `Passkey` table (`ARKI_AUTH_E007`).
+- A passkey never makes a user. The user signs up with another method first.
+
 ## Public imports
 
 | Entry                                        | Runtime                              | What it gives you                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | -------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@arki/auth`                                 | Node, Bun, Deno, browser             | `defineAuth`, `definePolicies`, `authed`, `verified`, `role`, `AUTH_ERROR_CODES`, `AuthError`, `isAuthError`, `PASSWORD_MIN_LENGTH`, `AUTH_SECRET_MIN_LENGTH`; types `AuthDefinition`, `AccountOptions`, `AuthMethod`, `SocialMethod`, `IdTokenMethod`, `Seconds`, `VerifyEmailMode`, `WorkspacesOption`, `Principal`, `PrincipalOf`, `AnyPrincipal`, `AuthContext`, `PrincipalSession`, `PrincipalVia`, `AuthErrorCode`, `UserId`, `Policies`, `Policy`, `PolicyArgs`, `PolicyName`, `PolicyTree`, `AnyPolicies`, `PoliciesFor`, `PrincipalOfPolicies`, `SubjectOf`, `GroupOf`, `Loaded`, `RefusalOutcome` |
+| `@arki/auth`                                 | Node, Bun, Deno, browser             | `defineAuth`, `definePolicies`, `authed`, `freshSession`, `verified`, `role`, `AUTH_ERROR_CODES`, `AuthError`, `isAuthError`, `PASSWORD_MIN_LENGTH`, `AUTH_SECRET_MIN_LENGTH`; types `AuthDefinition`, `AccountOptions`, `AuthMethod`, `SocialMethod`, `IdTokenMethod`, `Seconds`, `VerifyEmailMode`, `WorkspacesOption`, `Principal`, `PrincipalOf`, `AnyPrincipal`, `AuthContext`, `PrincipalSession`, `PrincipalVia`, `AuthErrorCode`, `UserId`, `Policies`, `Policy`, `PolicyArgs`, `PolicyName`, `PolicyTree`, `AnyPolicies`, `PoliciesFor`, `PrincipalOfPolicies`, `SubjectOf`, `GroupOf`, `Loaded`, `RefusalOutcome` |
 | `@arki/auth/ids`                             | Node, Bun, Deno, browser             | types `UserId`, `SessionId`, `AccountId`, `VerificationId`; `createUserId`, `createSessionId`, `createAccountId`, `createVerificationId`                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `@arki/auth/zod`                             | Node, Bun, Deno, browser (needs Zod) | `userIdSchema`, `sessionIdSchema`, `accountIdSchema`, `verificationIdSchema`, `organizationIdSchema`, `teamIdSchema`, `emailSchema`                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `@arki/auth/password`                        | Node, Bun, Deno, browser             | `hashPassword`, `verifyPassword`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -429,7 +479,7 @@ Auth failures are thrown as `AuthError` with a stable code. Handle each by its a
 | `ARKI_AUTH_E429` | `rateLimited`         | The limiter refused                                                                          | 429 with `Retry-After` |
 | `ARKI_AUTH_E503` | `storeUnavailable`    | The limiter store failed                                                                     | 503                    |
 
-Transport guards use canonical failures: `auth.unauthenticated` (401, including expired sessions), `auth.forbidden` (403), `auth.not_found` (404), `auth.rate_limited` (429), and `auth.unavailable` (503). Engine errors above keep their existing codes internally. Declare failures with `.errors(errorMap(...AUTH_FAILURES))` on oRPC contracts or `failures: AUTH_FAILURES` on HTTP routes. HTTP steps and policy handlers return canonical failure values; binding requires every inferred step failure in the route declaration. oRPC bridges preserve canonical code and data; clients use `reviveRpcError(error, AUTH_FAILURES)` or the HTTP client's automatic revival. With `failureHeaders: authFailureHeaders`, auth steps set `WWW-Authenticate: Bearer` on 401 and retain limiter `Retry-After`. Policy handlers use `.bind(contract, authorize(...)(...), { failureHeaders: authFailureHeaders })` from `@arki/auth/http` for the same headers.
+Transport guards use canonical failures: `auth.unauthenticated` (401, including expired sessions), `auth.forbidden` (403), `auth.session_not_fresh` (403, `freshSession` on a session older than `sessions.freshFor`; data `{ freshFor }`), `auth.not_found` (404), `auth.rate_limited` (429), and `auth.unavailable` (503). Engine errors above keep their existing codes internally. Declare failures with `.errors(errorMap(...AUTH_FAILURES))` on oRPC contracts or `failures: AUTH_FAILURES` on HTTP routes. HTTP steps and policy handlers return canonical failure values; binding requires every inferred step failure in the route declaration. oRPC bridges preserve canonical code and data; clients use `reviveRpcError(error, AUTH_FAILURES)` or the HTTP client's automatic revival. With `failureHeaders: authFailureHeaders`, auth steps set `WWW-Authenticate: Bearer` on 401 and retain limiter `Retry-After`. Policy handlers use `.bind(contract, authorize(...)(...), { failureHeaders: authFailureHeaders })` from `@arki/auth/http` for the same headers.
 
 `resolvePrincipal`, `requirePrincipal`, `checkPrincipal` and `authorizePolicy` return values or their exact inferred canonical failures. `AUTH_PRINCIPAL_FAILURES` and `AUTH_POLICY_FAILURES` provide narrower declaration sets. Missing and hidden subjects use the same `ResourceMissing` definition, message and data. `isAuthBoundaryFailure(value)` is a type guard for exactly those canonical failures. Use it on the result of a guard so the success type stays narrow instead of widening to `Failure`.
 
@@ -459,7 +509,7 @@ if (!isAuthError(refusal) || refusal.status !== 403) throw new Error('E403 must 
 - **Workspaces need two session columns** (`activeOrganizationId`, `activeTeamId`) as well as the workspace tables.
 - **`expo` is `false` by default.** Native apps turn it on.
 - **Session tokens are stored as they are**, as the engine does. The cookie is signed, and lists never return the token.
-- **Not in this version:** email one-time codes, multi-factor, API keys, passkeys, idle and absolute session timeouts, per-account rate budgets, breached-password checks, and auth mail through the outbox. None of them is exported in any form.
+- **Not in this version:** email one-time codes, multi-factor, API keys, idle and absolute session timeouts, per-account rate budgets, breached-password checks, and auth mail through the outbox. None of them is exported in any form.
 
 ## Observability
 

@@ -11,6 +11,7 @@ import { pgColumns } from '@arki/db/pg';
 import { authIdSources } from '../pg/ids.js';
 import { createWorkspaceTables } from '../pg/workspaces/schema.js';
 import { createAuthTables } from '../schema/auth-tables.js';
+import { createPasskeyTables } from '../schema/passkey-table.js';
 
 const c = pgColumns(pgSchema('notes'));
 
@@ -44,3 +45,6 @@ export const workspaceTables = createWorkspaceTables(c, {
 });
 
 export const allTables = { ...authTables, ...workspaceTables };
+
+/** The passkey table, for the definitions that list `passkey`. */
+export const passkeyTables = createPasskeyTables(c, { fill: 'app', user: authTables.User, ids: authIdSources });

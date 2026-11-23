@@ -14,10 +14,10 @@ import type { authTables } from './__fixtures__/tables.js';
 import type { PrincipalSource } from './http.js';
 import type { UserId } from './ids.js';
 import type { PrincipalFor } from './pg/types.js';
-import { AccessDenied, AUTH_FAILURES, AuthenticationRequired } from './boundary-failures.js';
+import { AccessDenied, AUTH_FAILURES, AuthenticationRequired, SessionNotFresh } from './boundary-failures.js';
 import { defineAuth } from './definition.js';
 import { principalFromHeaders } from './http.js';
-import { authed, role, verified } from './steps.js';
+import { authed, freshSession, role, verified } from './steps.js';
 
 const definition = defineAuth({
   app: { name: 'Notes', key: 'notes' },
@@ -72,6 +72,39 @@ describe('steps on oRPC', () => {
     os.$context<Context>()
       .errors(errorMap(AuthenticationRequired, AccessDenied))
       .use(rpcStep(role('admin')));
+  });
+});
+
+describe('freshSession', () => {
+  it('narrows like authed and keeps the exact principal type', () => {
+    os.$context<Context>()
+      .errors(errorMap(...AUTH_FAILURES))
+      .use(rpcStep(freshSession))
+      .handler(({ context }) => {
+        expectTypeOf(context.principal).toEqualTypeOf<NotesPrincipal>();
+        expectTypeOf(context.principal.user.id).toEqualTypeOf<UserId>();
+      });
+    const declared = route.get('/fresh', { id: 'fresh', failures: AUTH_FAILURES });
+    routes()
+      .use(httpStep(principalFromHeaders(source)))
+      .use(httpStep(freshSession))
+      .bind(declared, (_input, ctx) => {
+        expectTypeOf(ctx.principal).toEqualTypeOf<NotesPrincipal>();
+      });
+  });
+
+  it('needs auth.session_not_fresh declared next to auth.unauthenticated', () => {
+    const onlyUnauthenticated = os.$context<Context>().errors(errorMap(AuthenticationRequired));
+    // @ts-expect-error freshSession also refuses with auth.session_not_fresh.
+    onlyUnauthenticated.use(rpcStep(freshSession));
+    os.$context<Context>().errors(errorMap(AuthenticationRequired, SessionNotFresh)).use(rpcStep(freshSession));
+  });
+
+  it('the failure carries freshFor as a number', () => {
+    expectTypeOf(SessionNotFresh({ freshFor: 1800 }).data).toEqualTypeOf<{ freshFor: number }>();
+    // @ts-expect-error freshFor is required.
+    const missingFreshFor = SessionNotFresh({});
+    expectTypeOf(missingFreshFor.code).toEqualTypeOf<'auth.session_not_fresh'>();
   });
 });
 

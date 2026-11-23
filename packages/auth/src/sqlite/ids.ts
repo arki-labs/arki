@@ -8,12 +8,13 @@
  */
 import { idColumns, sqliteColumns } from '@arki/db/sqlite';
 
-import { accountId, sessionId, userId, verificationId } from '../id-declarations.js';
+import { accountId, passkeyId, sessionId, userId, verificationId } from '../id-declarations.js';
 
 export const userIdColumns = idColumns(userId);
 export const sessionIdColumns = idColumns(sessionId);
 export const accountIdColumns = idColumns(accountId);
 export const verificationIdColumns = idColumns(verificationId);
+export const passkeyIdColumns = idColumns(passkeyId);
 
 // A spec does not depend on the table's prefix, so one prefix-less kit makes them for every app.
 const kit = sqliteColumns();
@@ -30,4 +31,6 @@ export const authIdSources = {
   session: kit.id(sessionId),
   account: kit.id(accountId),
   verification: kit.id(verificationId),
+  /** For `createPasskeyTables`; `createAuthTables` does not read it. */
+  passkey: kit.id(passkeyId),
 };

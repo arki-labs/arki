@@ -5,7 +5,7 @@
  *
  * This module is pure: types and one narrowing function, no engine and no database code.
  */
-import type { ExposedFields } from './definition.js';
+import type { ExposedFields, Seconds } from './definition.js';
 import { AUTH_ERROR_CODES, AuthError } from './errors.js';
 
 /** The user columns the engine owns, as the principal sees them. */
@@ -57,6 +57,8 @@ export type Principal<U, SId extends string = string> = {
   readonly session: PrincipalSession<SId>;
   readonly via: PrincipalVia;
   readonly roles: readonly string[];
+  /** `sessions.freshFor` of the auth that built this principal. Absent when the definition sets none. */
+  readonly freshFor?: Seconds;
   /** The selected workspace. A selection, not proof of membership: check membership where it matters. */
   readonly workspace?: { readonly activeOrganizationId: string | null; readonly activeTeamId: string | null };
 };
@@ -150,6 +152,8 @@ export type ToPrincipalInput = {
   readonly via: PrincipalVia;
   /** Read `activeOrganizationId` / `activeTeamId` from the session. */
   readonly workspaces: boolean;
+  /** The definition's `sessions.freshFor`, copied onto the principal for `freshSession`. */
+  readonly freshFor: Seconds | undefined;
 };
 
 /**
@@ -162,13 +166,14 @@ export async function toPrincipal<U, SId extends string>(
   input: ToPrincipalInput,
   roles: (user: U) => readonly string[] | Promise<readonly string[]>,
 ): Promise<Principal<U, SId>> {
-  const { session, fields, via, workspaces } = input;
+  const { session, fields, via, workspaces, freshFor } = input;
   const user = toUserRow<U>(input.user, fields);
   return {
     user,
     session: toPrincipalSession<SId>(session),
     via,
     roles: await roles(user),
+    ...(freshFor !== undefined && { freshFor }),
     ...(workspaces && {
       workspace: {
         activeOrganizationId: optionalText(Reflect.get(session, 'activeOrganizationId')),

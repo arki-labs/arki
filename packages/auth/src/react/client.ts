@@ -8,6 +8,7 @@
  */
 import type { BetterAuthClientPlugin } from 'better-auth/client';
 import type { ReactAuthClient } from 'better-auth/react';
+import { passkeyClient } from '@better-auth/passkey/client';
 import { magicLinkClient, organizationClient } from 'better-auth/client/plugins';
 import { createAuthClient as createEngineClient } from 'better-auth/react';
 
@@ -17,11 +18,13 @@ import { resolveDefinition } from '../definition.js';
 import { authCapabilities } from './capabilities.js';
 
 type MagicLinkClientPlugin = ReturnType<typeof magicLinkClient>;
+type PasskeyClientPlugin = ReturnType<typeof passkeyClient>;
 
 /** The client plugins each method needs. Typed per method, so the client's API follows `methods`. */
 type MethodClientPlugins = {
   readonly password: readonly [];
   readonly magicLink: readonly [MagicLinkClientPlugin];
+  readonly passkey: readonly [PasskeyClientPlugin];
   readonly google: readonly [];
   readonly apple: readonly [];
   readonly facebook: readonly [];
@@ -32,6 +35,7 @@ type MethodClientPlugins = {
 const METHOD_CLIENT_PLUGINS: { readonly [K in AuthMethod]: () => MethodClientPlugins[K] } = {
   password: () => [],
   magicLink: () => [magicLinkClient()],
+  passkey: () => [passkeyClient()],
   google: () => [],
   apple: () => [],
   facebook: () => [],
@@ -46,7 +50,7 @@ export type DefinitionClientPlugins<D extends AuthDefinition> = MethodClientPlug
 
 /** The engine client plugins a definition's methods need, typed per method. */
 export function definitionClientPlugins<D extends AuthDefinition>(definition: D): DefinitionClientPlugins<D> {
-  return definition.methods.flatMap(method => pluginsOfMethod(method));
+  return definition.methods.flatMap<DefinitionClientPlugins<D>[number]>(method => pluginsOfMethod(method));
 }
 
 const workspaceFactories = {

@@ -5,6 +5,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
 import type { AuthRuntime } from './pg/types.js';
+import type { AnyPrincipal } from './principal.js';
 import { defineAuth } from './definition.js';
 
 const withGoogle = defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['password', 'google'] });
@@ -24,6 +25,18 @@ describe('defineAuth', () => {
       user: { fields: ['plan', 'segment'], signUpFields: ['plan'] },
     });
     expectTypeOf(definition.user?.fields).toEqualTypeOf<readonly ['plan', 'segment'] | undefined>();
+  });
+
+  it('takes sessions.freshFor in seconds, and the principal carries it', () => {
+    const definition = defineAuth({
+      app: { name: 'Notes', key: 'notes' },
+      methods: ['password'],
+      sessions: { freshFor: 1800 },
+    });
+    expectTypeOf(definition.sessions?.freshFor).toEqualTypeOf<number | undefined>();
+    expectTypeOf<AnyPrincipal['freshFor']>().toEqualTypeOf<number | undefined>();
+    // @ts-expect-error -- freshFor is seconds, not text
+    defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['password'], sessions: { freshFor: '30m' } });
   });
 
   it('refuses an unknown method', () => {
@@ -75,5 +88,16 @@ describe('runtime.providers', () => {
       providers: { google: credentials, github: credentials },
     });
     expectTypeOf(runtime).returns.toHaveProperty('providers');
+  });
+});
+
+describe('passkey options', () => {
+  it('are required when a written method list names passkey', () => {
+    defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['passkey'], passkey: { rpName: 'Notes' } });
+    // @ts-expect-error `passkey: { rpName }` is missing
+    defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['password', 'passkey'] });
+    expectTypeOf<Parameters<typeof defineAuth<readonly ['passkey']>>[0]['passkey']>().toEqualTypeOf<{
+      readonly rpName: string;
+    }>();
   });
 });

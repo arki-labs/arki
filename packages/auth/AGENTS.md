@@ -15,6 +15,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 9. Policies never read input and never query. Input rules go in the schema. Membership checks go in the loader.
 10. A security claim needs a test that runs on PGlite. Add the claim to `docs/security-evidence.md` with its test file.
 11. Testing helpers throw `ARKI_AUTH_E005` in production. Never mount them there.
+12. Freshness is `sessions.freshFor` and the `freshSession` step. A sign-in on a request with the same user's session revokes that session. Never compare `session.createdAt` in app code.
 
 ## Changing this package
 

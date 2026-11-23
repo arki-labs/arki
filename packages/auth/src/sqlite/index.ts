@@ -10,4 +10,11 @@
  * export const auth = createAuth(authDefinition, { db, tables: authTables, mail, runtime });
  */
 export * from '../runtime.js';
-export { accountIdColumns, authIdSources, sessionIdColumns, userIdColumns, verificationIdColumns } from './ids.js';
+export {
+  accountIdColumns,
+  authIdSources,
+  passkeyIdColumns,
+  sessionIdColumns,
+  userIdColumns,
+  verificationIdColumns,
+} from './ids.js';

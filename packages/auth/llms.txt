@@ -7,14 +7,14 @@ The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is s
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/auth`: the browser-safe vocabulary: `defineAuth`, `definePolicies`, the error codes, the constants and the principal and definition types. `AUTH_ERROR_CODES`, `AUTH_FAILURES`, `AUTH_POLICY_FAILURES`, `AUTH_PRINCIPAL_FAILURES`, `AUTH_SECRET_MIN_LENGTH`, `AccessDenied`, `AuthError`, `AuthenticationRateLimited`, `AuthenticationRequired`, `AuthenticationUnavailable`, `PASSWORD_MIN_LENGTH`, `ResourceMissing`; and 44 more.
-- `@arki/auth/ids`: the auth id types and their generators. `createAccountId`, `createSessionId`, `createUserId`, `createVerificationId`; types `AccountId`, `AuthRequestId`, `SessionId`, `UserId`, `VerificationId`.
-- `@arki/auth/zod`: Zod schemas for the auth ids and an email address, for apps that validate input with Zod. `accountIdSchema`, `authRequestIdSchema`, `emailSchema`, `organizationIdSchema`, `sessionIdSchema`, `teamIdSchema`, `userIdSchema`, `verificationIdSchema`.
+- `@arki/auth`: the browser-safe vocabulary: `defineAuth`, `definePolicies`, the error codes, the constants and the principal and definition types. `AUTH_ERROR_CODES`, `AUTH_FAILURES`, `AUTH_POLICY_FAILURES`, `AUTH_PRINCIPAL_FAILURES`, `AUTH_SECRET_MIN_LENGTH`, `AccessDenied`, `AuthError`, `AuthenticationRateLimited`, `AuthenticationRequired`, `AuthenticationUnavailable`, `PASSWORD_MIN_LENGTH`, `ResourceMissing`; and 46 more.
+- `@arki/auth/ids`: the auth id types and their generators. `createAccountId`, `createPasskeyId`, `createSessionId`, `createUserId`, `createVerificationId`; types `AccountId`, `AuthRequestId`, `PasskeyId`, `SessionId`, `UserId`, `VerificationId`.
+- `@arki/auth/zod`: Zod schemas for the auth ids and an email address, for apps that validate input with Zod. `accountIdSchema`, `authRequestIdSchema`, `emailSchema`, `organizationIdSchema`, `passkeyIdSchema`, `sessionIdSchema`, `teamIdSchema`, `userIdSchema`, `verificationIdSchema`.
 - `@arki/auth/password`: Password hashing with scrypt, in pure JavaScript (`@noble/hashes`), so it runs in every runtime without a native module. `hashPassword`, `verifyPassword`.
 - `@arki/auth/workspaces`: the workspace vocabulary with no database in it: roles, the active workspace context, row scopes and the scope error. `WorkspaceScopeError`, `rankRole`, `roleAtLeast`, `scopeLevel`; types `OrganizationId`, `RowScope`, `Scope`, `ScopeLevel`, `TeamId`, `WorkspaceContext`, `WorkspaceRole`.
-- `@arki/auth/pg`: the runtime: one factory that turns a definition and its bindings into a working auth on Postgres (node-postgres or PGlite). `accountIdColumns`, `additionalFieldsFromColumns`, `assertAuthSecret`, `authAccountColumns`, `authIdSources`, `authLinkInput`, `authSessionColumns`, `authUserColumns`, `authVerificationColumns`, `createAuth`, `createAuthTables`, `sessionIdColumns`; and 42 more.
+- `@arki/auth/pg`: the runtime: one factory that turns a definition and its bindings into a working auth on Postgres (node-postgres or PGlite). `accountIdColumns`, `additionalFieldsFromColumns`, `assertAuthSecret`, `authAccountColumns`, `authIdSources`, `authLinkInput`, `authSessionColumns`, `authUserColumns`, `authVerificationColumns`, `createAuth`, `createAuthTables`, `createPasskeyTables`; and 45 more.
 - `@arki/auth/pg/workspaces`: the workspace tables and the scoping kernel. `canSeeRow`, `createWorkspaceForeignKeys`, `createWorkspaceTables`, `getWorkspaceResource`, `reassignScope`, `registerWorkspaceResource`, `resetWorkspaceRegistry`, `resolveWriteScope`, `workspaceReadFilter`; types `CreateWorkspaceTablesOptions`, `OrganizationId`, `TeamId`; and 1 more.
-- `@arki/auth/sqlite`: the same runtime as @arki/auth/pg, on SQLite (libSQL). `accountIdColumns`, `additionalFieldsFromColumns`, `assertAuthSecret`, `authAccountColumns`, `authIdSources`, `authLinkInput`, `authSessionColumns`, `authUserColumns`, `authVerificationColumns`, `createAuth`, `createAuthTables`, `sessionIdColumns`; and 42 more.
+- `@arki/auth/sqlite`: the same runtime as @arki/auth/pg, on SQLite (libSQL). `accountIdColumns`, `additionalFieldsFromColumns`, `assertAuthSecret`, `authAccountColumns`, `authIdSources`, `authLinkInput`, `authSessionColumns`, `authUserColumns`, `authVerificationColumns`, `createAuth`, `createAuthTables`, `createPasskeyTables`; and 45 more.
 - `@arki/auth/sqlite/workspaces`: the workspace tables on SQLite. `createWorkspaceForeignKeys`, `createWorkspaceTables`; types `CreateWorkspaceTablesOptions`, `OrganizationId`, `TeamId`.
 - `@arki/auth/dot`: @arki/auth in a Dot app. `auth`; types `AuthOf`.
 - `@arki/auth/orpc`: ownership checks and policy checks for oRPC procedures. `assertFound`, `assertOwnedOrForbidden`, `assertOwnedOrNotFound`, `can`; types `Owned`, `PolicyGuard`, `PolicyLoader`.
@@ -39,6 +39,7 @@ The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is s
 ## By task
 - [Add sign-in to an app](docs/agent-guide.md#add-sign-in-to-an-app)
 - [Protect a procedure or a route](docs/agent-guide.md#protect-a-procedure-or-a-route)
+- [Ask for a fresh sign-in before a risky action](docs/agent-guide.md#ask-for-a-fresh-sign-in-before-a-risky-action)
 - [Authorize with a policy](docs/agent-guide.md#authorize-with-a-policy)
 - [Expose a user column](docs/agent-guide.md#expose-a-user-column)
 - [Test code that needs a signed-in user](docs/agent-guide.md#test-code-that-needs-a-signed-in-user)

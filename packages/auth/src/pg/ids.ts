@@ -9,12 +9,13 @@
 import { idColumns } from '@arki/db/id';
 import { pgColumns } from '@arki/db/pg';
 
-import { accountId, sessionId, userId, verificationId } from '../id-declarations.js';
+import { accountId, passkeyId, sessionId, userId, verificationId } from '../id-declarations.js';
 
 export const userIdColumns = idColumns(userId);
 export const sessionIdColumns = idColumns(sessionId);
 export const accountIdColumns = idColumns(accountId);
 export const verificationIdColumns = idColumns(verificationId);
+export const passkeyIdColumns = idColumns(passkeyId);
 
 // A spec does not depend on the table's schema, so one schema-less kit makes them for every app.
 const kit = pgColumns();
@@ -31,4 +32,6 @@ export const authIdSources = {
   session: kit.id(sessionId),
   account: kit.id(accountId),
   verification: kit.id(verificationId),
+  /** For `createPasskeyTables`; `createAuthTables` does not read it. */
+  passkey: kit.id(passkeyId),
 };

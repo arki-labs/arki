@@ -6,6 +6,7 @@ import { defineId } from '@arki/contracts';
 import { sqliteColumns } from '@arki/db/sqlite';
 
 import { createAuthTables } from '../schema/auth-tables.js';
+import { createPasskeyTables } from '../schema/passkey-table.js';
 import { authIdSources } from '../sqlite/ids.js';
 import { createWorkspaceTables } from '../sqlite/workspaces/schema.js';
 
@@ -41,3 +42,6 @@ export const workspaceTables = createWorkspaceTables(c, {
 });
 
 export const allTables = { ...authTables, ...workspaceTables };
+
+/** The passkey table, for the definitions that list `passkey`. */
+export const passkeyTables = createPasskeyTables(c, { fill: 'app', user: authTables.User, ids: authIdSources });

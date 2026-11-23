@@ -33,6 +33,7 @@ export function signInMethodOf(path: string, methods: readonly AuthMethod[]): Au
 function signInMethodOfPath(path: string): AuthMethod | undefined {
   if (path === '/sign-in/email' || path === '/sign-up/email') return 'password';
   if (path === '/magic-link/verify') return 'magicLink';
+  if (path === '/passkey/verify-authentication') return 'passkey';
   const provider = /^\/callback\/([^/]+)$/.exec(path)?.[1];
   return provider !== undefined && isSocialMethod(provider) ? provider : undefined;
 }

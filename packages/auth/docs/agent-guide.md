@@ -4,7 +4,7 @@ Read this before changing code that signs users in or reads who is calling. [`ll
 
 ## The model
 
-1. **One declaration.** `defineAuth({ app, methods, user, verifyEmail, sessions, magicLink, workspaces, expo })` is plain data from `@arki/auth`. It imports no engine and no database code, so the backend, the start app and the sign-in form share the same object.
+1. **One declaration.** `defineAuth({ app, methods, user, verifyEmail, sessions, magicLink, passkey, workspaces, expo })` is plain data from `@arki/auth`. It imports no engine and no database code, so the backend, the start app and the sign-in form share the same object.
 2. **One factory.** `createAuth(definition, bindings)` from `@arki/auth/pg` builds the engine on Postgres (node-postgres or PGlite). In a Dot app, `auth(definition, bindings)` from `@arki/auth/dot` does the same with `db` and `mail` taken from the graph.
 3. **Types come from the tables.** `user.fields` names extra columns of the app's user table. The principal's `user` has the core columns plus those, typed from the table. `user.id` is the table's branded id.
 4. **One way to read the caller.** `auth.principal(headers)` returns a `Principal` or `null`. It reads a cookie or a bearer token. Both on one request is `ARKI_AUTH_E401`.
@@ -99,6 +99,20 @@ export const adminOnly = os
   .use(step(role('admin')))
   .handler(() => 'ok');
 ```
+
+### Ask for a fresh sign-in before a risky action
+
+1. Set `sessions: { freshFor: 1800 }` (seconds) in `defineAuth` (`src/definition.ts`). It also sets the engine's window for delete-account, unlink-account and list-sessions.
+2. Use `step(freshSession)` from `@arki/auth` (`src/steps.ts`) where you would use `step(authed)`. A guest gets 401 `auth.unauthenticated`. A session older than `freshFor` gets 403 `auth.session_not_fresh` with data `{ freshFor }`.
+3. The client shows the sign-in form again (password, magic link or social), or calls `authClient.signIn.passkey()`. The fresh sign-in replaces the old session on that device, so the retry passes and one session is left.
+4. Test with `vi.useFakeTimers({ toFake: ['Date'] })` and `vi.setSystemTime`. See `src/pg/flows/fresh-session.test.ts`.
+
+### Add passkey sign-in
+
+1. Add `'passkey'` to `methods` and `passkey: { rpName: 'Notes' }` to `defineAuth` (`src/definition.ts`). The relying party id and the origin come from `runtime.url`.
+2. Build the table with `createPasskeyTables(c, { fill, user: authTables.User, ids: authIdSources })` (`src/schema/passkey-table.ts`, from `@arki/auth/pg` and `@arki/auth/sqlite`) and pass `{ ...authTables, ...passkeyTables }` as `tables`. Generate a migration.
+3. In the browser: `authClient.passkey.addPasskey({ name })` (needs a fresh session), `authClient.signIn.passkey()`, `authClient.passkey.listUserPasskeys()`, `authClient.passkey.deletePasskey({ id })`. `authClient.capabilities.passkey` says whether to show them.
+4. Test with the software authenticator in `src/__fixtures__/authenticator.ts`; see `src/pg/flows/passkey.test.ts`. App e2e uses Chromium's virtual authenticator.
 
 ### Authorize with a policy
 
@@ -205,6 +219,7 @@ Follow [the migration guide](migration.md). It maps every old name to the new on
 - Production refuses `rateLimit: false` and a missing `rateLimit`. Tests get `rateLimit: false` from `testAuth`.
 - Set `runtime().clientIp`: `{ header: '<name>' }` behind a proxy, `{ from: 'socket' }` without one. Production refuses to boot without it (`ARKI_AUTH_E009`), and with `{ from: 'socket' }` refuses a request that has no socket address (`ARKI_AUTH_E010`). Without it in development, no request header counts: the limiter keys on the socket address, else the target account (signed-in user, else the body `email` on sign-in, reset request and magic-link sign-in), else one shared key. Pass `clientAddress` to `signInWithIdToken`.
 - The origin and CSRF checks are always on, also under `NODE_ENV=test`. Requests a test sends to `auth.handler` carry an `origin` header equal to the app URL, as a browser's do.
+- `passkey` needs `passkey: { rpName }` and the `Passkey` table from `createPasskeyTables`. Adding a passkey needs a fresh session. A passkey never makes a user.
 - A magic link to an unknown email signs that person up. Set `magicLink: { signUp: false }` for sign-in-only links; the request still answers 200 and the link is refused when it is used.
 - A template validator defect throws `schema.validator_defect` at the auth callback boundary. It is not converted to a delivery refusal.
 - A failed verify mail at password sign-up is logged by the engine, not returned as `ARKI_AUTH_E006`. Asking for the mail again returns `E006`.
@@ -212,6 +227,8 @@ Follow [the migration guide](migration.md). It maps every old name to the new on
 - `expo` is `false` by default. Native apps set `expo: true`.
 - A policy never gets the input and never queries. Input rules go in the schema; membership checks go in the loader.
 - `can` needs the same policy name in the contract meta (`ARKI_AUTH_E008`). Someone else's row and a missing row both answer `auth.not_found` (404).
+- `freshSession` needs `sessions.freshFor`. Without it the step throws `ARKI_AUTH_E001` on its first signed-in call, not at boot: the step is a plain function and never sees the definition.
+- A sign-in on a request that carries the same user's session revokes that session. Do not keep the old cookie for later calls.
 - Events are observers. They never change the response. Only `beforeUserCreate` can refuse, by throwing an `AuthError`.
 
 ## Errors
@@ -228,6 +245,7 @@ Follow [the migration guide](migration.md). It maps every old name to the new on
 | `ARKI_AUTH_E008` | `can` checks a policy the procedure's contract meta does not name. 500, a bug.                                         | Add `.meta({ policy: '<group>.<action>' })` to the contract, with the same name as `can`. |
 | `ARKI_AUTH_E009` | Production with no `runtime().clientIp`: sign-up and mail requests would share one rate-limit budget. Boot.           | Set `runtime().clientIp` to `{ header: '<the proxy header>' }`, or `{ from: 'socket' }` with no proxy. |
 | `ARKI_AUTH_E010` | `clientIp: { from: 'socket' }` in production, and the request (or an id-token sign-in) has no address. 500.          | Serve through srvx (`request.ip`), use `{ header }` behind a proxy, pass `clientAddress`. |
+| `auth.session_not_fresh` | `freshSession` saw a session older than `sessions.freshFor`. 403, data `{ freshFor }`. | Sign in again on the same device, then retry. |
 | `ARKI_AUTH_E401` | No principal, or a cookie and a bearer token together. 401.                                                            | Sign in. Send one credential per request.                                                 |
 | `ARKI_AUTH_E403` | `role()` or `verified` refused. 403.                                                                                   | Expected for users without the role or a verified email.                                  |
 | `ARKI_AUTH_E429` | The rate limiter refused. 429 with `Retry-After`.                                                                      | Wait the given seconds.                                                                   |

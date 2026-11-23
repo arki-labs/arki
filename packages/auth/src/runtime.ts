@@ -52,6 +52,8 @@ export {
   authVerificationColumns,
   createAuthTables,
 } from './schema/auth-tables.js';
+export { createPasskeyTables } from './schema/passkey-table.js';
+export type { CreatePasskeyTablesOptions } from './schema/passkey-table.js';
 export type {
   AuthColumnFill,
   AuthColumnNaming,

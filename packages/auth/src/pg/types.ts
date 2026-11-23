@@ -52,6 +52,8 @@ export type AuthTables = PrincipalTables & {
   readonly Session: AuthTable;
   readonly Account: AuthTable;
   readonly Verification: AuthTable;
+  /** From `createPasskeyTables`, when the definition lists `passkey`. */
+  readonly Passkey?: AuthTable;
   readonly Organization?: AuthTable;
   readonly Member?: AuthTable;
   readonly Invitation?: AuthTable;

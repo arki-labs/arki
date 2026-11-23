@@ -11,7 +11,8 @@
  * type (exposed columns, branded ids), not {@link AnyPrincipal}.
  */
 import type { AnyPrincipal } from './principal.js';
-import { AccessDenied, AuthenticationRequired } from './boundary-failures.js';
+import { AccessDenied, AuthenticationRequired, SessionNotFresh } from './boundary-failures.js';
+import { AUTH_ERROR_CODES, AuthError } from './errors.js';
 
 /** Signed in, or `auth.unauthenticated` (401). */
 export function authed<P extends AnyPrincipal>(ctx: { readonly principal: P | null }) {
@@ -30,4 +31,23 @@ export function role(name: string) {
     if (ctx.principal === null) return AuthenticationRequired();
     return ctx.principal.roles.includes(name) ? { principal: ctx.principal } : AccessDenied();
   };
+}
+
+/**
+ * Signed in less than `sessions.freshFor` seconds ago: a guest is `auth.unauthenticated` (401), an
+ * older session `auth.session_not_fresh` (403, with `freshFor`). A fresh sign-in on the same device
+ * replaces the old session, so the caller passes on the next try. A principal from an auth without
+ * `sessions.freshFor` throws `ARKI_AUTH_E001`: that is a setup bug, not a refusal.
+ */
+export function freshSession<P extends AnyPrincipal>(ctx: { readonly principal: P | null }) {
+  if (ctx.principal === null) return AuthenticationRequired();
+  const { freshFor, session } = ctx.principal;
+  if (freshFor === undefined) {
+    throw new AuthError(
+      AUTH_ERROR_CODES.invalidConfig,
+      '[@arki/auth] `freshSession` needs `sessions.freshFor` in the auth definition.',
+    );
+  }
+  const age = Date.now() - session.createdAt.getTime();
+  return age < freshFor * 1000 ? { principal: ctx.principal } : SessionNotFresh({ freshFor });
 }

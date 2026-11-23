@@ -4,6 +4,7 @@
  */
 import type { BetterAuthOptions, BetterAuthPlugin } from 'better-auth';
 import { expo } from '@better-auth/expo';
+import { passkey } from '@better-auth/passkey';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { bearer, magicLink, oAuthProxy, organization } from 'better-auth/plugins';
@@ -67,12 +68,13 @@ export type EngineInput = {
 
 /** The engine's model names mapped to the app's tables. */
 export function engineSchema(tables: AuthTables): Record<string, AuthTable> {
-  const { User, Session, Account, Verification, Organization, Member, Invitation, Team, TeamMember } = tables;
+  const { User, Session, Account, Verification, Passkey, Organization, Member, Invitation, Team, TeamMember } = tables;
   return {
     user: User,
     session: Session,
     account: Account,
     verification: Verification,
+    ...(Passkey && { passkey: Passkey }),
     ...(Organization && { organization: Organization }),
     ...(Member && { member: Member }),
     ...(Invitation && { invitation: Invitation }),
@@ -111,6 +113,12 @@ export function engineOptions(input: EngineInput): BetterAuthOptions {
           }),
         ]
       : []),
+    ...(definition.passkey === undefined
+      ? []
+      : [
+          // The relying party id is the host of `runtime.url`; only that origin may answer a ceremony.
+          passkey({ rpName: definition.passkey.rpName, origin: originOf(runtime.url) }),
+        ]),
     ...(workspaces === undefined ? [] : [organization({ teams: { enabled: workspaces.teams } })]),
     ...(sessions.bearer ? [bearer()] : []),
     ...input.plugins,
@@ -171,6 +179,8 @@ export function engineOptions(input: EngineInput): BetterAuthOptions {
       additionalFields: input.sessionFields,
       expiresIn: sessions.expiresIn,
       updateAge: sessions.refreshEvery,
+      // Unset: the engine's own default, one day.
+      ...(sessions.freshFor !== undefined && { freshAge: sessions.freshFor }),
       storeSessionInDatabase: true,
       // Off, so a revoked session fails on the very next request.
       cookieCache: { enabled: false },

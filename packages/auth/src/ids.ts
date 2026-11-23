@@ -5,7 +5,7 @@
 import type { IdOf } from '@arki/contracts';
 
 import type { authRequestId } from './id-declarations.js';
-import { accountId, sessionId, userId, verificationId } from './id-declarations.js';
+import { accountId, passkeyId, sessionId, userId, verificationId } from './id-declarations.js';
 
 // `UserId` is defined in `@arki/contracts`, so packages that refer to a user share it without
 // depending on this package.
@@ -14,9 +14,11 @@ export type AuthRequestId = IdOf<typeof authRequestId>;
 export type SessionId = IdOf<typeof sessionId>;
 export type AccountId = IdOf<typeof accountId>;
 export type VerificationId = IdOf<typeof verificationId>;
+export type PasskeyId = IdOf<typeof passkeyId>;
 
 /** A new user id: `usr_` and 24 random letters and digits. */
 export const createUserId = userId.create;
 export const createSessionId = sessionId.create;
 export const createAccountId = accountId.create;
 export const createVerificationId = verificationId.create;
+export const createPasskeyId = passkeyId.create;

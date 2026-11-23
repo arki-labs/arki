@@ -23,8 +23,11 @@ export type SocialMethod = (typeof SOCIAL_METHODS)[number];
 export const ID_TOKEN_METHODS = ['google', 'apple', 'facebook', 'microsoft'] as const satisfies readonly SocialMethod[];
 export type IdTokenMethod = (typeof ID_TOKEN_METHODS)[number];
 
-/** Every sign-in method. Email OTP and passkeys are later work and are not accepted yet. */
-export const AUTH_METHODS = ['password', 'magicLink', ...SOCIAL_METHODS] as const;
+/**
+ * Every sign-in method. `passkey` signs an existing user in with the device's own unlock (face,
+ * fingerprint, PIN); a user adds a passkey while signed in. Email OTP is later work.
+ */
+export const AUTH_METHODS = ['password', 'magicLink', 'passkey', ...SOCIAL_METHODS] as const;
 export type AuthMethod = (typeof AUTH_METHODS)[number];
 
 /** A duration in whole seconds. */
@@ -38,6 +41,12 @@ export type Seconds = number;
  * - `'none'`: no link is sent.
  */
 export type VerifyEmailMode = 'none' | 'send' | 'require';
+
+/**
+ * Passkey options. `rpName` is the name the device shows when it asks to save the passkey. The
+ * relying party id and the expected origin come from the auth's `runtime.url`.
+ */
+export type PasskeyOptions = { readonly rpName: string };
 
 /** Organizations (workspaces). `teams: true` adds teams inside each workspace. */
 export type WorkspacesOption = { readonly teams: boolean };
@@ -76,10 +85,24 @@ export type AuthDefinition<
   readonly user?: { readonly fields?: F; readonly signUpFields?: readonly F[number][] };
   /** Default `'require'`. */
   readonly verifyEmail?: VerifyEmailMode;
-  /** Defaults: 7 days, refreshed at most once a day, no bearer tokens. */
-  readonly sessions?: { readonly expiresIn?: Seconds; readonly refreshEvery?: Seconds; readonly bearer?: boolean };
+  /**
+   * Defaults: 7 days, refreshed at most once a day, no bearer tokens, no `freshFor`.
+   *
+   * `freshFor`: how many seconds after sign-in a session counts as fresh. The `freshSession` step
+   * refuses an older session, and so do the engine's own sensitive routes (delete the account,
+   * unlink an account, list sessions). Unset, those routes accept a session up to one day old and
+   * `freshSession` throws `ARKI_AUTH_E001`.
+   */
+  readonly sessions?: {
+    readonly expiresIn?: Seconds;
+    readonly refreshEvery?: Seconds;
+    readonly bearer?: boolean;
+    readonly freshFor?: Seconds;
+  };
   /** `signUp: false` makes magic links sign-in only. Default `true`. */
   readonly magicLink?: { readonly signUp?: boolean };
+  /** Required when `methods` lists `passkey`, refused otherwise. */
+  readonly passkey?: PasskeyOptions;
   /** Organizations (workspaces), optionally with teams. Needs the workspace tables. */
   readonly workspaces?: W;
   /** Account self-service: change email, link accounts, delete the account. All off by default. */
@@ -114,8 +137,14 @@ export type ResolvedDefinition = {
   readonly fields: readonly string[];
   readonly signUpFields: readonly string[];
   readonly verifyEmail: VerifyEmailMode;
-  readonly sessions: { readonly expiresIn: Seconds; readonly refreshEvery: Seconds; readonly bearer: boolean };
+  readonly sessions: {
+    readonly expiresIn: Seconds;
+    readonly refreshEvery: Seconds;
+    readonly bearer: boolean;
+    readonly freshFor: Seconds | undefined;
+  };
   readonly magicLink: { readonly signUp: boolean };
+  readonly passkey: PasskeyOptions | undefined;
   readonly workspaces: WorkspacesOption | undefined;
   readonly account: { readonly changeEmail: boolean; readonly linking: boolean; readonly delete: boolean };
   readonly expo: boolean;
@@ -152,7 +181,7 @@ function duplicateOf(values: readonly string[]): string | undefined {
  * The factory calls it again, so a hand-written object gets the same checks.
  */
 export function resolveDefinition(definition: AuthDefinition): ResolvedDefinition {
-  const { app, methods, user, sessions, magicLink, workspaces, account } = definition;
+  const { app, methods, user, sessions, magicLink, passkey, workspaces, account } = definition;
   if (app.name.trim() === '') invalid('`app.name` is empty.');
   if (!/^[a-z0-9][a-z0-9-]*$/.test(app.key)) {
     invalid(`\`app.key\` "${app.key}" must be lower-case letters, digits and dashes (it prefixes the cookies).`);
@@ -180,9 +209,20 @@ export function resolveDefinition(definition: AuthDefinition): ResolvedDefinitio
   assertSeconds(expiresIn, '`sessions.expiresIn`');
   assertSeconds(refreshEvery, '`sessions.refreshEvery`');
   if (refreshEvery >= expiresIn) invalid('`sessions.refreshEvery` must be shorter than `sessions.expiresIn`.');
+  const freshFor = sessions?.freshFor;
+  if (freshFor !== undefined) {
+    assertSeconds(freshFor, '`sessions.freshFor`');
+    if (freshFor > expiresIn) invalid('`sessions.freshFor` cannot be longer than `sessions.expiresIn`.');
+  }
 
   if (magicLink !== undefined && !methods.includes('magicLink')) {
     invalid('`magicLink` options are set but the `magicLink` method is not enabled.');
+  }
+  if (passkey !== undefined && !methods.includes('passkey')) {
+    invalid('`passkey` options are set but the `passkey` method is not enabled.');
+  }
+  if (methods.includes('passkey') && (passkey === undefined || passkey.rpName.trim() === '')) {
+    invalid('The `passkey` method needs `passkey: { rpName }`: the name the device shows when it saves the passkey.');
   }
 
   return {
@@ -191,8 +231,9 @@ export function resolveDefinition(definition: AuthDefinition): ResolvedDefinitio
     fields,
     signUpFields,
     verifyEmail: definition.verifyEmail ?? 'require',
-    sessions: { expiresIn, refreshEvery, bearer: sessions?.bearer ?? false },
+    sessions: { expiresIn, refreshEvery, bearer: sessions?.bearer ?? false, freshFor },
     magicLink: { signUp: magicLink?.signUp ?? true },
+    passkey,
     workspaces,
     account: {
       changeEmail: account?.changeEmail ?? false,
@@ -204,6 +245,16 @@ export function resolveDefinition(definition: AuthDefinition): ResolvedDefinitio
 }
 
 /**
+ * `passkey` options are required when `methods` is a written list that names `passkey`. A list
+ * typed only as an array (built at run time) is checked when the definition is resolved instead.
+ */
+export type PasskeyOptionsFor<M extends readonly AuthMethod[]> = number extends M['length']
+  ? unknown
+  : 'passkey' extends M[number]
+    ? { readonly passkey: PasskeyOptions }
+    : unknown;
+
+/**
  * Declares the app's auth. Returns the definition unchanged after checking it; the point is the
  * literal types: `methods` and `user.fields` keep their exact names for the server, the client and
  * the principal, and `workspaces` stays as written for the client.
@@ -212,7 +263,7 @@ export function defineAuth<
   const M extends readonly AuthMethod[],
   const F extends readonly string[] = readonly [],
   const W extends WorkspacesOption | undefined = undefined,
->(definition: AuthDefinition<M, F, W>): AuthDefinition<M, F, W> {
+>(definition: AuthDefinition<M, F, W> & PasskeyOptionsFor<M>): AuthDefinition<M, F, W> {
   resolveDefinition(definition);
   return definition;
 }

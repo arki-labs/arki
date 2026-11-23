@@ -6,21 +6,23 @@ The code blocks that import from `./fixture.ts` use [the docs fixture](examples/
 
 ## The declaration
 
-| Option                  | Default     | Meaning                                                                                                                                                                                           |
-| ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app.name`              | required    | Appears in mail.                                                                                                                                                                                  |
-| `app.key`               | required    | Lower-case letters, digits and dashes. Prefixes the cookies: `auth-<key>`.                                                                                                                        |
-| `methods`               | required    | Any of `password`, `magicLink`, `google`, `apple`, `facebook`, `microsoft`, `github`.                                                                                                             |
-| `user.fields`           | none        | Extra user columns the principal and the client see. Each must be a column of your user table.                                                                                                    |
-| `user.signUpFields`     | none        | The fields a client may set at sign-up. Each must be in `user.fields`.                                                                                                                            |
-| `verifyEmail`           | `'require'` | `'require'`: password sign-in waits for the link. `'send'`: the link is sent, sign-in works before it is used. `'none'`: no link.                                                                 |
-| `sessions.expiresIn`    | 7 days      | Seconds.                                                                                                                                                                                          |
-| `sessions.refreshEvery` | 1 day       | Seconds. Must be shorter than `expiresIn`.                                                                                                                                                        |
-| `sessions.bearer`       | `false`     | Accept `Authorization: Bearer` tokens (native apps).                                                                                                                                              |
-| `magicLink.signUp`      | `true`      | `false`: links are sign-in only.                                                                                                                                                                  |
-| `workspaces`            | off         | `{ teams: boolean }`: organizations, and teams inside them.                                                                                                                                       |
-| `account`               | all off     | `{ changeEmail?, linking?, delete? }`: change email (a verify link to the new address), link social accounts, delete the account (fresh session or password). Routes of an off switch answer 404. |
-| `expo`                  | `false`     | Accept the Expo client.                                                                                                                                                                           |
+| Option                  | Default                 | Meaning                                                                                                                                                                                                                                                                                   |
+| ----------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app.name`              | required                | Appears in mail.                                                                                                                                                                                                                                                                          |
+| `app.key`               | required                | Lower-case letters, digits and dashes. Prefixes the cookies: `auth-<key>`.                                                                                                                                                                                                                |
+| `methods`               | required                | Any of `password`, `magicLink`, `passkey`, `google`, `apple`, `facebook`, `microsoft`, `github`.                                                                                                                                                                                          |
+| `user.fields`           | none                    | Extra user columns the principal and the client see. Each must be a column of your user table.                                                                                                                                                                                            |
+| `user.signUpFields`     | none                    | The fields a client may set at sign-up. Each must be in `user.fields`.                                                                                                                                                                                                                    |
+| `verifyEmail`           | `'require'`             | `'require'`: password sign-in waits for the link. `'send'`: the link is sent, sign-in works before it is used. `'none'`: no link.                                                                                                                                                         |
+| `sessions.expiresIn`    | 7 days                  | Seconds.                                                                                                                                                                                                                                                                                  |
+| `sessions.refreshEvery` | 1 day                   | Seconds. Must be shorter than `expiresIn`.                                                                                                                                                                                                                                                |
+| `sessions.freshFor`     | none                    | Seconds a session counts as fresh after sign-in. `freshSession` refuses an older one with `auth.session_not_fresh`. The engine's delete-account, unlink-account and list-sessions routes use the same window. Unset, those routes use the engine's default of 1 day. At most `expiresIn`. |
+| `sessions.bearer`       | `false`                 | Accept `Authorization: Bearer` tokens (native apps).                                                                                                                                                                                                                                      |
+| `magicLink.signUp`      | `true`                  | `false`: links are sign-in only.                                                                                                                                                                                                                                                          |
+| `passkey.rpName`        | required with `passkey` | The name the device shows when it saves the passkey. The relying party id is the host of `runtime.url`; only that origin may answer a ceremony. Refused without the `passkey` method.                                                                                                     |
+| `workspaces`            | off                     | `{ teams: boolean }`: organizations, and teams inside them.                                                                                                                                                                                                                               |
+| `account`               | all off                 | `{ changeEmail?, linking?, delete? }`: change email (a verify link to the new address), link social accounts, delete the account (fresh session or password). Routes of an off switch answer 404.                                                                                         |
+| `expo`                  | `false`                 | Accept the Expo client.                                                                                                                                                                                                                                                                   |
 
 Link lifetimes are fixed: magic link 5 minutes, password reset 15 minutes, email verification 60 minutes.
 
@@ -53,6 +55,7 @@ type Principal<User> = {
   readonly session: { id; createdAt; expiresAt; ipAddress; userAgent };
   readonly via: 'cookie' | 'bearer';
   readonly roles: readonly string[];
+  readonly freshFor?: Seconds; // `sessions.freshFor`, absent when unset
   readonly workspace?: { activeOrganizationId; activeTeamId }; // the selection, not proof of membership
 };
 ```
@@ -63,6 +66,8 @@ type Principal<User> = {
 - `revoke(principal, id)`: one of the principal's own sessions. Someone else's id does nothing.
 - `revokeOthers(principal)`: every session but the current one.
 - `revokeUser(userId)`: every session of a user. A trusted server call.
+
+A sign-in that succeeds on a request already carrying the same user's session (cookie or bearer) revokes that session. The paths are password sign-in, magic-link verify, social callbacks and `signInWithIdToken`. A re-check with `freshSession` therefore leaves one session. A different user's sign-in leaves the old session alone.
 
 ## Authorization: policies
 
@@ -289,6 +294,11 @@ const brandedMagicLink = defineTemplate({
 | `POST /change-password`                                                                              | core, with a hook that always revokes the other sessions                 | `password`                                                 |
 | `POST /sign-in/magic-link`                                                                           | `magicLink` plugin, token stored hashed                                  | `magicLink`                                                |
 | `GET /magic-link/verify`                                                                             | `magicLink` plugin                                                       | `magicLink`                                                |
+| `GET /passkey/generate-register-options`                                                             | `passkey` plugin, needs a fresh session                                  | `passkey`                                                  |
+| `POST /passkey/verify-registration`                                                                  | `passkey` plugin, origin pinned to `runtime.url`                         | `passkey`                                                  |
+| `GET /passkey/generate-authenticate-options`                                                         | `passkey` plugin, works signed out                                       | `passkey`                                                  |
+| `POST /passkey/verify-authentication`                                                                | `passkey` plugin; replaces the same user's session on the request        | `passkey`                                                  |
+| `GET /passkey/list-user-passkeys`, `POST /passkey/delete-passkey`, `POST /passkey/update-passkey`    | `passkey` plugin, the caller's own passkeys only                         | `passkey`                                                  |
 | `POST /sign-in/social`                                                                               | `socialProviders`                                                        | `google`, `apple`, `facebook`, `microsoft`, `github`       |
 | `GET /callback/:provider`                                                                            | `socialProviders` (`oAuthProxy` when `productionUrl` differs from `url`) | the same                                                   |
 | `GET /get-session`                                                                                   | core                                                                     | every method                                               |

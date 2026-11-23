@@ -46,6 +46,7 @@ export {
   ResourceMissing,
   AuthenticationRateLimited,
   AuthenticationUnavailable,
+  SessionNotFresh,
   SIGN_IN_FAILURE_REASONS,
   SignInRefused,
   resolvePrincipal,
@@ -54,4 +55,4 @@ export {
 } from './boundary-failures.js';
 export type { PrincipalSource, PrincipalChecks } from './boundary-failures.js';
 export { authorizePolicy } from './policies.js';
-export { authed, role, verified } from './steps.js';
+export { authed, freshSession, role, verified } from './steps.js';

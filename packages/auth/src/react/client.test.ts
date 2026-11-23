@@ -9,6 +9,11 @@ const BASE_URL = 'http://notes.test';
 
 const passwordAndGoogle = defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['password', 'google'] });
 const magicOnly = defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['magicLink'] });
+const withPasskey = defineAuth({
+  app: { name: 'Notes', key: 'notes' },
+  methods: ['password', 'passkey'],
+  passkey: { rpName: 'Notes' },
+});
 const withWorkspaces = defineAuth({
   app: { name: 'Notes', key: 'notes' },
   methods: ['password'],
@@ -46,6 +51,23 @@ describe('createAuthClient', () => {
     expect(password.signIn.magicLink).toBeDefined();
   });
 
+  it('adds the passkey API only when the definition lists passkey, typed with no type arguments', () => {
+    const client = createAuthClient(withPasskey, { baseURL: BASE_URL });
+    expect(client.capabilities.passkey).toBe(true);
+    expect(typeof client.signIn.passkey).toBe('function');
+    expect(typeof client.passkey.addPasskey).toBe('function');
+    expectTypeOf(client.signIn.passkey).toBeFunction();
+    expectTypeOf(client.passkey.addPasskey).toBeFunction();
+    expectTypeOf(client.passkey.listUserPasskeys).toBeFunction();
+    expectTypeOf(client.passkey.deletePasskey).toBeFunction();
+
+    const without = createAuthClient(passwordAndGoogle, { baseURL: BASE_URL });
+    // @ts-expect-error a definition without passkey has no passkey API
+    expectTypeOf(without.passkey).toBeObject();
+    expect(definitionClientPlugins(passwordAndGoogle)).toEqual([]);
+    expect(definitionClientPlugins(withPasskey).map(plugin => plugin.id)).toEqual(['passkey']);
+  });
+
   it('carries the capabilities the UI renders from', () => {
     const client = createAuthClient(passwordAndGoogle, { baseURL: BASE_URL });
     expect(client.capabilities).toEqual({
@@ -53,6 +75,7 @@ describe('createAuthClient', () => {
       social: ['google'],
       password: true,
       magicLink: false,
+      passkey: false,
       workspaces: false,
     });
     const social: readonly 'google'[] = client.capabilities.social;

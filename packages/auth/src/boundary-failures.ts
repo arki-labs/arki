@@ -27,6 +27,18 @@ export const AccessDenied = defineFailure('auth.forbidden', {
 });
 
 /**
+ * The caller is signed in, but the session is older than `sessions.freshFor`. `freshFor` is that
+ * window in seconds, so the client can say how long a fresh sign-in lasts.
+ * @fix Sign in again (password, magic link or social) on the same device, then retry within `freshFor` seconds.
+ * @verify bun run test -- src/pg/flows/fresh-session.test.ts
+ */
+export const SessionNotFresh = defineFailure('auth.session_not_fresh', {
+  status: 403,
+  data: z.object({ freshFor: z.number().int().positive() }),
+  message: 'Sign in again to continue.',
+});
+
+/**
  * Missing and hidden subjects have exactly the same public refusal.
  * @fix Check the resource identifier and account access.
  * @verify bun run test -- src/http-policies.test.ts
@@ -79,6 +91,7 @@ export const AUTH_FAILURES = [
   ResourceMissing,
   AuthenticationRateLimited,
   AuthenticationUnavailable,
+  SessionNotFresh,
   UnexpectedDefect,
 ] as const;
 

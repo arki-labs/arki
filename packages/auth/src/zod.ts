@@ -13,6 +13,7 @@ import {
   accountId,
   authRequestId,
   organizationId,
+  passkeyId,
   sessionId,
   teamId,
   userId,
@@ -35,6 +36,7 @@ export const userIdSchema = idSchema(userId);
 export const sessionIdSchema = idSchema(sessionId);
 export const accountIdSchema = idSchema(accountId);
 export const verificationIdSchema = idSchema(verificationId);
+export const passkeyIdSchema = idSchema(passkeyId);
 export const organizationIdSchema = idSchema(organizationId);
 export const teamIdSchema = idSchema(teamId);
 
