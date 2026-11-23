@@ -4,6 +4,8 @@
 
 ### Minor Changes
 
+- Breaking: the six `/index` alias entries are removed: `@arki/payments/index`, `/core/index`, `/dunning/index`, `/tax/index`, `/refunds/index` and `/presets/index`. Each pointed at the same file as its short path, so import `@arki/payments`, `/core`, `/dunning`, `/tax`, `/refunds` or `/presets` instead. The published API index (`dist/api.json`) listed every symbol twice under them.
+
 - 937e762: Tax writes, tax quotes and the Stripe subscription preset return typed failures instead of throwing on data a caller or Stripe can send.
 
   - Breaking: `TaxJurisdictionRepository.createJurisdiction` now returns `TaxJurisdiction | TaxReferenceNotFound`. A `parentId` that names no jurisdiction returns `payments.tax_reference_not_found` (kind `jurisdiction`) instead of a raw Postgres foreign-key error. `updateJurisdiction` (new `parentId`), `TaxExemptionRepository.createExemption` and `updateExemption` (new `jurisdictionId`) return the same failure. The named jurisdiction is locked until the write, so it cannot be deleted in between.

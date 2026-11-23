@@ -87,11 +87,6 @@
     },
     {
       "package": "@arki/payments",
-      "error": "TYPES_E001 export \"./core/index\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
-    },
-    {
-      "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/journal\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
@@ -217,11 +212,6 @@
     },
     {
       "package": "@arki/payments",
-      "error": "TYPES_E001 export \"./dunning/index\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
-    },
-    {
-      "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/primitives\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
@@ -267,17 +257,7 @@
     },
     {
       "package": "@arki/payments",
-      "error": "TYPES_E001 export \"./index\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
-    },
-    {
-      "package": "@arki/payments",
       "error": "TYPES_E001 export \"./presets\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
-    },
-    {
-      "package": "@arki/payments",
-      "error": "TYPES_E001 export \"./presets/index\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
@@ -304,11 +284,6 @@
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./refunds/effects\" exposes Zod types: ZodCustom, ZodEnum, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTemplateLiteral, ZodTransform",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails. Refund entries approved by the founder, 2026-10-30."
-    },
-    {
-      "package": "@arki/payments",
-      "error": "TYPES_E001 export \"./refunds/index\" exposes Zod types: $ZodBranded, ZodEnum, ZodNullable, ZodObject, ZodPipe, ZodString, ZodTransform",
-      "reason": "Now-tier baseline 2026-10-17"
     },
     {
       "package": "@arki/payments",
@@ -353,11 +328,6 @@
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./tax/contracts\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
-    },
-    {
-      "package": "@arki/payments",
-      "error": "TYPES_E001 export \"./tax/index\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {

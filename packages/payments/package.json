@@ -81,11 +81,6 @@
       "import": "./dist/core/failures.js",
       "default": "./dist/core/failures.js"
     },
-    "./core/index": {
-      "types": "./dist/core/index.d.ts",
-      "import": "./dist/core/index.js",
-      "default": "./dist/core/index.js"
-    },
     "./core/journal": {
       "types": "./dist/core/journal.d.ts",
       "import": "./dist/core/journal.js",
@@ -226,11 +221,6 @@
       "import": "./dist/dunning/contracts.js",
       "default": "./dist/dunning/contracts.js"
     },
-    "./dunning/index": {
-      "types": "./dist/dunning/index.d.ts",
-      "import": "./dist/dunning/index.js",
-      "default": "./dist/dunning/index.js"
-    },
     "./dunning/primitives": {
       "types": "./dist/dunning/primitives.d.ts",
       "import": "./dist/dunning/primitives.js",
@@ -281,16 +271,6 @@
       "import": "./dist/dunning/types.js",
       "default": "./dist/dunning/types.js"
     },
-    "./index": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    },
-    "./presets/index": {
-      "types": "./dist/presets/index.d.ts",
-      "import": "./dist/presets/index.js",
-      "default": "./dist/presets/index.js"
-    },
     "./presets/revenuecat": {
       "types": "./dist/presets/revenuecat.d.ts",
       "import": "./dist/presets/revenuecat.js",
@@ -310,11 +290,6 @@
       "types": "./dist/refunds/effects.d.ts",
       "import": "./dist/refunds/effects.js",
       "default": "./dist/refunds/effects.js"
-    },
-    "./refunds/index": {
-      "types": "./dist/refunds/index.d.ts",
-      "import": "./dist/refunds/index.js",
-      "default": "./dist/refunds/index.js"
     },
     "./refunds/journal": {
       "types": "./dist/refunds/journal.d.ts",
@@ -355,11 +330,6 @@
       "types": "./dist/tax/contracts.d.ts",
       "import": "./dist/tax/contracts.js",
       "default": "./dist/tax/contracts.js"
-    },
-    "./tax/index": {
-      "types": "./dist/tax/index.d.ts",
-      "import": "./dist/tax/index.js",
-      "default": "./dist/tax/index.js"
     },
     "./tax/primitives": {
       "types": "./dist/tax/primitives.d.ts",
