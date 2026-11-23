@@ -13,6 +13,27 @@ When the ledger and the tool disagree, **trust the tool**, then correct the ledg
 
 ---
 
+## Wave 3 — Frontend (frontend) @ b841a29 (2026-11-23)
+
+<!-- candidate: frontend-b841a29 -->
+
+**Packages shipped** (2, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/icons | 0.2.1 | 1 |
+| @arki/ui | 0.2.1 | 2 |
+
+**Source commit**: `b841a29e953464aec717278fc03b20ae4a556628`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (2 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `demo:drop-studio` success, `demo:faultline` success, `docs:@arki/icons` success, `docs:@arki/ui` success, `published:@arki/icons` success, `published:@arki/ui` success, `runtimes:@arki/icons` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/frontend-b841a29/candidate.json`.
+
+---
+
 ## Wave 1 — Foundation (foundation) @ ed0d724 (2026-11-09)
 
 <!-- candidate: foundation-ed0d724 -->
