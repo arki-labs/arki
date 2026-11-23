@@ -13,6 +13,40 @@ When the ledger and the tool disagree, **trust the tool**, then correct the ledg
 
 ---
 
+## Wave 4 — Infrastructure Adapters (infrastructure-adapters) @ 41a1018 (2026-11-23)
+
+<!-- candidate: infrastructure-adapters-41a1018 -->
+
+**Packages shipped** (15, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/admin | 0.3.1 | 1 |
+| @arki/dot | 0.11.0 | 2 |
+| @arki/kv | 0.6.0 | 3 |
+| @arki/lock | 0.2.2 | 4 |
+| @arki/mail | 0.6.0 | 5 |
+| @arki/resilience | 0.3.3 | 6 |
+| @arki/tanstack-start | 0.3.2 | 7 |
+| @arki/testing | 0.4.0 | 8 |
+| @arki/db | 0.6.0 | 9 |
+| @arki/http | 0.5.0 | 10 |
+| @arki/live | 0.3.0 | 11 |
+| @arki/schedule | 0.2.0 | 12 |
+| @arki/auth | 0.5.0 | 13 |
+| @arki/journal | 0.5.0 | 14 |
+| @arki/queue | 0.4.0 | 15 |
+
+**Source commit**: `41a1018842862be727d838d5e3c830e4f3155566`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (15 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `demo:drop-studio` success, `demo:faultline` success, `docs:@arki/admin` success, `docs:@arki/auth` success, `docs:@arki/db` success, `docs:@arki/dot` success, `docs:@arki/http` success, `docs:@arki/journal` success, `docs:@arki/kv` success, `docs:@arki/live` success, `docs:@arki/lock` success, `docs:@arki/mail` success, `docs:@arki/queue` success, `docs:@arki/resilience` success, `docs:@arki/schedule` success, `docs:@arki/tanstack-start` success, `docs:@arki/testing` success, `published:@arki/admin` success, `published:@arki/auth` success, `published:@arki/db` success, `published:@arki/dot` success, `published:@arki/http` success, `published:@arki/journal` success, `published:@arki/kv` success, `published:@arki/live` success, `published:@arki/lock` success, `published:@arki/mail` success, `published:@arki/queue` success, `published:@arki/resilience` success, `published:@arki/schedule` success, `published:@arki/tanstack-start` success, `published:@arki/testing` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/infrastructure-adapters-41a1018/candidate.json`.
+
+---
+
 ## Wave 3 — Frontend (frontend) @ b841a29 (2026-11-23)
 
 <!-- candidate: frontend-b841a29 -->
