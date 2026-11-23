@@ -3,6 +3,8 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { pgColumns } from '@arki/db/pg';
 
+import { columnNamer } from './column-options';
+
 import {
   authAccountColumns,
   authSessionColumns,
@@ -36,6 +38,15 @@ describe('column sets', () => {
   it('spell column names in snake case by default', () => {
     const User = c.table('users', authUserColumns(c, { id: c.text('id').primaryKey(), fill: 'app' }));
     expect(columnNames(User)).toEqual(['id', 'name', 'email', 'email_verified', 'image', 'created_at', 'updated_at']);
+  });
+
+  it('spell a run of capitals as one word (credentialID is credential_id)', () => {
+    const snake = columnNamer();
+    expect(['credentialID', 'userId', 'accessTokenExpiresAt'].map(key => snake(key))).toEqual([
+      'credential_id',
+      'user_id',
+      'access_token_expires_at',
+    ]);
   });
 
   it('keep the key as the column name with naming camel', () => {
