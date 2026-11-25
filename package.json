@@ -63,7 +63,6 @@
     "@types/debug": "^4.1.13",
     "@types/proper-lockfile": "^4.1.4",
     "@typescript/native": "npm:typescript@^7.0.2",
-    "@uiw/codemirror-themes-all": "^4.25.12",
     "@uiw/react-codemirror": "^4.25.12",
     "@vis.gl/react-google-maps": "^1.10.1",
     "@vitejs/plugin-react": "6.1.2",

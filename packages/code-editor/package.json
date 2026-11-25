@@ -94,7 +94,6 @@
     "@uiw/codemirror-theme-tokyo-night": "^4.25.12",
     "@uiw/codemirror-theme-vscode": "^4.25.12",
     "@uiw/codemirror-theme-xcode": "^4.25.12",
-    "@uiw/codemirror-themes-all": "catalog:",
     "@uiw/react-codemirror": "catalog:"
   },
   "devDependencies": {
