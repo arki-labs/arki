@@ -1,5 +1,14 @@
 # @arki/content-build
 
+## 0.2.1
+
+### Patch Changes
+
+- 4f24c6d: Each package README now records what it instruments, including why these packages need no spans.
+- 744896d: Add the agent guide, AGENTS.md and the missing README sections, and fix the doc errors in these packages.
+- 2a9dea1: Reading time leaves inline `<svg>` blocks out in one pass. A post with many `<svg` tags and no `</svg>` after them read on to the end from each tag. It removes the same blocks as before.
+- 763b232: Declares the engines it supports and documents them in the README.
+
 ## 0.2.0
 
 ### Minor Changes
@@ -16,4 +25,3 @@
 
 - `sharp` moves to `^0.35.5`. Version 0.34 has no prebuilt binary that installs under Node 26, so installing `@arki/content-build` tried to compile sharp from source and failed.
 - e132ad3: Object checks on unknown values now use `is(value, recordSchema)` from `@arki/schema` instead of hand-written `typeof value === 'object'` guards. Behaviour is unchanged.
-

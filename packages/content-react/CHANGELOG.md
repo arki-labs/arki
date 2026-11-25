@@ -1,5 +1,23 @@
 # @arki/content-react
 
+## 0.3.0
+
+### Minor Changes
+
+- 10fe795: The package `.d.ts` no longer names Zod types: the internal post overview schema of `searchPosts` moved to its own module. No export changed.
+
+### Patch Changes
+
+- 4f24c6d: Each package README now records what it instruments, including why these packages need no spans.
+- 744896d: Add the agent guide, AGENTS.md and the missing README sections, and fix the doc errors in these packages.
+- 763b232: Declares the engines it supports and documents them in the README.
+- Updated dependencies [f367180]
+- Updated dependencies [4f24c6d]
+- Updated dependencies [744896d]
+- Updated dependencies [763b232]
+  - @arki/intl@0.3.0
+  - @arki/content@0.2.1
+
 ## 0.2.0
 
 ### Minor Changes

@@ -1,5 +1,41 @@
 # @arki/geo
 
+## 0.3.0
+
+### Minor Changes
+
+- 10fe795: Import `providerAttemptSchema`, `addressComponentsSchema` and `geocodeResultSchema` from the new `@arki/geo/zod` entry; they moved there from `@arki/geo` and `@arki/geo/geocoding`. `ProviderAttempt`, `AddressComponents` and `GeocodeResult` keep their names and places as plain TS types.
+- 7035f16: Arguments that are the caller's own constants are checked up front and throw the invariant failure `ARKI_FAILURE_E008`, documented in each JSDoc:
+
+  - `precision` in `formatCoordinates` (both entries), `formatCoordinatesWithCardinals`, `roundCoordinates` and `formatBounds` must be a finite number from 0 to 100 (outside that range `toFixed` threw a raw `RangeError`, `NaN` silently meant 0 places, and `roundCoordinates` returned `NaN` past about 308 places). Breaking: a negative `precision` in `roundCoordinates` is refused.
+  - `bearingToDirection` needs a finite bearing, and `getMarkerColor` a whole index of at least 0 (both returned `undefined` typed as a value).
+
+- f367180: Breaking: `parseCoordinates` from `@arki/geo/maps/google` is now the core parser. It returns `InvalidCoordinates` with a reason for bad text instead of `null`, and no longer accepts `"12abc, 5"`. Check the result with `InvalidCoordinates.is(result)` instead of `result === null`.
+
+### Patch Changes
+
+- 744896d: Add the agent guide, AGENTS.md and the missing README sections, and fix the doc errors in these packages.
+- 20e2cc4: The runtime claims are now proven per entry, and the README tables show it.
+
+  - `@arki/geo/geocoding` runs on Node, Bun and Deno only (package.json `arki.entryRuntimes`):
+    `node-geocoder` needs Node's `readline`. The rest of `@arki/geo` runs on all five engines.
+  - `@arki/seo/react` and `@arki/tanstack-start/error` are bundler-only entries. They are now proven as a
+    bundle on each engine they claim, which is how an app loads them.
+  - `@arki/queue` now passes on Deno, run straight from `node_modules` as a Deno app does.
+  - `@arki/payments-native` now passes on Hermes.
+
+  No code in these packages changed.
+
+  no docs impact: README runtime sections only.
+  no demo impact: no behaviour change.
+
+- 93d1ea9: `@arki/geo/geocoding` spans each lookup (`geo.geocode`, `geo.reverse_geocode`, `geo.batch_geocode`) and each provider call under it (`geo.<provider>.geocode`, `geo.<provider>.reverse_geocode`), so a fallback shows which provider failed. The lookup span says whether the cache answered (`geo.cache`: `hit`, `miss` or `off`). A failure sets `failure.code`; only a refused or unreachable provider (a fault) sets the error status. Each counts in `geo.operations` (`operation`, `outcome`). The address, coordinates and API keys are never recorded. `@opentelemetry/api` is a new dependency.
+
+  Docs: README `## Observability`.
+
+- 763b232: Declares the engines it supports and documents them in the README.
+- 937e762: `calculateMidpoint` and `calculateDestination` always return a longitude within [-180, 180]. Across the antimeridian they could return values such as 181.
+
 ## 0.2.0
 
 ### Minor Changes

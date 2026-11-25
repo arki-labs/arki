@@ -1,6 +1,6 @@
 {
   "name": "@arki/content",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Content helpers for blogs and docs: RSS and Atom feed parsing and generation, post search with MiniSearch, and typed queries over generated collections.",
   "keywords": [
     "arki",

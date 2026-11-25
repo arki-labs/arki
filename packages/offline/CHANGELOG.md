@@ -1,5 +1,41 @@
 # @arki/offline
 
+## 0.2.0
+
+### Minor Changes
+
+- b27c18b: `@arki/offline` now claims Hermes (React Native) only for `./collections`. `./query`, `./mutations`, `./preset`, `./status` and `./devtools` run on Node, Bun, Deno and browsers: they need IndexedDB, browser `online`/`offline` events or the DOM, which React Native lacks. On React Native, queue writes with `@tanstack/offline-transactions/react-native` and persist queries with TanStack's AsyncStorage persister.
+
+  React Native sets `window` without browser APIs, and the package took that `window` for a browser. Now it tests for the features themselves:
+
+  - `./status` no longer throws on import, and a `navigator` without `onLine` counts as online.
+  - The queue no longer throws when it starts. Without IndexedDB, every enqueue returns `offline.queue_storage_unavailable`.
+  - `createLocalCollection` no longer listens for `storage` events on a `window` that has no events.
+
+  `./collections` on React Native needs `react-native-get-random-values`. Without a random source, TanStack DB refuses to build a collection.
+
+  Docs: README `## React Native` and `## Runtime support`.
+
+- 53d25f7: Offline spans mark only faults (status 500 or higher) as errors. An expected refusal, such as a mutation that cannot be serialized, keeps `failure.code` and leaves the span status unset.
+- 10fe795: `QueuedMutation`, `QueueErrorCode`, `EnqueueReceipt` and `DeadLetterEntry` in `@arki/offline/mutations` are now plain TS types (same shapes), and the stored-value schemas are internal, so `./mutations` and `./preset` name no Zod types.
+
+### Patch Changes
+
+- 53d25f7: The README has an `## Observability` section: every `offline.*` span, and the parts with no span yet (query-cache persistence, collections, PWA, status hooks). No code change.
+- 20e2cc4: `@arki/offline/query` and `@arki/offline/devtools` now load outside Vite. `createPersistedQueryClient`
+  and `OfflineDevPanel` read `import.meta.env` only when it exists, so plain Node, Deno, a browser bundle
+  without Vite and an Expo app no longer throw a `TypeError`. There, the default `buster` is `''` and the
+  dev panel renders nothing. Inside Vite nothing changes.
+
+  - `./orpc` runs on Node, Bun, Deno and browsers, not Hermes (package.json `arki.entryRuntimes`): oRPC needs Web Streams (`TransformStream`), which React Native lacks. `./pwa` runs in browsers only: Workbox reads the worker global `self` when it loads.
+
+  no docs impact: the README runtime table and the `buster` doc comment are updated.
+  no demo impact: no demo runs these entries outside Vite.
+
+- b21d378: Declare `zod` as a runtime dependency, since the published entries import it.
+- 744896d: Add the README standard sections, `AGENTS.md` and an agent guide, and ship the guide in the package.
+- 763b232: Declares the engines it supports and documents them in the README.
+
 ## 0.1.0
 
 ### Minor Changes

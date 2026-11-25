@@ -1,5 +1,13 @@
 # @arki/code-editor
 
+## 0.1.4
+
+### Patch Changes
+
+- 4f24c6d: Each package README now records what it instruments, including why these packages need no spans.
+- 744896d: Add the agent guide, AGENTS.md and the missing README sections, and fix the doc errors in these packages.
+- 763b232: Declares the engines it supports and documents them in the README.
+
 ## 0.1.3
 
 ### Patch Changes

@@ -1,5 +1,12 @@
 # @arki/mcp
 
+## 0.1.1
+
+### Patch Changes
+
+- 744896d: Add the README standard sections, `AGENTS.md` and an agent guide, and state that the package is published.
+- 53d25f7: The README has an `## Observability` section: no spans of its own, because the app's oRPC instrumentation already spans each tool call. No code change.
+
 ## 0.1.0
 
 ### Minor Changes

@@ -1,5 +1,17 @@
 # @arki/intl
 
+## 0.3.0
+
+### Minor Changes
+
+- f367180: `loadMessagesFromMultipleDictionaries` returns a `DictionaryLoadFailed` failure (`intl.dictionary_load_failed`, the cause attached) instead of rejecting when a dictionary chunk fails to load or a feature loader rejects. Check the result with `isFailure` or `orThrow` from `@arki/failure`. `@arki/failure` is a new dependency.
+
+### Patch Changes
+
+- 4f24c6d: Each package README now records what it instruments, including why these packages need no spans.
+- 744896d: Add the agent guide, AGENTS.md and the missing README sections, and fix the doc errors in these packages.
+- 763b232: Declares the engines it supports and documents them in the README.
+
 ## 0.2.0
 
 ### Minor Changes

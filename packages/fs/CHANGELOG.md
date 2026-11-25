@@ -1,5 +1,19 @@
 # @arki/fs
 
+## 0.3.0
+
+### Minor Changes
+
+- f67692d: The local file helpers return typed storage failures instead of throwing. `readFile` is now async and resolves to the text, `StorageNotFound` for a missing path, `StorageRejected` for an unknown encoding or a refused read, `StorageUnavailable` or `StorageCancelled` (it takes an optional `signal`). `writeToTheFileEnd` resolves to nothing, `StorageRejected` when nothing was written, or `StorageWriteUncertain`. `deleteAsync` resolves to the deleted paths, `StorageRejected` for a path outside the working directory or a permission error, or `StorageWriteUncertain`. `deleteSync` returns the same paths and failures as `deleteAsync`, synchronously. `glob` resolves to the matched paths, `StorageCancelled`, or `UnexpectedDefect` for an invalid option set. `globIterate` yields the paths and never throws: its return value is `undefined` or that same failure. `globStream` is now a web `ReadableStream` of paths that never errors: a failure arrives as its last chunk. `ProgressData` stays a type re-exported from `del`. Each records an `fs.local.*` span and metric. Migration: `await` `readFile` and check the result with `isFailure` before using it; check the result of the other helpers the same way; read `globIterate`'s return value and check `globStream` chunks with `isFailure`.
+
+### Patch Changes
+
+- 53d25f7: The README's observability note is now a full `## Observability` section: a table of every `fs.local.*`, `fs.s3.*`, `fs.upload` and `fs.files.*` span, the `fs.operations` and `fs.operation.duration` metrics, and what is left uninstrumented and why.
+- 744896d: Add the agent guide, AGENTS.md and the missing README sections, and fix the doc errors in these packages.
+- 81983b8: Building the legacy `initializeStorage` Flystorage handle now runs in an `fs.s3.initialize_storage` span and counts in `fs.operations` and `fs.operation.duration`, under the caller's active span. No bucket, prefix, region or credential is recorded. The handle's own Flystorage calls still carry no span; `createS3StorageAdapter` remains the instrumented S3 path.
+- 4f24c6d: Span status now follows one rule. A returned failure always sets `failure.code`. It sets the span status to error only when `isFault(failure)` is true (status 500 or higher). An expected outcome (a 4xx, such as a missing record, a held lock or a declined card) leaves the status unset, so alerts on span errors fire only for faults. Thrown errors still set the error status. `@arki/env` and `@arki/schedule` now set `failure.code`, which they did not before. `@arki/payments` used to leave the status unset for every returned failure; a 5xx now sets error. `@arki/async`: `Cancelled` (499) no longer marks the span as an error.
+- 763b232: Declares the engines it supports and documents them in the README.
+
 ## 0.2.0
 
 ### Minor Changes
