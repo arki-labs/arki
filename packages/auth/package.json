@@ -184,6 +184,7 @@
     "@electric-sql/pglite": "catalog:",
     "@levischuck/tiny-cbor": "^0.2.11",
     "@libsql/client": "^0.18.0",
+    "@orpc/client": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@playwright/test": "catalog:testing",
     "@tanstack/react-router": "catalog:tanstack/start",
@@ -210,6 +211,7 @@
     "@arki/ui": "workspace:*",
     "@electric-sql/pglite": "catalog:",
     "@libsql/client": "^0.18.0",
+    "@orpc/client": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@playwright/test": "catalog:testing",
     "@tanstack/react-router": "catalog:tanstack/start",
@@ -241,6 +243,9 @@
       "optional": true
     },
     "@libsql/client": {
+      "optional": true
+    },
+    "@orpc/client": {
       "optional": true
     },
     "@orpc/server": {
