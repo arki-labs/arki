@@ -13,6 +13,26 @@ When the ledger and the tool disagree, **trust the tool**, then correct the ledg
 
 ---
 
+## Wave 4 — Infrastructure Adapters (infrastructure-adapters) @ fab24da (2026-11-25)
+
+<!-- candidate: infrastructure-adapters-fab24da -->
+
+**Packages shipped** (1, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/auth | 0.6.0 | 1 |
+
+**Source commit**: `fab24da4efb9f5f94186017b2b02811bb3337d30`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (1 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `demo:drop-studio` success, `docs:@arki/auth` success, `published:@arki/auth` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/infrastructure-adapters-fab24da/candidate.json`.
+
+---
+
 ## Wave 5 — Specialized (specialized) @ 2000eb8 (2026-11-23)
 
 <!-- candidate: specialized-2000eb8 -->
