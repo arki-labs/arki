@@ -13,6 +13,31 @@ When the ledger and the tool disagree, **trust the tool**, then correct the ledg
 
 ---
 
+## Wave 5 — Specialized (specialized) @ 2000eb8 (2026-11-23)
+
+<!-- candidate: specialized-2000eb8 -->
+
+**Packages shipped** (6, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/bench | 0.2.1 | 1 |
+| @arki/math | 0.2.1 | 2 |
+| @arki/expr | 0.1.1 | 3 |
+| @arki/money | 0.2.1 | 4 |
+| @arki/cas | 0.1.1 | 5 |
+| @arki/payments | 0.6.0 | 6 |
+
+**Source commit**: `2000eb82767566d4bf300485c64265434c027948`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (6 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `docs:@arki/bench` success, `docs:@arki/cas` success, `docs:@arki/expr` success, `docs:@arki/math` success, `docs:@arki/money` success, `docs:@arki/payments` success, `published:@arki/bench` success, `published:@arki/cas` success, `published:@arki/expr` success, `published:@arki/math` success, `published:@arki/money` success, `published:@arki/payments` success, `runtimes:@arki/bench` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/specialized-2000eb8/candidate.json`.
+
+---
+
 ## Wave 4 — Infrastructure Adapters (infrastructure-adapters) @ 41a1018 (2026-11-23)
 
 <!-- candidate: infrastructure-adapters-41a1018 -->
