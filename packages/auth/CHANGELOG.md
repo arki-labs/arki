@@ -1,5 +1,12 @@
 # @arki/auth
 
+## 0.6.0
+
+### Minor Changes
+
+- f98fe6f: Add a fresh-session check for risky actions. `sessions.freshFor` (seconds) in `defineAuth` sets how long a session counts as fresh after sign-in; the engine's delete-account, unlink-account and list-sessions routes follow it too (unset: the engine's default of 1 day). The new `freshSession` step is used like `authed`: a guest gets `auth.unauthenticated`, an older session gets the new `SessionNotFresh` failure (`auth.session_not_fresh`, 403, data `{ freshFor }`), part of `AUTH_FAILURES`. A sign-in that succeeds on a request carrying the same user's session now revokes that session, so a re-check leaves one session. The principal carries `freshFor` when it is set.
+- f98fe6f: Add passkey sign-in. List `'passkey'` in `defineAuth({ methods })` with `passkey: { rpName }` (required with the method, refused without it); the relying party id and the expected origin come from `runtime.url`. Build the table with the new `createPasskeyTables(c, { fill, user, ids })` from `@arki/auth/pg` and `@arki/auth/sqlite`, and pass it with the other tables; boot refuses `passkey` without it (`ARKI_AUTH_E007`). `authIdSources` gains `passkey`, and `passkeyIdColumns`, `PasskeyId`, `createPasskeyId` and `passkeyIdSchema` are new. The client from `createAuthClient` gains `signIn.passkey`, `passkey.addPasskey`, `passkey.listUserPasskeys` and `passkey.deletePasskey`, typed from the definition, and `capabilities.passkey`. A passkey sign-in counts as a fresh sign-in for `freshSession`, and one made on a request with the same user's session replaces that session.
+
 ## 0.5.0
 
 ### Minor Changes
