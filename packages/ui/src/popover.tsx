@@ -31,11 +31,21 @@ function PopoverContent({
   alignOffset = 0,
   side = 'bottom',
   sideOffset = 4,
+  anchor,
   ...props
-}: PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'>) {
+}: PopoverPrimitive.Popup.Props &
+  Pick<PopoverPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'anchor' | 'side' | 'sideOffset'>) {
+  // `anchor` is the element the popup is placed against (and whose size `--anchor-width` reads). Unset, it is the trigger.
   return (
     <PopoverPrimitive.Portal>
-      <PopoverPrimitive.Positioner align={align} alignOffset={alignOffset} side={side} sideOffset={sideOffset} className="isolate z-50">
+      <PopoverPrimitive.Positioner
+        align={align}
+        alignOffset={alignOffset}
+        anchor={anchor}
+        side={side}
+        sideOffset={sideOffset}
+        className="isolate z-50"
+      >
         <PopoverPrimitive.Popup
           data-slot="popover-content"
           className={cn(

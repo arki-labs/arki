@@ -45,7 +45,7 @@ Most components are small wrappers over a Base UI primitive. They take the primi
 - `AlertDialog`: a modal that asks the user to confirm before an action. Parts: `AlertDialogTrigger`, `AlertDialogContent`, `AlertDialogHeader`, `AlertDialogTitle`, `AlertDialogDescription`, `AlertDialogFooter`, `AlertDialogAction` (confirm), `AlertDialogCancel` (back out), `AlertDialogOverlay`, `AlertDialogPortal`.
 - `Drawer`: a panel that slides in from an edge, with drag to close. Parts: `DrawerTrigger`, `DrawerContent`, `DrawerHeader`, `DrawerTitle`, `DrawerDescription`, `DrawerFooter`, `DrawerClose`, `DrawerOverlay`, `DrawerPortal`.
 - `Sheet`: a side panel that slides in from a screen edge. Parts: `SheetTrigger`, `SheetContent`, `SheetHeader`, `SheetTitle`, `SheetDescription`, `SheetFooter`, `SheetClose`.
-- `Popover`: a floating panel anchored to a button. Parts: `PopoverTrigger`, `PopoverContent`, `PopoverClose`.
+- `Popover`: a floating panel anchored to a button. Parts: `PopoverTrigger`, `PopoverContent`, `PopoverClose`. `PopoverContent` takes `anchor` (an element, a ref, a virtual element or a function returning one) to place the panel against another element than the trigger; `--anchor-width` then reads that element's width.
 - `HoverCard`: a preview card that opens on hover. Parts: `HoverCardTrigger`, `HoverCardContent`.
 - `Tooltip`: a short hint on hover or focus. Parts: `TooltipProvider` (mount once), `TooltipTrigger`, `TooltipContent`. `WithTooltip` is the short form: wrap an element and pass the tip text.
 - `Command`: a searchable list of actions. Parts: `CommandInput`, `CommandList`, `CommandEmpty` (no results), `CommandGroup`, `CommandItem`, `CommandSeparator`, `CommandShortcut` (key hint). `CommandDialog` puts it in a modal, like a command palette.
