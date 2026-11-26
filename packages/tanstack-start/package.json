@@ -126,6 +126,12 @@
   },
   "files": [
     "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/*.test-d.ts",
+    "!src/**/__fixtures__/**",
+    "!src/**/__tests__/**",
     "docs/**",
     "llms.txt",
     "CHANGELOG.md",
