@@ -239,10 +239,12 @@ function createInit<
           "journal: compose({ workflows }) needs workflowMeta, the meta recorded on the workflow runner's checkpoints, such as { actorId: 'system:workflow' }",
         );
       }
+      // Marks this compose as the one that holds the workflows, so only its release empties them.
+      const owner = {};
       const runner =
         registered === undefined || config.workflowMeta === undefined
           ? undefined
-          : workflows.register(registered, config.workflowMeta);
+          : workflows.register(registered, config.workflowMeta, owner);
       // `'worker'`: the handlers keep their needs, and each worker or drain gives the services.
       const services = config.services === 'worker' ? undefined : (config.services ?? {});
       const effects = [...(config.effects ?? []), ...(runner === undefined ? [] : runner.effects)].map(declared =>
@@ -250,7 +252,7 @@ function createInit<
       );
       const taps = (config.taps ?? []).map(tap => (services === undefined ? tap : bindTap(tap, services)));
       const projections = [...(config.projections ?? []), ...(runner === undefined ? [] : [runner.steps])];
-      return createJournal<Meta, Tx, AppDb>(metaSchema, tables, projections, effects, taps, retention, forwardedLogs, {
+      const composed = createJournal<Meta, Tx, AppDb>(metaSchema, tables, projections, effects, taps, retention, forwardedLogs, {
         eventStarts: runner?.eventStarts ?? [],
         commands: workflows.operate,
         limits: workflows.limits,
@@ -259,8 +261,22 @@ function createInit<
         stepHooks: workflows.stepHooks,
         bindRun: runner?.bindRun,
       });
+      workflowReleases.set(composed, () => workflows.release(owner));
+      return composed;
     },
   };
+}
+
+/** Each composed journal's release of its workflows. Not public: `releaseWorkflows` is the only reader. */
+const workflowReleases = new WeakMap<object, () => void>();
+
+/**
+ * Frees the workflows `journal` registered, so a later compose of the same `initJournal()` may
+ * register them again. The Dot journal unit calls it when its app is disposed: a dev server boots
+ * the next app on the same cached `initJournal()`. Not exported from the package.
+ */
+export function releaseWorkflows(journal: object): void {
+  workflowReleases.get(journal)?.();
 }
 
 /** Throws when two handlers of one kind share a name: the second would silently replace the first. */

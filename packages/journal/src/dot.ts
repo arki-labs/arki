@@ -84,6 +84,7 @@ import { JOURNAL_ACTION_META_SCHEMA } from './action-meta.js';
 import { debugWorker } from './debug.js';
 import { JournalError } from './errors.js';
 import { givenServices, need } from './handlers.js';
+import { releaseWorkflows } from './journal.js';
 import { defaultEffectRetry } from './worker.js';
 
 export { JOURNAL_ACTION_META_SCHEMA } from './action-meta.js';
@@ -681,6 +682,11 @@ function journalFromFeatures<
           ...(workflowMeta === undefined ? {} : { workflowMeta }),
           services: 'worker',
         }),
+    },
+    // A dev server disposes this app and boots the next one on the same cached `j`: free the
+    // workflows so that app's compose can register them. Two live apps on one `j` still refuse.
+    dispose({ journal: composed }) {
+      releaseWorkflows(composed);
     },
   });
 }

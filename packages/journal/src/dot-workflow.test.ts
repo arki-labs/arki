@@ -340,3 +340,55 @@ describe('journalWorker() and workflows', () => {
     expect(order).toEqual(['before', 'after']);
   });
 });
+
+describe('one initJournal() across app lifetimes', () => {
+  // Why: a dev server (a TanStack Start hot update) disposes the old app and boots a new one in the
+  // same process. The module that holds `initJournal()` is cached, so the new app composes the same
+  // journal again. Its workflows must register; a second live app must still be refused.
+  const greeterOf = (wj: ReturnType<typeof freshJournal>) => {
+    const hello = wj
+      .workflow('dot.reboot', { version: 1, input: z.object({}) })
+      .step('greet', () => 'hi')
+      .finish();
+    const core = defineFeature('greeter');
+    return { hello, greeter: core.usecases({}, journalHandlers(core, { workflows: [hello] })).entrypoints() };
+  };
+  const bootGreeter = (wj: ReturnType<typeof freshJournal>, greeter: ReturnType<typeof greeterOf>['greeter']) =>
+    defineApp('wf-reboot')
+      .infra(dbPlugin())
+      .infra(journal({ j: wj, workflowMeta }))
+      .features([greeter])
+      .entrypoints(journalWorker({ pollMs: POLL_MS }))
+      .boot();
+
+  it('a new app composes the same workflows after the old app is disposed', async () => {
+    const wj = freshJournal();
+    const { hello, greeter } = greeterOf(wj);
+    const first = await orThrow(bootGreeter(wj, greeter));
+    await orThrow(first.dispose());
+    const second = track(await orThrow(bootGreeter(wj, greeter)));
+    await orThrow(second.start());
+    const id = newId();
+    orThrow(await second.services.journal.run(db, hello.start, { input: {}, id }, caller));
+    await completed(id);
+  });
+
+  it('a second live app on one initJournal() is still refused', async () => {
+    const wj = freshJournal();
+    const { greeter } = greeterOf(wj);
+    track(await orThrow(bootGreeter(wj, greeter)));
+    await expect(bootGreeter(wj, greeter)).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: expect.objectContaining({
+        message: expect.stringContaining('already composed a journal with workflows'),
+      }),
+    });
+  });
+
+  it('a compose that throws part-way registers nothing', () => {
+    const wj = freshJournal();
+    const { hello } = greeterOf(wj);
+    expect(() => wj.compose({ workflows: [hello, hello], workflowMeta })).toThrow('registered twice');
+    expect(() => wj.compose({ workflows: [hello], workflowMeta })).not.toThrow();
+  });
+});

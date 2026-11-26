@@ -1106,6 +1106,18 @@ export function createWorkflows<
 
   /** Every definition a `compose({ workflows })` of this `initJournal()` registered, by `name@version`. A start of any other has no step effect to queue its job for. */
   const started = new Map<string, WorkflowDef>();
+  /** The compose whose workflows `started` holds. Only its `release` empties `started`. */
+  let registeredBy: object | undefined;
+  /**
+   * Empties `started` when `owner` filled it, so a later compose may register. The Dot journal unit
+   * calls it when its app is disposed (a dev server boots a new app on the same `initJournal()`),
+   * and compose calls it when registering throws part-way. Another owner's release does nothing.
+   */
+  function release(owner: object): void {
+    if (registeredBy !== owner) return;
+    started.clear();
+    registeredBy = undefined;
+  }
   /** The code of the run's own pinned `(name, version)`, never another version. A stranded run throws: it is never run with other code. */
   const definitionOf = (row: Row): WorkflowDef => {
     const code = codeOf(row, started);
@@ -4295,9 +4307,9 @@ export function createWorkflows<
    * Registers the definitions: the step effect that runs their nodes, and the projection that keeps `workflow_steps`.
    * `meta` is the actor recorded on every checkpoint the library commits.
    */
-  function register(declared: readonly WorkflowDef[], meta: SchemaInput<Meta>) {
+  function register(declared: readonly WorkflowDef[], meta: SchemaInput<Meta>, owner: object) {
     // The commands (`start`, `signal`, `cancel`) find a run's code in `started`, the worker in this compose's
-    // registry: one compose with workflows per `initJournal()` keeps the two the same.
+    // registry: one live compose with workflows per `initJournal()` keeps the two the same.
     if (started.size > 0) {
       throw new JournalError(
         'BAD_DEFINITION',
@@ -4306,6 +4318,18 @@ export function createWorkflows<
         'this initJournal() already composed a journal with workflows; compose workflows once per initJournal()',
       );
     }
+    registeredBy = owner;
+    try {
+      return registerDefinitions(declared, meta);
+    } catch (error) {
+      // A throw part-way leaves `started` half filled; emptying it lets a corrected compose register.
+      release(owner);
+      throw error;
+    }
+  }
+
+  /** The body of `register`, after its once-per-live-compose check: validates `declared` and fills `started`. */
+  function registerDefinitions(declared: readonly WorkflowDef[], meta: SchemaInput<Meta>) {
     // The branches of a `parallel` node are definitions the parent's checkpoint starts runs of: they register with it.
     const defs = withBranches(declared);
     const registry = new Map<string, WorkflowDef>();
@@ -5337,6 +5361,7 @@ export function createWorkflows<
     workflow,
     task,
     register,
+    release,
     started,
     stepHooks,
     operate: {

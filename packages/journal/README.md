@@ -1096,7 +1096,7 @@ export const journal = j.compose({
 });
 ```
 
-- Compose workflows once per `initJournal()`. A second compose with workflows on the same `j` throws `BAD_DEFINITION`. A new process (a deploy, a restart) runs `initJournal()` again, so it composes again.
+- Compose workflows once per `initJournal()`. A second compose with workflows on the same `j` throws `BAD_DEFINITION`. A new process (a deploy, a restart) runs `initJournal()` again, so it composes again. In a Dot app, disposing the app frees its workflows, so the next app on the same `j` composes again: a dev server that boots a new app after a hot update keeps working.
 - A missing service is a compile error, as for an effect, and `compose` throws `BAD_DEFINITION` naming the workflow and the need. In Dot the feature's `needs` make it a compile error.
 
 ### Start, signal, cancel, read
