@@ -7,7 +7,7 @@
  *
  * ```ts
  * // start/src/server.ts
- * export const server = startServer(app, { hot: import.meta.hot });
+ * export const server = startServer(app, { hot: import.meta.hot, owner: import.meta.url });
  * export default createServerEntry(server);
  *
  * declare module '@tanstack/react-start' {
@@ -51,11 +51,17 @@ type RuntimeOptions = NonNullable<Parameters<typeof createAppRuntime>[1]>;
  * Options of {@link startServer}.
  *
  * @example
- * startServer(app, { hot: import.meta.hot, eager: env.NODE_ENV === 'production', client: new URL('../client/', import.meta.url) });
+ * startServer(app, { hot: import.meta.hot, owner: import.meta.url, eager: env.NODE_ENV === 'production', client: new URL('../client/', import.meta.url) });
  */
 export type StartServerOptions<Context> = {
   /** `import.meta.hot`: dispose the old app before a hot update starts the new one. */
   readonly hot?: RuntimeOptions['hot'];
+  /**
+   * The server entry's `import.meta.url` (`createAppRuntime`'s `owner`). A re-run of the entry
+   * disposes the old app before the new one starts, even when the dev server calls no
+   * `hot.dispose` (Nitro's dev worker does not).
+   */
+  readonly owner?: RuntimeOptions['owner'];
   /**
    * Boot the app when the server is created, not on the first request
    * (`createAppRuntime`'s `eager`). Pass `env.NODE_ENV === 'production'`: a
@@ -151,14 +157,14 @@ type AnyStartContext = StartRequestContext<StartServices, unknown, unknown>;
  * as `handler(request, { context })`. Its type is `RequestContextOf<typeof app>`.
  *
  * @example
- * export const server = startServer(app, { hot: import.meta.hot });
+ * export const server = startServer(app, { hot: import.meta.hot, owner: import.meta.url });
  * export default createServerEntry(server);
  */
 export function startServer<Services extends ServiceRecord, Rpc, Session>(
   app: DotAppLifecycle<WithStart<Services, Rpc, Session>, Failure, Failure, UnitPhases>,
   options: StartServerOptions<StartRequestContext<WithStart<Services, Rpc, Session>, Rpc, Session>> = {},
 ): StartServer {
-  const runtime = createAppRuntime(app, { hot: options.hot, eager: options.eager });
+  const runtime = createAppRuntime(app, { hot: options.hot, owner: options.owner, eager: options.eager });
   const handler: StartHandler<StartRequestContext<WithStart<Services, Rpc, Session>, Rpc, Session>> =
     options.handler ?? createStartHandler<{ server: { requestContext: AnyStartContext } }>(defaultStreamHandler);
   const client = options.client ?? defaultClientDir();

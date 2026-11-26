@@ -236,6 +236,7 @@ import { startServer, withForwardedProto } from '@arki/tanstack-start/server';
 
 export const server = startServer(app, {
   hot: import.meta.hot,
+  owner: import.meta.url,
   handler: (incoming, options) => {
     const request = withForwardedProto(incoming);
     return paraglideMiddleware(request, () => startHandler(request, options));

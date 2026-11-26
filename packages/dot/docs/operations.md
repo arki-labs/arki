@@ -93,7 +93,7 @@ hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise
   re-raises itself so the exit status keeps standard signal semantics; a
   second signal falls through to the runtime default (immediate kill).
   Returns an unhook function.
-- **`createAppRuntime(app, { hot: import.meta.hot, onStarted? })`** (from
+- **`createAppRuntime(app, { hot: import.meta.hot, owner: import.meta.url, onStarted? })`** (from
   `@arki/dot/runtime`) — one
   started app per server process, for hosts that boot the app lazily (TanStack
   Start, Vite SSR). `get()` starts the app once and retries a failed start;
@@ -102,6 +102,9 @@ hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise
   disposed, and the replacing module starts its app only after that disposal
   finished — `import.meta.hot.dispose` alone does not wait, so two apps would
   share the pool or the PGlite directory.
+  A dev server that re-runs the entry without calling `hot.dispose` (Nitro's
+  dev worker) is covered by `owner`: a new runtime with the same owner disposes
+  the live one first. Pass the entry's `import.meta.url`.
 - **`hookTimeoutMs`** — a per-hook watchdog. It requests cancellation and records
   `ARKI_DOT_E015` diagnostics. Owned construction returns `Deadline` after
   admitted work settles; cleanup never races a callback still using resources.

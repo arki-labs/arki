@@ -43,6 +43,20 @@ export const RuntimeReleaseFailed = defineFailure('dot.runtime_release_failed', 
 
 const DISPOSING_KEY = 'arki.appRuntime.disposing';
 
+declare global {
+  /**
+   * Each `owner`'s release of its live runtime, for this process. On `globalThis` because a dev
+   * server may re-evaluate this module too: a full reload drops every evaluation.
+   */
+  // eslint-disable-next-line no-var -- a `globalThis` property is declared with `var`
+  var __arkiAppRuntimeOwners: Map<string, () => Promise<unknown>> | undefined;
+}
+
+/** The live runtimes of this process, by `owner`. */
+function liveOwners() {
+  return (globalThis.__arkiAppRuntimeOwners ??= new Map());
+}
+
 function failed<Value>(value: Value): value is FailureIn<Value> {
   return isFailure<unknown>(value);
 }
@@ -102,6 +116,13 @@ export function createAppRuntime<
       | undefined;
     readonly onStarted?: ((app: DotApp<S, Close, Open, Phases>) => void) | undefined;
     /**
+     * Who owns the app, usually the server entry's `import.meta.url`. A new runtime with the
+     * same owner replaces the live one: it disposes the old app and waits for that before its
+     * own start. Pass it in dev: Nitro's dev worker re-runs the entry after an edit and calls no
+     * `hot.dispose`, so without it the old app stays live beside the new one.
+     */
+    readonly owner?: string | undefined;
+    /**
      * Start the app as soon as the runtime is created instead of on the first
      * `get()`. A production server boots before it serves, so the first
      * request pays no boot and a boot failure shows at process start. Leave
@@ -112,12 +133,17 @@ export function createAppRuntime<
     readonly eager?: boolean | undefined;
   } = {},
 ) {
-  const { hot, onStarted, eager = false } = options;
-  const previousGone = previousDisposal(hot?.data[DISPOSING_KEY]);
+  const { hot, onStarted, eager = false, owner } = options;
+  // The owner's live runtime is always the newest one, so it wins over `hot.data`, which only a
+  // hot update that ran `hot.dispose` fills. When both ran, `release` hands back the same promise.
+  const replacedOwner = owner === undefined ? undefined : liveOwners().get(owner);
+  const previousGone = previousDisposal(replacedOwner === undefined ? hot?.data[DISPOSING_KEY] : replacedOwner());
+  if (owner !== undefined) liveOwners().set(owner, release);
   let running: ReturnType<typeof start> | undefined;
   let unhookSignals: (() => void) | undefined;
   let replaced = false;
   let releaseFailure: ReturnType<typeof RuntimeReleaseFailed> | undefined;
+  let releasing: Promise<unknown> | undefined;
 
   async function start() {
     const previous = await previousGone;
@@ -153,7 +179,12 @@ export function createAppRuntime<
     return started;
   }
 
-  hot?.dispose(data => {
+  /**
+   * Marks this runtime replaced and disposes its app. Called by `hot.dispose`, or by the next
+   * runtime of the same owner; the second call gets the first call's promise.
+   */
+  function release() {
+    if (releasing !== undefined) return releasing;
     replaced = true;
     const current = running;
     running = undefined;
@@ -161,7 +192,7 @@ export function createAppRuntime<
     unhookSignals = undefined;
     // This promise always resolves, so HMR without a replacement module cannot
     // leave an unobserved rejection. The next module validates its outcome.
-    data[DISPOSING_KEY] = (async () => {
+    releasing = (async () => {
       const previous = await previousGone;
       if (previous !== undefined) return previous;
       if (releaseFailure !== undefined) return releaseFailure;
@@ -170,6 +201,11 @@ export function createAppRuntime<
       if (!startedApp(started)) return releaseFailure;
       return disposeOwned(() => started.dispose());
     })();
+    return releasing;
+  }
+
+  hot?.dispose(data => {
+    data[DISPOSING_KEY] = release();
   });
 
   function get() {

@@ -7,7 +7,7 @@
 - `@arki/tanstack-start`: @arki/tanstack-start. `AnalyticsScript`, `createAppConfig`, `createRouter`; types `AnalyticsConfig`, `AppConfig`, `RouterConfig`.
 - `@arki/tanstack-start/config`: TanStack Start App Configuration. `createAppConfig`, `defineConfig`; types `AppConfig`.
 - `@arki/tanstack-start/vite`: `fleetVite`, `oneChunkPerRoute`, `zodCompiled`.
-- `@arki/tanstack-start/server`: `startServer(app, { hot })` — the server entry of a Dot app on TanStack Start. `startServer`, `withForwardedProto`; types `StartHandler`, `StartServer`, `StartServerOptions`.
+- `@arki/tanstack-start/server`: `startServer(app, { hot, owner })` — the server entry of a Dot app on TanStack Start. `startServer`, `withForwardedProto`; types `StartHandler`, `StartServer`, `StartServerOptions`.
 - `@arki/tanstack-start/dot`: `TANSTACK_START_PLUGIN_ERROR_CODES`, `authHandlers`, `cronHandlers`, `healthHandlers`, `rpcHandlers`, `tanstackStart`; types `CorsOptions`, `CronRouter`, `MountOptions`, `RequestContextOf`, `TanstackStartOptions`.
 - `@arki/tanstack-start/router`: TanStack Router Configuration. `createQueryClient`, `createRouter`, `createTanStackRouter`; types `RouterConfig`.
 - `@arki/tanstack-start/orpc/client`: oRPC Client Setup for TanStack Start. `RPCLink`, `createORPCClient`, `createORPCReact`, `createOrpcUtils`, `createTanstackQueryUtils`, `getORPCUrl`; types `ORPCClientConfig`, `OrpcUtils`, `RouterClient`.

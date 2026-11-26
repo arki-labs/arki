@@ -151,6 +151,49 @@ describe('createAppRuntime', () => {
     expect(await current.dispose()).toBeUndefined();
   });
 
+  it('owner: a module re-run that runs no hot.dispose still disposes the old app first', async () => {
+    // Why: Nitro's dev worker re-imports the server entry after an edit and never calls
+    // `import.meta.hot.dispose`. Without the owner the old app stays live beside the new one:
+    // two pools, and a journal that refuses to compose its workflows a second time.
+    const { app, counts } = countedApp();
+    const owner = 'file:///app/src/server.ts#rerun';
+    const oldRuntime = createAppRuntime(app, { owner });
+    orThrow(await oldRuntime.get());
+
+    const started = orThrow(await createAppRuntime(app, { owner }).get());
+
+    expect(counts.maxLive).toBe(1);
+    expect(counts.live).toBe(1);
+    expect(RuntimeReplaced.is(await oldRuntime.get())).toBe(true);
+    expect(await started.dispose()).toBeUndefined();
+  });
+
+  it('owner: runtimes of different owners keep their own apps', async () => {
+    const { app, counts } = countedApp();
+    const first = orThrow(await createAppRuntime(app, { owner: 'file:///app/a.ts#owners' }).get());
+    const second = orThrow(await createAppRuntime(app, { owner: 'file:///app/b.ts#owners' }).get());
+
+    expect(counts.live).toBe(2);
+    expect(await second.dispose()).toBeUndefined();
+    expect(await first.dispose()).toBeUndefined();
+  });
+
+  it('owner and hot together: a hot update disposes the old app once', async () => {
+    const { app, counts } = countedApp();
+    const owner = 'file:///app/src/server.ts#both';
+    const data: Record<string, unknown> = {};
+    const first = hotModule(data);
+    orThrow(await createAppRuntime(app, { hot: first.hot, owner }).get());
+    first.replace();
+
+    const started = orThrow(await createAppRuntime(app, { hot: hotModule(data).hot, owner }).get());
+
+    expect(counts.starts).toBe(2);
+    expect(counts.maxLive).toBe(1);
+    expect(counts.live).toBe(1);
+    expect(await started.dispose()).toBeUndefined();
+  });
+
   it('hooks signals for the started app and unhooks them on a hot update', async () => {
     const { app } = countedApp();
     const data: Record<string, unknown> = {};
