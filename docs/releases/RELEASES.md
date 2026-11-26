@@ -13,6 +13,31 @@ When the ledger and the tool disagree, **trust the tool**, then correct the ledg
 
 ---
 
+## Wave 1 — Foundation (foundation) @ a8d1beb (2026-11-26)
+
+<!-- candidate: foundation-a8d1beb -->
+
+**Packages shipped** (6, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/failure | 0.4.2 | 1 |
+| @arki/ts | 0.1.3 | 2 |
+| @arki/clock | 0.2.3 | 3 |
+| @arki/schema | 0.3.3 | 4 |
+| @arki/contracts | 0.4.4 | 5 |
+| @arki/date | 0.5.3 | 6 |
+
+**Source commit**: `a8d1beb91a38f0643629d5879e9e6a8cdf2f6fa7`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (6 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `demo:drop-studio` success, `demo:faultline` success, `docs:@arki/clock` success, `docs:@arki/contracts` success, `docs:@arki/date` success, `docs:@arki/failure` success, `docs:@arki/schema` success, `docs:@arki/ts` success, `published:@arki/clock` success, `published:@arki/contracts` success, `published:@arki/date` success, `published:@arki/failure` success, `published:@arki/schema` success, `published:@arki/ts` success, `runtimes:@arki/ts` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/foundation-a8d1beb/candidate.json`.
+
+---
+
 ## Wave 7 — Content and Platform (content-and-platform) @ 0d6df06 (2026-11-25)
 
 <!-- candidate: content-and-platform-0d6df06 -->
