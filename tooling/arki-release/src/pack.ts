@@ -120,7 +120,7 @@ export const DEFAULT_PACK_RULES: readonly PackAuditRule[] = [
         // scaffold generator at user time, never executed from the published
         // package). Exclude them from the tests-must-not-ship rule.
         if (/(^|\/)templates\//.test(f.path) && f.path.endsWith('.tmpl')) return false;
-        return /\.test\.|\.spec\.|__tests__\/|\/tests?\//i.test(f.path);
+        return /\.test\.|\.test-d\.|\.spec\.|__tests__\/|\/tests?\//i.test(f.path);
       });
       return offender ? `test file in published output: ${offender.path}` : null;
     },

@@ -117,6 +117,14 @@ describe('auditPackEntry — error rules', () => {
     expect(hit?.severity).toBe('error');
   });
 
+  it('flags .test-d.ts type-test files', () => {
+    // Why: `.test.` never matched `foo.test-d.ts`, so 14 packages shipped their
+    // type tests (30 in @arki/journal) with the rule passing.
+    const entry = makeEntry([{ path: 'dist/foo.js' }, { path: 'dist/foo.d.ts' }, { path: 'src/foo.test-d.ts' }]);
+    const hit = auditPackEntry(entry, srcCtx).ruleHits.find(h => h.ruleId === 'no-tests');
+    expect(hit?.reason).toContain('src/foo.test-d.ts');
+  });
+
   it('flags __tests__/ dir entries', () => {
     const entry = makeEntry([
       { path: 'dist/foo.js' },
