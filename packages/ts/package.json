@@ -53,6 +53,7 @@
     "src/**",
     "!src/**/*.test.*",
     "!src/**/*.spec.*",
+    "!src/**/*.test-d.ts",
     "!src/**/tests/**",
     "!src/**/test/**",
     "!src/**/__tests__/**",

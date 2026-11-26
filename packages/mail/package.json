@@ -94,6 +94,7 @@
     "src/**",
     "!src/**/*.test.*",
     "!src/**/*.spec.*",
+    "!src/**/*.test-d.ts",
     "docs/agent-guide.md",
     "llms.txt",
     "README.md",

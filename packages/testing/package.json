@@ -137,6 +137,7 @@
     "src/**",
     "!src/**/*.test.ts",
     "!src/**/*.spec.ts",
+    "!src/**/*.test-d.ts",
     "!src/**/__fixtures__/**",
     "!src/**/*.calibration.test.ts",
     "docs/agent-guide.md",

@@ -71,6 +71,7 @@
     "src/**",
     "!src/**/*.test.*",
     "!src/**/*.spec.*",
+    "!src/**/*.test-d.ts",
     "!src/**/*.fixture.*",
     "CHANGELOG.md",
     "README.md",

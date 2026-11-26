@@ -51,6 +51,7 @@
     "src/**",
     "!src/**/*.test.*",
     "!src/**/*.spec.*",
+    "!src/**/*.test-d.ts",
     "CHANGELOG.md",
     "README.md",
     "llms.txt",

@@ -85,6 +85,7 @@
     "src/**",
     "!src/**/*.test.*",
     "!src/**/*.spec.*",
+    "!src/**/*.test-d.ts",
     "!src/**/__tests__/**",
     "docs/**",
     "llms.txt",
