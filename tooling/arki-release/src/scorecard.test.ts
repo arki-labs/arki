@@ -918,7 +918,7 @@ describe('candidate mode: dimensions from the frozen tarball', () => {
     // Why: npm consumers cannot resolve workspace:/catalog:, so those bytes are uninstallable even if the source tree looks fine.
     const dims = frozenDimensions(
       '@arki/a',
-      { files: [], packedSize: 1, manifest: { ...complete, dependencies: { '@arki/b': 'workspace:*', zod: 'catalog:' } } },
+      { files: [], sourceMaps: [], packedSize: 1, manifest: { ...complete, dependencies: { '@arki/b': 'workspace:*', zod: 'catalog:' } } },
       frozenCandidate({}),
     );
     expect(dims.dependencies.status).toBe('fail');
@@ -928,14 +928,14 @@ describe('candidate mode: dimensions from the frozen tarball', () => {
 
   it('warns on metadata the tarball manifest lacks', () => {
     // Why: the npm page is built from the published manifest, not from source.
-    const dims = frozenDimensions('@arki/a', { files: [], packedSize: 1, manifest: { name: '@arki/a', version: '1.0.0' } }, frozenCandidate({}));
+    const dims = frozenDimensions('@arki/a', { files: [], sourceMaps: [], packedSize: 1, manifest: { name: '@arki/a', version: '1.0.0' } }, frozenCandidate({}));
     expect(dims.metadata.status).toBe('warn');
     expect(dims.metadata.details).toContain('description');
   });
 
   it('judges fixtures from the smoke run on the frozen tarballs, deferred when smoke never ran', () => {
     // Why: candidate mode must not re-pack; smoke already installed these exact bytes in a clean consumer.
-    const manifest = { files: [], packedSize: 1, manifest: complete };
+    const manifest = { files: [], sourceMaps: [], packedSize: 1, manifest: complete };
     expect(frozenDimensions('@arki/a', manifest, frozenCandidate({})).fixtures.status).toBe('deferred');
     const smoke = (status: 'pass' | 'fail') => ({
       status: status === 'pass' ? ('success' as const) : ('failure' as const),
@@ -950,7 +950,7 @@ describe('candidate mode: dimensions from the frozen tarball', () => {
     // Why: the packlist gate must see what the founder publishes, not a fresh npm pack of the working tree.
     const result = auditFrozenTarball(
       { name: '@arki/a', version: '1.0.0', tarball: 'tarballs/a.tgz', sha512: 'x', publishOrder: 1 },
-      { files: [{ path: 'package.json', size: 10, mode: 420 }, { path: 'dist/index.js', size: 20, mode: 420 }], packedSize: 5, manifest: complete },
+      { files: [{ path: 'package.json', size: 10, mode: 420 }, { path: 'dist/index.js', size: 20, mode: 420 }], sourceMaps: [], packedSize: 5, manifest: complete },
       '/repo/packages/a',
     );
     expect(result.totals).toEqual({ fileCount: 2, unpackedSize: 30, packedSize: 5 });

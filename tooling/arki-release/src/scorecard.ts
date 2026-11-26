@@ -942,6 +942,7 @@ export function auditFrozenTarball(frozen: CandidatePackage, contents: TarballCo
       packageDir,
       manifest: { name: frozen.name, version: frozen.version },
       isSourceDistributed: manifest.success && isSourceDistributedManifest(manifest.data),
+      sourceMaps: contents.sourceMaps,
     },
   );
 }

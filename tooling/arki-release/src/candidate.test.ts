@@ -18,6 +18,7 @@ import {
 } from './candidate';
 import type { TreeExporter } from './candidate';
 import type { GitRunner, NpmRunner } from './runners';
+import { auditFrozenTarball } from './scorecard';
 import type { ReleaseConfig } from './types';
 
 const config: ReleaseConfig = {
@@ -257,6 +258,28 @@ describe('readTarball and lastShippedCommits', () => {
     // Why: ship reads the previous release's dist/api.json from its tarball to diff the API.
     expect(await readTarballText(tgz, 'package.json')).toContain('@arki/a');
     expect(await readTarballText(tgz, 'dist/api.json')).toBeNull();
+  });
+
+  it('fails the frozen packlist when a shipped map names a source the tarball lacks', async () => {
+    // Why: the founder publishes these exact bytes; a map pointing at a missing src/ file
+    // made every consumer's Vite print "Sourcemap points to missing source files".
+    const pkg = path.join(root, 'maps', 'package');
+    mkdirSync(path.join(pkg, 'dist'), { recursive: true });
+    writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: '@arki/a', version: '1.0.0', files: ['dist/**'] }));
+    writeFileSync(path.join(pkg, 'dist/cors.js'), 'export {};\n');
+    writeFileSync(path.join(pkg, 'dist/cors.js.map'), JSON.stringify({ version: 3, sources: ['../src/cors.ts'], mappings: '' }));
+    const frozen = { name: '@arki/a', version: '1.0.0', tarball: 'tarballs/a.tgz', sha512: 'x', publishOrder: 1 };
+    const audit = async () => {
+      const tgz = path.join(root, 'maps.tgz');
+      execFileSync('tar', ['-czf', tgz, '-C', path.join(root, 'maps'), 'package'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
+      const contents = await readTarball(tgz);
+      return auditFrozenTarball(frozen, contents, pkg).ruleHits.find(h => h.ruleId === 'map-sources-shipped');
+    };
+
+    expect((await audit())?.reason).toContain('dist/cors.js.map -> src/cors.ts');
+    mkdirSync(path.join(pkg, 'src'));
+    writeFileSync(path.join(pkg, 'src/cors.ts'), 'export {};\n');
+    expect(await audit()).toBeUndefined();
   });
 
   it('takes the newest shipped candidate per package and ignores unshipped ones', async () => {

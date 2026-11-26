@@ -19,7 +19,11 @@
  *   - `PACK_E003` — a pack-audit rule flagged a failure.
  */
 
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import debugFactory from 'debug';
+import { z } from 'zod';
 
 import { defaultNpmRunner, type NpmRunner, type RunOutput } from './runners';
 
@@ -32,6 +36,61 @@ import type {
 } from './types';
 
 const debug = debugFactory('arki:release:pack');
+
+/** The sourcemap (v3) fields the `map-sources-shipped` rule reads. */
+export const sourceMapSchema = z
+  .object({
+    sources: z.array(z.string().nullable()),
+    sourceRoot: z.string().optional(),
+    sourcesContent: z.array(z.string().nullable()).optional(),
+  })
+  .loose();
+
+/** One shipped `*.map` file. `map` is `null` when the file is not a readable sourcemap. */
+export type ShippedSourceMap = {
+  readonly path: string;
+  readonly map: z.output<typeof sourceMapSchema> | null;
+};
+
+/** True for a published path that is a sourcemap (`.js.map`, `.d.ts.map`, ...). */
+export function isSourceMapPath(publishedPath: string): boolean {
+  return publishedPath.endsWith('.map');
+}
+
+/** Parses one shipped map's text; `null` text means the bytes could not be read. */
+export function parseShippedSourceMap(mapPath: string, text: string | null): ShippedSourceMap {
+  if (text === null) return { path: mapPath, map: null };
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return { path: mapPath, map: null };
+  }
+  const parsed = sourceMapSchema.safeParse(json);
+  return { path: mapPath, map: parsed.success ? parsed.data : null };
+}
+
+/** `webpack://`, `data:`, `https:`: sources a consumer never looks up on disk. */
+const URL_SOURCE = /^[a-z][a-z0-9+.-]*:/i;
+
+/**
+ * The sources of one map that a consumer cannot find: neither inlined in
+ * `sourcesContent` nor shipped at the path the map names. Vite warns
+ * "Sourcemap points to missing source files" for each such map.
+ */
+function unshippedSources(shippedMap: ShippedSourceMap, shipped: ReadonlySet<string>): readonly string[] {
+  const { map } = shippedMap;
+  if (map === null) return [`${shippedMap.path} (not a readable sourcemap)`];
+  if (map.sourceRoot !== undefined && URL_SOURCE.test(map.sourceRoot)) return [];
+  return map.sources.flatMap((source, index) => {
+    if (source === null || source === '' || URL_SOURCE.test(source)) return [];
+    if (map.sourcesContent?.[index] != null) return [];
+    const resolved = path.posix.normalize(
+      path.posix.join(path.posix.dirname(shippedMap.path), map.sourceRoot ?? '', source),
+    );
+    return shipped.has(resolved) ? [] : [`${shippedMap.path} -> ${resolved}`];
+  });
+}
 
 /** Stable error codes for pack-audit envelope entries. */
 export const PACK_ERROR_CODES = {
@@ -122,6 +181,18 @@ export const DEFAULT_PACK_RULES: readonly PackAuditRule[] = [
     check: entry => {
       const offender = entry.files.find(f => /(^|\/)node_modules\//.test(f.path));
       return offender ? `node_modules leak in published output: ${offender.path}` : null;
+    },
+  },
+  {
+    id: 'map-sources-shipped',
+    description: 'Requires every source a shipped sourcemap names to ship too, or to be inlined in `sourcesContent`.',
+    severity: 'error',
+    check: (entry, ctx) => {
+      const shipped = new Set(entry.files.map(f => f.path));
+      const missing = ctx.sourceMaps.flatMap(m => unshippedSources(m, shipped));
+      if (missing.length === 0) return null;
+      const examples = missing.slice(0, 3).join(', ');
+      return `${missing.length.toString()} sourcemap source(s) not in published output (${examples}); add "src/**" to "files" or build with inlineSources`;
     },
   },
   {
@@ -362,12 +433,21 @@ export async function auditPack(
   if (entry === undefined) {
     return { ok: false, error: 'npm pack returned no entries' };
   }
+  // A map npm would pack but that cannot be read is reported by the rule as unreadable.
+  const sourceMaps = await Promise.all(
+    entry.files
+      .filter(f => isSourceMapPath(f.path))
+      .map(async f =>
+        parseShippedSourceMap(f.path, await readFile(path.join(packageDir, f.path), 'utf8').catch(() => null)),
+      ),
+  );
   const result = auditPackEntry(
     entry,
     {
       packageDir,
       manifest: options.manifest,
       isSourceDistributed: options.isSourceDistributed,
+      sourceMaps,
     },
     options.rules ?? DEFAULT_PACK_RULES,
   );

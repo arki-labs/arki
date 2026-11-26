@@ -25,6 +25,7 @@ import { exportPublicTree } from './export-public';
 import { discoverManifests, RELEASE_ROOTS } from './inventory';
 import { createEnvelope } from './json-output';
 import { npmVersionLookup, pendingPackages, planOrder } from './order';
+import { isSourceMapPath, parseShippedSourceMap, type ShippedSourceMap } from './pack';
 import type { OrderItem } from './order';
 import { createSourceSnapshot } from './snapshot';
 import { defaultGitRunner, defaultNpmRunner, type GitRunner, type NpmRunner } from './runners';
@@ -507,11 +508,13 @@ async function packOne(
 // Reading a frozen tarball
 // ---------------------------------------------------------------------------
 
-/** What a candidate tarball holds: its file list and its `package/package.json`. */
+/** What a candidate tarball holds: its file list, its `package/package.json` and its sourcemaps. */
 export interface TarballContents {
   readonly files: readonly NpmPackFileEntry[];
   /** Parsed `package/package.json`; `null` when absent or not JSON. */
   readonly manifest: unknown;
+  /** Every `*.map` in the tarball, parsed; the `map-sources-shipped` pack rule reads these. */
+  readonly sourceMaps: readonly ShippedSourceMap[];
   /** Size of the `.tgz` on disk. */
   readonly packedSize: number;
 }
@@ -568,9 +571,11 @@ function* tarFiles(tar: Buffer): Generator<{ readonly path: string; readonly siz
 export async function readTarball(file: string): Promise<TarballContents> {
   const packed = await readFile(file);
   const files: NpmPackFileEntry[] = [];
+  const sourceMaps: ShippedSourceMap[] = [];
   let manifest: unknown = null;
   for (const entry of tarFiles(gunzipSync(packed))) {
     files.push({ path: entry.path, size: entry.size, mode: entry.mode });
+    if (isSourceMapPath(entry.path)) sourceMaps.push(parseShippedSourceMap(entry.path, entry.body.toString('utf8')));
     if (entry.path === 'package.json') {
       try {
         manifest = JSON.parse(entry.body.toString('utf8')) as unknown;
@@ -579,7 +584,7 @@ export async function readTarball(file: string): Promise<TarballContents> {
       }
     }
   }
-  return { files, manifest, packedSize: packed.length };
+  return { files, manifest, sourceMaps, packedSize: packed.length };
 }
 
 /** Every regular file of a `.tgz` with its bytes (paths without `package/`). `site` copies docs from these. */

@@ -7,6 +7,10 @@
  * an injected runner so the tests stay deterministic and fast.
  */
 
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -14,6 +18,7 @@ import {
   auditPackEntry,
   DEFAULT_PACK_RULES,
   isSourceDistributedManifest,
+  parseShippedSourceMap,
   runNpmPack,
 } from './pack';
 import type { NpmPackEntry, NpmPackFileEntry, PackAuditContext } from './types';
@@ -41,6 +46,7 @@ const ctx: PackAuditContext = {
   packageDir: '/tmp/pkg',
   manifest: { name: 'pkg', version: '1.0.0' },
   isSourceDistributed: false,
+  sourceMaps: [],
 };
 const srcCtx: PackAuditContext = { ...ctx, isSourceDistributed: true };
 
@@ -407,6 +413,70 @@ describe('auditPack — end-to-end with injected runner', () => {
       runner: () => Promise.resolve({ stdout: '', stderr: 'boom', code: 1 }),
     });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('map-sources-shipped rule', () => {
+  const mapFile = (mapPath: string, map: Record<string, unknown>) => parseShippedSourceMap(mapPath, JSON.stringify(map));
+  const shipped = [{ path: 'dist/src/cors.js' }, { path: 'dist/src/cors.js.map' }, { path: 'dist/src/cors.d.ts' }];
+  const corsMap = mapFile('dist/src/cors.js.map', { version: 3, sources: ['../../src/cors.ts'], mappings: 'AAAA' });
+  const hitOf = (entry: NpmPackEntry, context: PackAuditContext) =>
+    auditPackEntry(entry, context).ruleHits.find(h => h.ruleId === 'map-sources-shipped');
+
+  it('fails when a shipped map names a source the package does not ship', () => {
+    // Why: @arki/tanstack-start 0.3.2 shipped dist/**/*.js.map pointing at ../../src/*.ts
+    // without src/, and every app's Vite dev server warned once per module it loaded.
+    const hit = hitOf(makeEntry(shipped), { ...ctx, sourceMaps: [corsMap] });
+    expect(hit?.severity).toBe('error');
+    expect(hit?.reason).toContain('dist/src/cors.js.map -> src/cors.ts');
+  });
+
+  it('passes once the named source ships', () => {
+    const entry = makeEntry([...shipped, { path: 'src/cors.ts' }]);
+    expect(hitOf(entry, { ...srcCtx, sourceMaps: [corsMap] })).toBeUndefined();
+  });
+
+  it('passes when the source text is inlined in sourcesContent', () => {
+    // Why: inlineSources is the other valid fix; the consumer then never looks on disk.
+    const inlined = mapFile('dist/src/cors.js.map', { sources: ['../../src/cors.ts'], sourcesContent: ['export {};'] });
+    expect(hitOf(makeEntry(shipped), { ...ctx, sourceMaps: [inlined] })).toBeUndefined();
+  });
+
+  it('ignores URL sources such as webpack:// that no consumer resolves on disk', () => {
+    const bundled = mapFile('dist/index.js.map', { sources: ['webpack://pkg/./src/a.ts', 'data:text/plain,x'] });
+    expect(hitOf(makeEntry([{ path: 'dist/index.js.map' }]), { ...ctx, sourceMaps: [bundled] })).toBeUndefined();
+  });
+
+  it('fails on a shipped .map that is not a readable sourcemap', () => {
+    const broken = parseShippedSourceMap('dist/index.js.map', '{ not json');
+    expect(hitOf(makeEntry([{ path: 'dist/index.js.map' }]), { ...ctx, sourceMaps: [broken] })?.reason).toContain(
+      'not a readable sourcemap',
+    );
+  });
+
+  it('audits the maps a real npm pack would ship, read from the package folder', async () => {
+    // Why: the source-mode scorecard must read the same map bytes npm would publish.
+    const dir = mkdtempSync(path.join(tmpdir(), 'arki-pack-maps-'));
+    try {
+      mkdirSync(path.join(dir, 'dist'));
+      mkdirSync(path.join(dir, 'src'));
+      writeFileSync(path.join(dir, 'dist/index.js'), 'export {};\n//# sourceMappingURL=index.js.map\n');
+      writeFileSync(path.join(dir, 'dist/index.js.map'), JSON.stringify({ version: 3, sources: ['../src/index.ts'], mappings: '' }));
+      writeFileSync(path.join(dir, 'src/index.ts'), 'export {};\n');
+      const manifest = { name: 'pkg', version: '1.0.0' };
+      const withFiles = (files: readonly string[]) =>
+        writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ ...manifest, files }));
+
+      withFiles(['dist/**']);
+      const without = await auditPack(dir, { manifest, isSourceDistributed: false });
+      expect(without.ok && without.result.ruleHits.some(h => h.ruleId === 'map-sources-shipped')).toBe(true);
+
+      withFiles(['dist/**', 'src/**']);
+      const withSrc = await auditPack(dir, { manifest, isSourceDistributed: true });
+      expect(withSrc.ok && withSrc.result.ruleHits.some(h => h.ruleId === 'map-sources-shipped')).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

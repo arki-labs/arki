@@ -9,6 +9,7 @@ import type { z } from 'zod';
 
 import type { arkiClaimSchema } from '@arki/library-tooling/src/manifest';
 
+import type { ShippedSourceMap } from './pack';
 import type { ReadinessResult } from './readiness';
 
 /**
@@ -321,11 +322,16 @@ export type NpmPackEntry = {
  *
  * `isSourceDistributed` defaults to `false` initially — Task 8 may opt
  * specific packages into `true` once their build shape supports it.
+ *
+ * `sourceMaps` holds every shipped `*.map` file, parsed by whoever read the
+ * package bytes (`auditPack` from disk, `readTarball` from the frozen `.tgz`),
+ * so the rules stay free of I/O.
  */
 export type PackAuditContext = {
   readonly packageDir: string;
   readonly manifest: { readonly name: string; readonly version: string };
   readonly isSourceDistributed: boolean;
+  readonly sourceMaps: readonly ShippedSourceMap[];
 };
 
 /**
