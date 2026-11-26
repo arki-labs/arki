@@ -1,15 +1,9 @@
 ---
 "@arki/auth": patch
-"@arki/contracts": patch
-"@arki/date": patch
 "@arki/db": patch
 "@arki/dot": patch
-"@arki/failure": patch
-"@arki/fs": patch
 "@arki/journal": patch
 "@arki/live": patch
-"@arki/mcp": patch
-"@arki/offline": patch
 "@arki/schedule": patch
 "@arki/tanstack-start": patch
 ---
