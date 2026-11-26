@@ -184,12 +184,12 @@
     },
     "backend": {
       "@keyv/redis": "5.1.6",
-      "@orpc/client": "^1.15.5",
-      "@orpc/contract": "^1.15.5",
-      "@orpc/openapi": "1.15.5",
-      "@orpc/server": "^1.15.5",
-      "@orpc/shared": "^1.15.5",
-      "@orpc/tanstack-query": "^1.15.5",
+      "@orpc/client": "1.16.5",
+      "@orpc/contract": "1.16.5",
+      "@orpc/openapi": "1.16.5",
+      "@orpc/server": "1.16.5",
+      "@orpc/shared": "1.16.5",
+      "@orpc/tanstack-query": "1.16.5",
       "elysia": "^1.4.30",
       "hono": "^4.13.13",
       "keyv": "^5.6.0"
@@ -320,10 +320,10 @@
       "tailwind-merge": "^3.7.0"
     },
     "tanstack/react-query": {
-      "@tanstack/query-async-storage-persister": "5.104.1",
-      "@tanstack/react-query": "5.104.1",
+      "@tanstack/query-async-storage-persister": "5.108.2",
+      "@tanstack/react-query": "5.108.2",
       "@tanstack/react-query-devtools": "^5.104.1",
-      "@tanstack/react-query-persist-client": "5.104.1"
+      "@tanstack/react-query-persist-client": "5.108.2"
     },
     "tanstack/start": {
       "@tanstack/react-devtools": "^0.10.13",
@@ -401,7 +401,7 @@
   },
   "overrides": {
     "@redis/client": "^5.12.1",
-    "@tanstack/query-core": "5.104.1",
+    "@tanstack/query-core": "5.108.2",
     "@types/css-font-loading-module": "^0.0.14",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
