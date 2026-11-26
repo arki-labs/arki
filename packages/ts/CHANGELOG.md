@@ -1,5 +1,13 @@
 # @arki/ts
 
+## 0.1.2
+
+### Patch Changes
+
+- 7f4cae3: Stop publishing type-test files (`src/**/*.test-d.ts`). The `!src/**/*.test.*` exclude does not match them, because the name is `.test-d.ts`, not `.test.ts`.
+
+  No docs impact: only the published file list changed. No demo impact: no runtime file changed.
+
 ## 0.1.1
 
 ### Patch Changes

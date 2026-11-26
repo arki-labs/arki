@@ -1,5 +1,13 @@
 # @arki/clock
 
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [ef1e7b5]
+- Updated dependencies [7f4cae3]
+  - @arki/failure@0.4.1
+
 ## 0.2.1
 
 ### Patch Changes

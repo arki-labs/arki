@@ -4,6 +4,18 @@
 
 `parse` and `parseAsync` return canonical typed failures through the shared failure executor. `SchemaError` and validation-related `SchemaRunError` codes are removed; `ARKI_SCHEMA_E003` remains for unsupported JSON Schema targets.
 
+## 0.3.2
+
+### Patch Changes
+
+- 7f4cae3: Stop publishing type-test files (`src/**/*.test-d.ts`). The `!src/**/*.test.*` exclude does not match them, because the name is `.test-d.ts`, not `.test.ts`.
+
+  No docs impact: only the published file list changed. No demo impact: no runtime file changed.
+
+- Updated dependencies [ef1e7b5]
+- Updated dependencies [7f4cae3]
+  - @arki/failure@0.4.1
+
 ## 0.3.1
 
 ### Patch Changes
