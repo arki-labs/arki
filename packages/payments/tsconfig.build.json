@@ -7,6 +7,7 @@
     "**/*.spec.ts",
     "src/test-support.ts",
     "src/service-test-support.ts",
-    "src/core/providers/stripe-test-support.ts"
+    "src/core/providers/stripe-test-support.ts",
+    "src/hostile-input"
   ]
 }
